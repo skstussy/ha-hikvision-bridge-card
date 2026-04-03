@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="IMG/applogo-small-ha-hikvision-bridge-card" alt="ha-hikvision-bridge-card logo" width="90">
+  <img src="IMG/applogo-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="90">
 </p>
 
 <h1 align="center">hikvision-bridge-card </h1>
