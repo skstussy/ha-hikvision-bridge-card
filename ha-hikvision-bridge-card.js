@@ -243,6 +243,23 @@ class HikvisionPTZCard extends HTMLElement {
     return entry;
   }
 
+_subscribeDebug() {
+  if (!this._hass || this._debugSubscribed) return;
+
+  this._debugSubscribed = true;
+
+  this._hass.connection.subscribeMessage(
+    (msg) => {
+      if (!this._debugEntries) this._debugEntries = [];
+      this._debugEntries.push(msg.event);
+      this.requestUpdate();
+    },
+    {
+      type: "ha_hikvision_bridge/subscribe_debug",
+      camera_id: this._cameraId || null,
+    }
+  );
+}
 
 _buildBackendDebugEntries(debugEntries = []) {
   if (!Array.isArray(debugEntries)) return [];
