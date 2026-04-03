@@ -1,7 +1,7 @@
 {
   "name": "hikvision-bridge-card",
   "content_in_root": true,
-  "filename": "hikvision-ptz-card.js",
+  "filename": "hikvision-bridge-card.js",
   "render_readme": true,
   "version": "2.6.8"
 }
