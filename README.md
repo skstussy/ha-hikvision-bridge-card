@@ -26,7 +26,7 @@
 </p>
 
 ---
-<p align="center">
+<p align="left">
   <img src="IMG/applogo-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="220">
 </p>
 ## 🔥 Recent Progress Snapshot
