@@ -2635,7 +2635,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-console-badge { min-height:26px; padding:0 10px; border-radius:999px; background: color-mix(in srgb, var(--hik-accent) 14%, var(--secondary-background-color)); display:inline-flex; align-items:center; gap:6px; font-size:12px; }
           .hik-console-action { min-height:30px; padding:0 12px; border-radius:999px; font-size:12px; background: color-mix(in srgb, var(--hik-accent) 18%, var(--secondary-background-color)); }
           .hik-motion-grid { display:grid; grid-template-columns:minmax(72px,82px) minmax(0,1fr); gap:12px; align-items:stretch; }
-          .hik-controls-two-col { display:grid; grid-template-columns:minmax(0, 1.3fr) minmax(280px, 0.9fr); gap:12px; align-items:stretch; }
+          .hik-controls-two-col { display:grid; grid-template-columns:1fr; gap:12px; align-items:stretch; }
           .hik-control-cluster { border:1px solid color-mix(in srgb, var(--hik-accent) 9%, var(--divider-color)); border-radius:20px; background: color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%); padding:10px; display:grid; gap:10px; min-width:0; }
           .hik-cluster-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
           .hik-cluster-body { display:grid; gap:12px; min-width:0; }
@@ -2675,6 +2675,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-lens-grid .hik-rail-head { justify-content:flex-start; }
           .hik-lens-grid .lens-pair { grid-template-columns:repeat(2, minmax(0,1fr)); }
           .hik-pad-wrap { border:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); border-radius:20px; padding:10px; background: color-mix(in srgb, var(--card-background-color) 88%, var(--hik-accent) 12%); display:grid; justify-content:center; }
+          .hik-control-cluster-motion .hik-pad-wrap { border:none; background:transparent; padding:0; border-radius:0; justify-content:start; }
+          .hik-control-cluster-motion .hik-pad { justify-self:start; max-width:none; width:auto; }
           .hik-pad-body .hik-pad { justify-self:center; }
           .hik-pad { display:grid; grid-template-columns:repeat(3,minmax(54px,1fr)); gap:8px; justify-content:center; align-items:center; max-width:230px; width:min(100%,230px); }
           .hik-pad .hik-icon-btn { min-height:54px; min-width:54px; border-radius:16px; background: color-mix(in srgb, var(--secondary-background-color) 92%, transparent); }
