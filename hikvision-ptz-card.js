@@ -3,7 +3,7 @@
 class HikvisionPTZCard extends HTMLElement {
   setConfig(config) {
     this.config = {
-      title: "Hikvision PTZ",
+      title: "ha-hikvision-bridge-card",
       speed: 50,
       lens_step: 60,
       repeat_ms: 350,
@@ -750,7 +750,7 @@ _toggleDebugFilter(kind, value) {
 
   static getStubConfig() {
     return {
-      type: "custom:hikvision-ptz-card",
+      type: "custom:ha-hikvision-bridge-card",
       title: "Hikvision PTZ",
       auto_discover: true,
       controls_mode: "always",
@@ -767,7 +767,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   static getConfigElement() {
-    return document.createElement("hikvision-ptz-card-editor");
+    return document.createElement("ha-hikvision-bridge-card-editor");
   }
 
   escapeHtml(value) {
@@ -3076,7 +3076,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
   _valueChanged() {
     const config = {
       ...this.config,
-      type: "custom:hikvision-ptz-card",
+      type: "custom:ha-hikvision-bridge-card",
       title: this.querySelector("#title").value,
       speed: Number(this.querySelector("#speed").value),
       repeat_ms: Number(this.querySelector("#repeat_ms").value),
@@ -3121,6 +3121,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("hikvision-ptz-card", HikvisionPTZCard);
+customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
 
-customElements.define("hikvision-ptz-card-editor", HikvisionPTZCardEditor);
+customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
