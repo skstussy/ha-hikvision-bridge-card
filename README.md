@@ -2,10 +2,6 @@
   <img src="IMG/banner-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-ptz-bridge-card banner" width="100%">
 </p>
 
-<p align="center">
-  <img src="IMG/applogo-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="220">
-</p>
-
 <h1 align="center">hikvision-bridge-card </h1>
 <p align="center"><strong>Professional Lovelace control surface for ha-hikvision-bridge integration</strong></p>
 <p align="center"><em>Clean dashboard controls for live view, PTZ, playback, alarms, and storage visibility.</em></p>
@@ -30,7 +26,9 @@
 </p>
 
 ---
-
+<p align="center">
+  <img src="IMG/applogo-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="220">
+</p>
 ## 🔥 Recent Progress Snapshot
 
 - ✅ Unified PTZ controls for Pan, Tilt, Zoom, Focus, and Iris
