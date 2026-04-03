@@ -3141,7 +3141,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
 }
 
 if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
-if (!customElements.get("hikvision-ptz-card")) customElements.define("hikvision-ptz-card", HikvisionPTZCard);
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
-if (!customElements.get("hikvision-ptz-card-editor")) customElements.define("hikvision-ptz-card-editor", HikvisionPTZCardEditor);
+
