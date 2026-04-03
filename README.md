@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="IMG/logo-main.png" alt="Hikvision PTZ Card banner" width="100%">
+  <img src="IMG/logo-main.png" alt="ha-hikvision-ptz-bridge-card banner" width="100%">
 </p>
 
 <p align="center">
-  <img src="IMG/logo.png" alt="Hikvision PTZ icon" width="90">
+  <img src="IMG/hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="90">
 </p>
 
-<h1 align="center">Hikvision PTZ (ISAPI Proxy) Card </h1>
-<p align="center"><strong>Professional Lovelace control surface for the Hikvision PTZ (ISAPI Proxy) integration</strong></p>
+<h1 align="center">hikvision-bridge-card </h1>
+<p align="center"><strong>Professional Lovelace control surface for ha-hikvision-bridge integration</strong></p>
 <p align="center"><em>Clean dashboard controls for live view, PTZ, playback, alarms, and storage visibility.</em></p>
 
 <p align="center">
