@@ -80,11 +80,6 @@ class HikvisionPTZCard extends HTMLElement {
     this._debugEntries = Array.isArray(this._debugEntries) ? this._debugEntries : [];
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
-    this._backendDebugSignature = this._backendDebugSignature || "";
-    this._backendDebugPollHandle = this._backendDebugPollHandle || null;
-    this._backendDebugFetchInFlight = this._backendDebugFetchInFlight || false;
-    this._backendDebugLastCamera = this._backendDebugLastCamera || "";
-    this._backendDebugIdSet = this._backendDebugIdSet || new Set();
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
   }
 
@@ -92,6 +87,9 @@ class HikvisionPTZCard extends HTMLElement {
     this._hass = hass;
     if (this._videoCard) this._videoCard.hass = hass;
     this.render();
+    if (!this._debugSubscribed) {
+    this._subscribeDebug();
+  }
   }
 
 
@@ -103,8 +101,6 @@ class HikvisionPTZCard extends HTMLElement {
     this._detachTalkReleaseListeners();
     this._stopTalkbackDirect();
     this._teardownAudioGraph();
-    if (this._backendDebugPollHandle) clearTimeout(this._backendDebugPollHandle);
-    this._backendDebugPollHandle = null;
     this._cleanupVideoCard();
   }
 
@@ -249,15 +245,21 @@ _subscribeDebug() {
 
   this._debugSubscribed = true;
 
-  this._hass.connection.subscribeMessage(
+  this._debugUnsubscribe = this._hass.connection.subscribeMessage(
     (msg) => {
-      if (!this._debugEntries) this._debugEntries = [];
-      this._debugEntries.push(msg.event);
-      this.requestUpdate();
+      const event = msg?.event;
+      if (!event) return;
+
+      const entry = this._normalizeDebugEvent ? this._normalizeDebugEvent(event) : event;
+
+      const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
+      this._debugEntries = [...(this._debugEntries || []), entry].slice(-maxEntries);
+      this.requestUpdate?.();
+      this.render?.();
     },
     {
       type: "ha_hikvision_bridge/subscribe_debug",
-      camera_id: this._cameraId || null,
+      camera_id: this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : undefined,
     }
   );
 }
@@ -299,49 +301,12 @@ _buildBackendDebugEntries(debugEntries = []) {
 _syncBackendDebugEntries(debugEntries = []) {
   const normalized = this._buildBackendDebugEntries(debugEntries);
   const signature = JSON.stringify(normalized.map((entry) => [entry.idx, entry.time, entry.message, entry.details?.response?.status || "", entry.details?.requested_time || ""]));
-  if (signature === this._backendDebugSignature) return;
-  this._backendDebugSignature = signature;
   const frontend = (this._debugEntries || []).filter((entry) => entry.source !== "backend");
   const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
   this._debugEntries = [...frontend, ...normalized].slice(-maxEntries);
-  this._backendDebugIdSet = new Set(normalized.map((entry) => String(entry.idx)));
 }
 
-async _refreshBackendDebugEntries(force = false) {
-  if (!this.isDebugEnabled() || !this._hass || this._backendDebugFetchInFlight) return;
-  const cameraId = this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : "";
-  if (!force && !cameraId && this._backendDebugLastCamera === cameraId) {
-    this._scheduleBackendDebugRefresh(6000);
-    return;
-  }
-  this._backendDebugFetchInFlight = true;
-  try {
-    const payload = { type: "ha_hikvision_bridge/get_debug_events", limit: Number(this.config?.debug?.max_entries ?? 150) || 150 };
-    if (cameraId) payload.camera_id = cameraId;
-    const result = await this._hass.callWS(payload);
-    const events = Array.isArray(result?.events) ? result.events : [];
-    const attrEntries = this._buildBackendDebugEntries((this._lastCameraAttrs?.playback_debug) || []);
-    const wsEntries = this._buildBackendDebugEntries(events);
-    const merged = [];
-    const seen = new Set();
-    [...attrEntries, ...wsEntries].forEach((entry) => {
-      const key = String(entry?.idx || `${entry?.time}-${entry?.message || ""}`);
-      if (seen.has(key)) return;
-      seen.add(key);
-      merged.push(entry);
-    });
-    const frontend = (this._debugEntries || []).filter((entry) => entry.source !== "backend");
-    const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-    this._debugEntries = [...frontend, ...merged].slice(-maxEntries);
-    this._backendDebugIdSet = new Set(merged.map((entry) => String(entry.idx)));
-    this._backendDebugSignature = JSON.stringify(merged.map((entry) => [entry.idx, entry.time, entry.message]));
-    this._backendDebugLastCamera = cameraId;
-    this.render();
-  } finally {
-    this._backendDebugFetchInFlight = false;
-    this._scheduleBackendDebugRefresh(6000);
-  }
-}
+
 
 _toggleDebugFilter(kind, value) {
     const current = new Set(this._debugFilters?.[kind] || ["all"]);
@@ -412,7 +377,6 @@ _toggleDebugFilter(kind, value) {
     if (!this.isDebugEnabled()) return "";
     this._lastCameraAttrs = camAttrs || {};
     this._syncBackendDebugEntries(camAttrs?.playback_debug || []);
-    this._scheduleBackendDebugRefresh(this._backendDebugLastCamera === String(this.selectedCamera?.channel || "") ? 6000 : 250);
     const entries = this._getFilteredDebugEntries();
     const summary = {
       total: (this._debugEntries || []).length,
