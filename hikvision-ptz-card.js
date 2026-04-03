@@ -249,7 +249,7 @@ class HikvisionPTZCard extends HTMLElement {
     if (!this._hass) throw new Error("No HA connection");
 
     const result = await this._hass.callWS({
-      type: "hikvision_ptz/webrtc_url",
+      type: "ha-hikvision-bridge_ptz/webrtc_url",
       url: rtspUrl,
     });
 
@@ -804,7 +804,7 @@ class HikvisionPTZCard extends HTMLElement {
     this.render();
 
     try {
-      await this._hass.callService("hikvision_ptz", "ptz_return_to_center", {
+      await this._hass.callService("ha-hikvision-bridge_ptz", "ptz_return_to_center", {
         channel: String(cam.channel),
         state,
         speed: Number(this.config.speed || 50),
@@ -927,7 +927,7 @@ class HikvisionPTZCard extends HTMLElement {
       ? Number(this.config.speed || 50)
       : Number(this.config.lens_step || 60)));
 
-    this._hass.callService("hikvision_ptz", service, {
+    this._hass.callService("ha-hikvision-bridge_ptz", service, {
       channel: String(cam.channel),
       direction: Number(direction || 0),
       speed,
@@ -943,7 +943,7 @@ class HikvisionPTZCard extends HTMLElement {
       window.setTimeout(() => {
         const activeCam = this.selectedCamera;
         if (!activeCam || String(activeCam.channel) !== String(cam.channel)) return;
-        this._hass.callService("hikvision_ptz", service, {
+        this._hass.callService("ha-hikvision-bridge_ptz", service, {
           channel: String(cam.channel),
           direction: 0,
           speed,
@@ -973,7 +973,7 @@ class HikvisionPTZCard extends HTMLElement {
     const run = () => {
       const cam = this.selectedCamera;
       if (!cam || !this._hass || !this.canPtz() || this._returningHome) return;
-      this._hass.callService("hikvision_ptz", "ptz", {
+      this._hass.callService("ha-hikvision-bridge_ptz", "ptz", {
         channel: String(cam.channel),
         pan,
         tilt,
@@ -1003,7 +1003,7 @@ class HikvisionPTZCard extends HTMLElement {
   gotoPreset(preset) {
     const cam = this.selectedCamera;
     if (!cam || !this._hass || !this.canPtz()) return;
-    this._hass.callService("hikvision_ptz", "goto_preset", {
+    this._hass.callService("ha-hikvision-bridge_ptz", "goto_preset", {
       channel: String(cam.channel),
       preset,
     });
@@ -1211,7 +1211,7 @@ async startPlayback(timestamp = null) {
   const requested = timestamp || state.currentTime || this.formatDateTimeLocal();
   state.currentTime = requested;
   state.paused = false;
-  await this._hass.callService("hikvision_ptz", "playback_seek", {
+  await this._hass.callService("ha-hikvision-bridge_ptz", "playback_seek", {
     entity_id: refs.camera,
     timestamp: requested,
   });
@@ -1224,7 +1224,7 @@ async stopPlayback() {
   if (!refs.camera) return;
   const state = this.getPlaybackState(cam.channel);
   state.paused = false;
-  await this._hass.callService("hikvision_ptz", "playback_stop", {
+  await this._hass.callService("ha-hikvision-bridge_ptz", "playback_stop", {
     entity_id: refs.camera,
   });
 }
@@ -2647,7 +2647,7 @@ ${this.config.show_playback_panel !== false ? `
     const streamModeSelect = this.querySelector("#streamMode");
     if (streamModeSelect && refs.camera) {
       streamModeSelect.addEventListener("change", (e) => {
-        this._hass.callService("hikvision_ptz", "set_stream_mode", {
+        this._hass.callService("ha-hikvision-bridge_ptz", "set_stream_mode", {
           entity_id: refs.camera,
           mode: e.target.value,
         });
@@ -2657,7 +2657,7 @@ ${this.config.show_playback_panel !== false ? `
     const streamProfileSelect = this.querySelector("#streamProfile");
     if (streamProfileSelect && refs.camera) {
       streamProfileSelect.addEventListener("change", (e) => {
-        this._hass.callService("hikvision_ptz", "set_stream_profile", {
+        this._hass.callService("ha-hikvision-bridge_ptz", "set_stream_profile", {
           entity_id: refs.camera,
           profile: e.target.value,
         });
