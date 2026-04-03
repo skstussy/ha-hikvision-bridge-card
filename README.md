@@ -7,22 +7,22 @@
 <p align="center"><em>Clean dashboard controls for live view, PTZ, playback, alarms, and storage visibility.</em></p>
 
 <p align="center">
-  <a href="https://github.com/skstussy/hikvision_ptz/releases"><img src="https://img.shields.io/github/v/release/skstussy/hikvision_ptz?include_prereleases&sort=semver&style=for-the-badge&logo=github" alt="Latest Release"></a>
-  <a href="https://img.shields.io/github/downloads/skstussy/hikvision_ptz/latest/total?style=for-the-badge&logo=home-assistant&logoColor=white"><img src="https://img.shields.io/github/downloads/skstussy/hikvision_ptz/latest/total?style=for-the-badge&logo=home-assistant&logoColor=white" alt="Latest Release Downloads"></a>
-  <a href="https://github.com/skstussy/hikvision_ptz"><img src="https://img.shields.io/badge/Home%20Assistant-Custom%20Card-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white" alt="Home Assistant Custom Card"></a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card/releases"><img src="https://img.shields.io/github/v/release/skstussy/ha-hikvision-bridge-card?include_prereleases&sort=semver&style=for-the-badge&logo=github" alt="Latest Release"></a>
+  <a href="https://img.shields.io/github/downloads/skstussy/ha-hikvision-bridge-card/latest/total?style=for-the-badge&logo=home-assistant&logoColor=white"><img src="https://img.shields.io/github/downloads/skstussy/ha-hikvision-bridge-card/latest/total?style=for-the-badge&logo=home-assistant&logoColor=white" alt="Latest Release Downloads"></a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card"><img src="https://img.shields.io/badge/Home%20Assistant-Custom%20Card-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white" alt="Home Assistant Custom Card"></a>
   <a href="https://www.hacs.xyz/"><img src="https://img.shields.io/badge/HACS-Bundled%20Card-41BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white" alt="HACS Frontend"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/skstussy/hikvision_ptz"><img src="https://img.shields.io/github/stars/skstussy/hikvision-ptz-card?style=social" alt="Stars"></a>
-  <a href="https://github.com/skstussy/hikvision_ptz/issues"><img src="https://img.shields.io/github/issues/skstussy/hikvision_ptz" alt="Issues"></a>
-  <a href="https://github.com/skstussy/hikvision_ptz/releases"><img src="https://img.shields.io/github/downloads/skstussy/hikvision_ptz/total" alt="Downloads"></a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card"><img src="https://img.shields.io/github/stars/skstussy/hikvision-ptz-card?style=social" alt="Stars"></a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card/issues"><img src="https://img.shields.io/github/issues/skstussy/ha-hikvision-bridge-card" alt="Issues"></a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card/releases"><img src="https://img.shields.io/github/downloads/skstussy/ha-hikvision-bridge-card/total" alt="Downloads"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/skstussy/hikvision_ptz">Documentation</a> •
-  <a href="https://github.com/skstussy/hikvision_ptz/issues">Report Bug</a> •
-  <a href="https://github.com/skstussy/hikvision_ptz/issues">Request Feature</a>
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card">Documentation</a> •
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card/issues">Report Bug</a> •
+  <a href="https://github.com/skstussy/ha-hikvision-bridge-card/issues">Request Feature</a>
 </p>
 
 ---
@@ -64,7 +64,7 @@ A custom **Lovelace dashboard card** for the Hikvision PTZ integration, built to
 This card is now bundled inside the main **Hikvision PTZ** repository so the backend and Lovelace UI can be versioned together from one place:
 
 **Hikvision PTZ (ISAPI Proxy)**  
-https://github.com/skstussy/hikvision_ptz
+https://github.com/skstussy/ha-hikvision-bridge-card
 
 ## Why this card exists
 
@@ -135,7 +135,7 @@ Design goals include:
 This card expects entities and attributes provided by:
 
 ```text
-https://github.com/skstussy/hikvision_ptz
+https://github.com/skstussy/ha-hikvision-bridge-card
 ```
 
 Install and configure the integration before adding the card.
