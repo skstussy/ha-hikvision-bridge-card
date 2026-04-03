@@ -3004,7 +3004,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         <div style="font-size:18px;font-weight:700;">HA Hikvision Bridge Card Editor</div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "Hikvision PTZ"}" style="width:100%;"></div>
+          <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "ha-hikvision-bridge-card"}" style="width:100%;"></div>
           <div><label>Default speed</label><br><input id="speed" type="number" min="1" max="100" value="${this.config.speed || 50}" style="width:100%;"></div>
           <div><label>Repeat interval (ms)</label><br><input id="repeat_ms" type="number" min="100" value="${this.config.repeat_ms || 350}" style="width:100%;"></div>
           <div><label>PTZ pulse duration (ms)</label><br><input id="ptz_duration" type="number" min="100" value="${this.config.ptz_duration ?? 300}" style="width:100%;"></div>
