@@ -3,7 +3,7 @@
 class HikvisionPTZCard extends HTMLElement {
   setConfig(config) {
     this.config = {
-      title: "ha-hikvision-bridge-card",
+      title: "ha-hikvision-bridge",
       speed: 50,
       lens_step: 60,
       repeat_ms: 350,
@@ -23,8 +23,6 @@ class HikvisionPTZCard extends HTMLElement {
       show_camera_chips: true,
       show_status_pills: true,
       show_alarm_dashboard: true,
-      show_stream_mode_info: true,
-      show_controls: true,
       show_title: true,
       show_position_info: true,
       speed_orientation: "vertical",
@@ -37,24 +35,17 @@ class HikvisionPTZCard extends HTMLElement {
       speaker_default: false,
       volume_default: 100,
       audio_boost: 100,
+      mic_volume: 100,
       talk_mode: "hold",
       mute_during_talk: true,
       show_audio_controls: true,
-      debug: {
-        enabled: false,
-        default_open: false,
-        max_entries: 150,
-        categories: ["audio", "playback", "video", "backend"],
-        levels: ["error", "warn", "info", "debug"],
-      },
       ...config,
     };
-    this.config.debug = this._normalizeDebugConfig(this.config);
     this.selected = 0;
     this._repeatHandle = null;
     this._videoCard = null;
     this._videoCardConfig = this._videoCardConfig || null;
-    this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
+    this._controlsVisible = this.config.controls_mode !== "toggle";
     this._ptzStateMap = this._ptzStateMap || {};
     this._playbackStateMap = this._playbackStateMap || {};
     this._returningHome = false;
@@ -73,18 +64,16 @@ class HikvisionPTZCard extends HTMLElement {
     this._talkActive = this._talkActive || false;
     this._talkHoldActive = this._talkHoldActive || false;
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
-    this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
-    this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
-    this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
-    this._debugEntries = Array.isArray(this._debugEntries) ? this._debugEntries : [];
-    this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
-    this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
-    this._backendDebugSignature = this._backendDebugSignature || "";
-    this._backendDebugPollHandle = this._backendDebugPollHandle || null;
-    this._backendDebugFetchInFlight = this._backendDebugFetchInFlight || false;
-    this._backendDebugLastCamera = this._backendDebugLastCamera || "";
-    this._backendDebugIdSet = this._backendDebugIdSet || new Set();
-    this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
+    this._micVolume = Number.isFinite(this._micVolume) ? this._micVolume : Math.max(0, Math.min(300, Number(this.config.mic_volume ?? 100)));
+    this._micMeterLevel = this._micMeterLevel ?? 0;
+    this._micAudioContext = this._micAudioContext || null;
+    this._micAnalyser = this._micAnalyser || null;
+    this._micGainNode = this._micGainNode || null;
+    this._micDestination = this._micDestination || null;
+    this._micProcessedStream = this._micProcessedStream || null;
+    this._micMeterRaf = this._micMeterRaf || null;
+    this._talkStats = this._talkStats || { bitrateKbps: 0, rttMs: 0 };
+    this._talkStatsTimer = this._talkStatsTimer || null;
   }
 
   set hass(hass) {
@@ -101,9 +90,8 @@ class HikvisionPTZCard extends HTMLElement {
     this._talkLatched = false;
     this._detachTalkReleaseListeners();
     this._stopTalkbackDirect();
+    this._teardownMicProcessing();
     this._teardownAudioGraph();
-    if (this._backendDebugPollHandle) clearTimeout(this._backendDebugPollHandle);
-    this._backendDebugPollHandle = null;
     this._cleanupVideoCard();
   }
 
@@ -174,313 +162,11 @@ class HikvisionPTZCard extends HTMLElement {
       .replace(/[^a-zA-Z0-9_.:-]/g, "_") || "hikvision_cam";
   }
 
-  _normalizeDebugConfig(config = {}) {
-    const incoming = config?.debug && typeof config.debug === "object" ? config.debug : {};
-    const legacyEnabled = config?.show_audio_debug === true || config?.show_playback_debug === true;
-    const categories = Array.isArray(incoming.categories) && incoming.categories.length ? incoming.categories.map((value) => String(value || "").toLowerCase()) : ["audio", "playback", "video", "backend"];
-    const levels = Array.isArray(incoming.levels) && incoming.levels.length ? incoming.levels.map((value) => String(value || "").toLowerCase()) : ["error", "warn", "info", "debug"];
-    return {
-      enabled: incoming.enabled === true || legacyEnabled,
-      default_open: incoming.default_open === true,
-      max_entries: Math.max(25, Math.min(500, Number(incoming.max_entries ?? 150) || 150)),
-      categories: Array.from(new Set(categories)),
-      levels: Array.from(new Set(levels)),
-    };
-  }
-
-  isDebugEnabled() {
-    return this.config?.debug?.enabled === true;
-  }
-
-  _sanitizeDebugValue(value) {
-    let text = value == null ? "" : String(value);
-    text = text.replace(/(rtsp:\/\/)([^\s@]+)@/gi, "$1<redacted>@");
-    text = text.replace(/(authSig=)[^&\s]+/gi, "$1<redacted>");
-    text = text.replace(/(authorization["']?\s*[:=]\s*["']?)[^\s"']+/gi, "$1<redacted>");
-    return text;
-  }
-
-  _sanitizeDebugObject(value) {
-    if (value == null) return value;
-    if (Array.isArray(value)) return value.map((item) => this._sanitizeDebugObject(item));
-    if (typeof value === "object") {
-      const next = {};
-      Object.entries(value).forEach(([key, raw]) => {
-        const lower = String(key || "").toLowerCase();
-        if (["password", "authorization", "authsig", "token", "access_token", "username"].includes(lower)) {
-          next[key] = "<redacted>";
-        } else {
-          next[key] = this._sanitizeDebugObject(raw);
-        }
-      });
-      return next;
-    }
-    return typeof value === "string" ? this._sanitizeDebugValue(value) : value;
-  }
-
-  _debugEventLevelFromData(event = "", details = {}) {
-    const name = String(event || "").toLowerCase();
-    if (details?.error || /fail|error|denied|missing|closed/.test(name)) return "error";
-    if (/warn|fallback|pause|stop/.test(name)) return "warn";
-    if (/request|selected|created|open|received|active|start|resume|seek|switch|loaded/.test(name)) return "info";
-    return "debug";
-  }
-
-  _pushDebug(category = "general", level = "info", event = "event", message = "", details = {}, source = "frontend") {
-    const entry = {
-      idx: ++this._debugSeq,
-      time: new Date().toISOString(),
-      category: String(category || "general").toLowerCase(),
-      level: String(level || "info").toLowerCase(),
-      source: String(source || "frontend").toLowerCase(),
-      event: String(event || "event"),
-      message: String(message || event || "Event"),
-      camera: this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : "",
-      details: this._sanitizeDebugObject(details || {}),
-    };
-    const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-    this._debugEntries = [...(this._debugEntries || []), entry].slice(-maxEntries);
-    return entry;
-  }
-
-
-_buildBackendDebugEntries(debugEntries = []) {
-  if (!Array.isArray(debugEntries)) return [];
-  return debugEntries.map((entry, index) => {
-    const responseStatus = Number(entry?.response?.status || 0);
-    const legacyLevel = responseStatus >= 400 || entry?.ok === false || entry?.reason || entry?.error ? "error" : "info";
-    const cameraId = entry?.camera_id || entry?.camera || this.selectedCamera?.channel || "";
-    return {
-      idx: entry?.id || `backend-${index}-${entry?.requested_time || entry?.search_start || entry?.ts || index}`,
-      time: entry?.ts || entry?.time || entry?.requested_time || entry?.search_start || new Date().toISOString(),
-      category: String(entry?.category || "backend").toLowerCase(),
-      level: String(entry?.level || legacyLevel).toLowerCase(),
-      source: "backend",
-      event: entry?.event || "backend_event",
-      message: entry?.message || entry?.reason || entry?.error || `Backend event${responseStatus ? ` HTTP ${responseStatus}` : ""}`,
-      camera: cameraId ? String(cameraId) : "",
-      details: this._sanitizeDebugObject({
-        entry_id: entry?.entry_id,
-        context: entry?.context,
-        track_id: entry?.track_id,
-        requested_time: entry?.requested_time,
-        search_start: entry?.search_start,
-        search_end: entry?.search_end,
-        match_count: entry?.match_count,
-        request: entry?.request,
-        response: entry?.response,
-        ok: entry?.ok,
-        reason: entry?.reason,
-        error: entry?.error,
-        selected_match: entry?.selected_match,
-      }),
-    };
-  });
-}
-
-_syncBackendDebugEntries(debugEntries = []) {
-  const normalized = this._buildBackendDebugEntries(debugEntries);
-  const signature = JSON.stringify(normalized.map((entry) => [entry.idx, entry.time, entry.message, entry.details?.response?.status || "", entry.details?.requested_time || ""]));
-  if (signature === this._backendDebugSignature) return;
-  this._backendDebugSignature = signature;
-  const frontend = (this._debugEntries || []).filter((entry) => entry.source !== "backend");
-  const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-  this._debugEntries = [...frontend, ...normalized].slice(-maxEntries);
-  this._backendDebugIdSet = new Set(normalized.map((entry) => String(entry.idx)));
-}
-
-_scheduleBackendDebugRefresh(delayMs = 5000) {
-  if (this._backendDebugPollHandle) clearTimeout(this._backendDebugPollHandle);
-  if (!this.isDebugEnabled() || !this._hass) return;
-  this._backendDebugPollHandle = setTimeout(() => {
-    this._backendDebugPollHandle = null;
-    this._refreshBackendDebugEntries().catch((err) => {
-      this._pushDebug("backend", "error", "backend_debug_fetch_failed", "Unable to fetch backend debug events", { error: String(err?.message || err) }, "frontend");
-    });
-  }, Math.max(1500, Number(delayMs) || 5000));
-}
-
-async _refreshBackendDebugEntries(force = false) {
-  if (!this.isDebugEnabled() || !this._hass || this._backendDebugFetchInFlight) return;
-  const cameraId = this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : "";
-  if (!force && !cameraId && this._backendDebugLastCamera === cameraId) {
-    this._scheduleBackendDebugRefresh(6000);
-    return;
-  }
-  this._backendDebugFetchInFlight = true;
-  try {
-    const payload = { type: "hikvision_ptz/get_debug_events", limit: Number(this.config?.debug?.max_entries ?? 150) || 150 };
-    if (cameraId) payload.camera_id = cameraId;
-    const result = await this._hass.callWS(payload);
-    const events = Array.isArray(result?.events) ? result.events : [];
-    const attrEntries = this._buildBackendDebugEntries((this._lastCameraAttrs?.playback_debug) || []);
-    const wsEntries = this._buildBackendDebugEntries(events);
-    const merged = [];
-    const seen = new Set();
-    [...attrEntries, ...wsEntries].forEach((entry) => {
-      const key = String(entry?.idx || `${entry?.time}-${entry?.message || ""}`);
-      if (seen.has(key)) return;
-      seen.add(key);
-      merged.push(entry);
-    });
-    const frontend = (this._debugEntries || []).filter((entry) => entry.source !== "backend");
-    const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-    this._debugEntries = [...frontend, ...merged].slice(-maxEntries);
-    this._backendDebugIdSet = new Set(merged.map((entry) => String(entry.idx)));
-    this._backendDebugSignature = JSON.stringify(merged.map((entry) => [entry.idx, entry.time, entry.message]));
-    this._backendDebugLastCamera = cameraId;
-    this.render();
-  } finally {
-    this._backendDebugFetchInFlight = false;
-    this._scheduleBackendDebugRefresh(6000);
-  }
-}
-
-_toggleDebugFilter(kind, value) {
-    const current = new Set(this._debugFilters?.[kind] || ["all"]);
-    const normalized = String(value || "all").toLowerCase();
-    if (normalized === "all") {
-      this._debugFilters = { ...(this._debugFilters || {}), [kind]: ["all"] };
-      this.render();
-      return;
-    }
-    current.delete("all");
-    if (current.has(normalized)) current.delete(normalized);
-    else current.add(normalized);
-    this._debugFilters = { ...(this._debugFilters || {}), [kind]: current.size ? Array.from(current) : ["all"] };
-    this.render();
-  }
-
-  _getFilteredDebugEntries() {
-    const categoryFilters = new Set(this._debugFilters?.categories || ["all"]);
-    const levelFilters = new Set(this._debugFilters?.levels || ["all"]);
-    return (this._debugEntries || []).filter((entry) => {
-      const categoryMatch = categoryFilters.has("all") || categoryFilters.has(String(entry?.category || "").toLowerCase());
-      const levelMatch = levelFilters.has("all") || levelFilters.has(String(entry?.level || "").toLowerCase());
-      return categoryMatch && levelMatch;
-    }).slice().reverse();
-  }
-
-  formatDebugEntryText(entry) {
-    if (!entry) return "";
-    const lines = [
-      "=== Hikvision Debug Event ===",
-      `Time: ${entry.time || ""}`,
-      `Source: ${entry.source || ""}`,
-      `Category: ${entry.category || ""}`,
-      `Level: ${entry.level || ""}`,
-      `Event: ${entry.event || ""}`,
-      `Message: ${entry.message || ""}`,
-      `Camera: ${entry.camera || ""}`,
-      "",
-      "--- Details ---",
-      JSON.stringify(this._sanitizeDebugObject(entry.details || {}), null, 2),
-      "",
-    ];
-    return lines.join("\n");
-  }
-
-  copyDebugText(text) {
-    const value = String(text || "");
-    if (!value) return;
-    navigator.clipboard.writeText(value).catch((err) => console.error("Failed to copy debug text", err));
-  }
-
-  downloadDebugText(text, prefix = "hikvision-debug") {
-    const value = String(text || "");
-    if (!value) return;
-    const blob = new Blob([value], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${prefix}-${stamp}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  renderDebugDashboard(camAttrs = {}) {
-    if (!this.isDebugEnabled()) return "";
-    this._lastCameraAttrs = camAttrs || {};
-    this._syncBackendDebugEntries(camAttrs?.playback_debug || []);
-    this._scheduleBackendDebugRefresh(this._backendDebugLastCamera === String(this.selectedCamera?.channel || "") ? 6000 : 250);
-    const entries = this._getFilteredDebugEntries();
-    const summary = {
-      total: (this._debugEntries || []).length,
-      error: (this._debugEntries || []).filter((entry) => entry.level === "error").length,
-      warn: (this._debugEntries || []).filter((entry) => entry.level === "warn").length,
-      audio: (this._debugEntries || []).filter((entry) => entry.category === "audio").length,
-      playback: (this._debugEntries || []).filter((entry) => entry.category === "playback").length,
-      video: (this._debugEntries || []).filter((entry) => entry.category === "video").length,
-      backend: (this._debugEntries || []).filter((entry) => entry.category === "backend").length,
-    };
-    const categories = ["all", "audio", "playback", "video", "backend"];
-    const levels = ["all", "error", "warn", "info", "debug"];
-    const openAttr = this._debugDashboardOpen ? "open" : "";
-    return `
-      <div class="hik-panel hik-info-card hik-debug-dashboard">
-        <details id="hik-debug-dashboard-details" ${openAttr}>
-          <summary class="hik-debug-summary">
-            <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
-            <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
-          </summary>
-          <div class="hik-status-row">
-            <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
-            <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:alert-outline"></ha-icon>Warn ${this.escapeHtml(String(summary.warn))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:microphone-outline"></ha-icon>Audio ${this.escapeHtml(String(summary.audio))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
-          </div>
-          <div class="hik-debug-toolbar">
-            <div class="hik-debug-filter-group">
-              ${categories.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.categories || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="categories" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-            </div>
-            <div class="hik-debug-filter-group">
-              ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-            </div>
-            <div class="hik-debug-actions">
-              <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
-              <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
-              <button class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
-            </div>
-          </div>
-          ${entries.length ? entries.slice(0, 40).map((entry, index) => {
-            const debugText = this.formatDebugEntryText(entry);
-            const badgeClass = entry.level === "error" ? "warn" : entry.level === "warn" ? "primary" : "neutral";
-            return `
-              <div class="hik-debug-block">
-                <div class="hik-status-row">
-                  <span class="hik-pill ${badgeClass}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.category || "general")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(entry.level || "info")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(entry.source || "frontend")}</span>
-                  ${entry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(entry.camera))}</span>` : ""}
-                </div>
-                <div class="hik-mini-note"><b>${this.escapeHtml(entry.event || "event")}</b> · ${this.escapeHtml(entry.message || "")}</div>
-                <div class="hik-mini-note">${this.escapeHtml(entry.time || "")}</div>
-                <div class="hik-debug-actions">
-                  <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
-                  <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
-                </div>
-                <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(debugText)}</textarea>
-                ${entry?.details ? `<details ${index === 0 ? "open" : ""}><summary>Details</summary><pre class="hik-debug-pre">${this.escapeHtml(JSON.stringify(entry.details, null, 2))}</pre></details>` : ""}
-              </div>`;
-          }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
-        </details>
-      </div>`;
-  }
-
   async _startTalkbackDirect() {
     try {
       if (this._talkActive) return;
-      this._setAudioDebugStatus({ requested: true, active: false, ws: "starting", pc: "starting", last_error: "" });
-      this._pushAudioDebug("talk_start_requested", {});
       const rtspUrl = this._preferredRtspUrl || "";
       if (!rtspUrl) throw new Error("No RTSP URL available for talkback");
-      this._pushAudioDebug("rtsp_selected", { rtspUrl });
 
       this._talkStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -490,28 +176,21 @@ _toggleDebugFilter(kind, value) {
         },
         video: false,
       });
-      this._setAudioDebugStatus({ mic: "granted" });
-      this._pushAudioDebug("mic_granted", { trackCount: this._talkStream?.getTracks?.().length || 0 });
+      const outboundMicStream = await this._initMicProcessing(this._talkStream);
 
       const pc = new RTCPeerConnection();
-      pc.addEventListener("connectionstatechange", () => this._setAudioDebugStatus({ pc: pc.connectionState || "unknown" }));
-      pc.addEventListener("iceconnectionstatechange", () => this._setAudioDebugStatus({ ice: pc.iceConnectionState || "unknown" }));
-      pc.addEventListener("signalingstatechange", () => this._setAudioDebugStatus({ signaling: pc.signalingState || "unknown" }));
-      this._pushAudioDebug("pc_created", {});
-      this._talkStream.getTracks().forEach((track) => pc.addTrack(track, this._talkStream));
+      outboundMicStream.getTracks().forEach((track) => pc.addTrack(track, outboundMicStream));
 
       const offer = await pc.createOffer({
         offerToReceiveAudio: false,
         offerToReceiveVideo: false,
       });
-      await pc.setLocalDescription(offer);
+
+      const mungedOffer = this._mungeTalkOffer(offer);
+      await pc.setLocalDescription(mungedOffer);
 
       const wsUrl = await this._getSignedWebRtcUrl(rtspUrl);
-      this._pushAudioDebug("signed_ws_url", { wsUrl });
       const ws = new WebSocket(wsUrl);
-      ws.addEventListener("open", () => { this._setAudioDebugStatus({ ws: "open" }); this._pushAudioDebug("ws_open", {}); });
-      ws.addEventListener("close", (ev) => { this._setAudioDebugStatus({ ws: "closed" }); this._pushAudioDebug("ws_close", { code: ev.code, reason: ev.reason }); });
-      ws.addEventListener("error", () => { this._setAudioDebugStatus({ ws: "error" }); this._pushAudioDebug("ws_error", { error: "Talkback websocket failed" }); });
 
       const answerReady = new Promise((resolve, reject) => {
         const cleanup = () => {
@@ -526,14 +205,10 @@ _toggleDebugFilter(kind, value) {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === "webrtc/answer") {
-              this._pushAudioDebug("answer_received", {});
               await pc.setRemoteDescription({ type: "answer", sdp: msg.value });
               cleanup();
               resolve();
               return;
-            }
-            if (msg.type === "error") {
-              this._pushAudioDebug("server_error", { error: msg.value || "unknown" });
             }
             if (msg.type === "webrtc/candidate" && msg.value) {
               try { await pc.addIceCandidate(new RTCIceCandidate(msg.value)); } catch (e) {}
@@ -549,7 +224,6 @@ _toggleDebugFilter(kind, value) {
 
       ws.addEventListener("open", () => {
         ws.send(JSON.stringify({ type: "webrtc/offer", value: offer.sdp }));
-        this._pushAudioDebug("offer_sent", {});
       }, { once: true });
 
       pc.onicecandidate = (event) => {
@@ -563,11 +237,8 @@ _toggleDebugFilter(kind, value) {
       this._talkPc = pc;
       this._talkWs = ws;
       this._talkActive = true;
-      this._setAudioDebugStatus({ requested: true, active: true, pc: pc.connectionState || "connected", signaling: pc.signalingState || "stable" });
-      this._pushAudioDebug("talk_active", {});
+      this._startTalkStats(pc);
     } catch (err) {
-      this._setAudioDebugStatus({ requested: true, active: false, ws: "failed", pc: "failed", last_error: String(err?.message || err) });
-      this._pushAudioDebug("talk_failed", { error: String(err?.message || err) });
       console.error("Direct talk failed:", err);
       this._stopTalkbackDirect();
       throw err;
@@ -581,7 +252,6 @@ _toggleDebugFilter(kind, value) {
       type: "hikvision_ptz/webrtc_url",
       url: rtspUrl,
     });
-    this._pushAudioDebug("signed_path_received", { hasPath: !!result?.path });
 
     const path = result?.path;
     if (!path) {
@@ -596,81 +266,46 @@ _toggleDebugFilter(kind, value) {
     return `${proto}//${location.host}${path}`;
   }
 
+  _mungeTalkOffer(offer) {
+    let sdp = String(offer?.sdp || "");
 
-  _setAudioDebugStatus(patch = {}) {
-    this._audioDebugStatus = { ...(this._audioDebugStatus || {}), ...patch };
-  }
+    // Strip any video media section so the backchannel sees an audio-only offer.
+    sdp = sdp.replace(/^m=video[\s\S]*?(?=^m=|$)/gm, "");
 
-  _pushAudioDebug(event, details = {}) {
-    const entry = {
-      idx: ++this._audioDebugSeq,
-      time: new Date().toISOString(),
-      event: String(event || 'event'),
-      details: details || {},
-    };
-    this._audioDebugLog = [...(this._audioDebugLog || []), entry].slice(-60);
-    if (details?.error) this._setAudioDebugStatus({ last_error: String(details.error) });
-    const level = this._debugEventLevelFromData(event, details);
-    this._pushDebug("audio", level, event, String(event || "Audio event").replace(/_/g, " "), details, "frontend");
-  }
+    // Force talk direction to sendonly.
+    sdp = sdp.replace(/^a=sendrecv$/gm, "a=sendonly");
+    sdp = sdp.replace(/^a=recvonly$/gm, "a=sendonly");
+    sdp = sdp.replace(/^a=inactive$/gm, "a=sendonly");
 
-  shouldShowAudioDebug() {
-    return this.config.show_audio_debug === true;
-  }
+    // Prefer PCMA and remove PCMU payloads if present.
+    const audioMatch = sdp.match(/^m=audio\s+\d+\s+\S+\s+(.+)$/m);
+    if (audioMatch) {
+      const payloads = audioMatch[1].trim().split(/\s+/);
+      const codecMap = {};
+      for (const m of sdp.matchAll(/^a=rtpmap:(\d+)\s+([^/\s]+)/gm)) {
+        codecMap[m[1]] = (m[2] || "").toUpperCase();
+      }
+      const removeIds = payloads.filter((id) => codecMap[id] === 'PCMU');
+      const keepIds = payloads.filter((id) => !removeIds.includes(id));
+      if (removeIds.length && keepIds.length) {
+        sdp = sdp.replace(/^m=audio\s+\d+\s+\S+\s+.+$/m, (line) => {
+          const parts = line.split(/\s+/);
+          return [...parts.slice(0, 3), ...keepIds].join(' ');
+        });
+        for (const id of removeIds) {
+          const esc = id.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+          sdp = sdp.replace(new RegExp(`^a=rtpmap:${esc}\s+.*(?:\r?\n)?`, 'gm'), '');
+          sdp = sdp.replace(new RegExp(`^a=rtcp-fb:${esc}\s+.*(?:\r?\n)?`, 'gm'), '');
+          sdp = sdp.replace(new RegExp(`^a=fmtp:${esc}\s+.*(?:\r?\n)?`, 'gm'), '');
+        }
+      }
+    }
 
-  formatAudioDebugText(entry) {
-    if (!entry) return '';
-    const details = entry.details || {};
-    const lines = [
-      '=== Hikvision Audio Debug ===',
-      `Time: ${entry.time || ''}`,
-      `Event: ${entry.event || ''}`,
-      '',
-      '--- Details ---',
-      JSON.stringify(details, null, 2),
-      '',
-    ];
-    return lines.join("\n");
-  }
-
-  renderAudioDebug() {
-    if (!this.shouldShowAudioDebug()) return '';
-    const status = this._audioDebugStatus || {};
-    const entries = (this._audioDebugLog || []).slice().reverse();
-    return `
-      <div class="hik-panel hik-info-card hik-audio-debug-panel">
-        <div class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Audio Debug</div>
-        <div class="hik-status-row">
-          <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Requested ${this.escapeHtml(String(!!status.requested))}</span>
-          <span class="hik-pill ${status.active ? 'good' : 'neutral'}"><ha-icon icon="mdi:microphone${status.active ? '' : '-off'}"></ha-icon>Active ${this.escapeHtml(String(!!status.active))}</span>
-          <span class="hik-pill neutral"><ha-icon icon="mdi:web"></ha-icon>WS ${this.escapeHtml(status.ws || 'idle')}</span>
-          <span class="hik-pill neutral"><ha-icon icon="mdi:access-point-network"></ha-icon>ICE ${this.escapeHtml(status.ice || 'idle')}</span>
-          <span class="hik-pill neutral"><ha-icon icon="mdi:lan-connect"></ha-icon>PC ${this.escapeHtml(status.pc || 'idle')}</span>
-          <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>Signal ${this.escapeHtml(status.signaling || 'stable')}</span>
-        </div>
-        <div class="hik-mini-note">RTSP ${this.escapeHtml(this._preferredRtspUrl || '-')}</div>
-        ${status.last_error ? `<div class="hik-mini-note" style="color:var(--error-color);">Last error: ${this.escapeHtml(status.last_error)}</div>` : ''}
-        ${entries.length ? entries.slice(0,8).map((entry, index) => {
-          const debugText = this.formatAudioDebugText(entry);
-          return `
-          <div class="hik-debug-block">
-            <div class="hik-status-row">
-              <span class="hik-pill ${/fail|error|close/i.test(entry.event) ? 'warn' : 'neutral'}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.event)}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:clock-outline"></ha-icon>${this.escapeHtml(entry.time)}</span>
-            </div>
-            <div class="hik-debug-actions">
-              <button class="hik-debug-btn" data-debug-index="${index}" data-debug-action="copy">Copy</button>
-              <button class="hik-debug-btn" data-debug-index="${index}" data-debug-action="download">Download</button>
-            </div>
-            <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(debugText)}</textarea>
-          </div>`;
-        }).join('') : '<div class="hik-empty-note">No audio debug events yet</div>'}
-      </div>`;
+    return { type: 'offer', sdp };
   }
 
   _stopTalkbackDirect() {
-    this._pushAudioDebug("talk_stop", {});
-    this._setAudioDebugStatus({ requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable" });
+    this._stopTalkStats();
     try {
       if (this._talkWs) {
         this._talkWs.close();
@@ -683,6 +318,7 @@ _toggleDebugFilter(kind, value) {
         this._talkPc = null;
       }
     } catch (err) {}
+    this._teardownMicProcessing();
     if (this._talkStream) {
       this._talkStream.getTracks().forEach((t) => {
         try { t.stop(); } catch (err) {}
@@ -690,6 +326,170 @@ _toggleDebugFilter(kind, value) {
       this._talkStream = null;
     }
     this._talkActive = false;
+  }
+
+  _teardownMicProcessing() {
+    if (this._micMeterRaf) {
+      cancelAnimationFrame(this._micMeterRaf);
+      this._micMeterRaf = null;
+    }
+    this._micMeterLevel = 0;
+    try { this._micAnalyser?.disconnect(); } catch (err) {}
+    try { this._micGainNode?.disconnect(); } catch (err) {}
+    try { this._micDestination?.disconnect(); } catch (err) {}
+    try { this._micAudioContext?.close(); } catch (err) {}
+    this._micAnalyser = null;
+    this._micGainNode = null;
+    this._micDestination = null;
+    this._micProcessedStream = null;
+    this._micAudioContext = null;
+  }
+
+  _updateMicMeter() {
+    if (!this._micAnalyser) return;
+    try {
+      const data = new Uint8Array(this._micAnalyser.fftSize);
+      this._micAnalyser.getByteTimeDomainData(data);
+      let peak = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const value = Math.abs(data[i] - 128) / 128;
+        if (value > peak) peak = value;
+      }
+      this._micMeterLevel = Math.max(0, Math.min(1, peak * 2.4));
+      const meter = this.querySelector('.hik-mic-meter-fill');
+      if (meter) meter.style.setProperty('--hik-mic-level', `${Math.round(this._micMeterLevel * 100)}%`);
+    } catch (err) {
+      this._micMeterLevel = 0;
+    }
+    this._micMeterRaf = requestAnimationFrame(() => this._updateMicMeter());
+  }
+
+  async _initMicProcessing(stream) {
+    this._teardownMicProcessing();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx || !stream?.getAudioTracks?.().length) {
+      return stream;
+    }
+    try {
+      const context = new AudioCtx();
+      const source = context.createMediaStreamSource(stream);
+      const gain = context.createGain();
+      const analyser = context.createAnalyser();
+      const destination = context.createMediaStreamDestination();
+      analyser.fftSize = 256;
+      gain.gain.value = Math.max(0, Math.min(3, Number(this._micVolume || 100) / 100));
+      source.connect(gain);
+      gain.connect(analyser);
+      gain.connect(destination);
+      this._micAudioContext = context;
+      this._micGainNode = gain;
+      this._micAnalyser = analyser;
+      this._micDestination = destination;
+      this._micProcessedStream = destination.stream;
+      this._updateMicMeter();
+      return destination.stream;
+    } catch (err) {
+      this._teardownMicProcessing();
+      return stream;
+    }
+  }
+
+  _setMicVolume(value) {
+    this._micVolume = Math.max(0, Math.min(300, Number(value) || 0));
+    if (this._micGainNode) {
+      this._micGainNode.gain.value = Math.max(0, Math.min(3, this._micVolume / 100));
+    }
+    const label = this.querySelector('.hik-mic-volume-value');
+    if (label) label.textContent = `${Math.round(this._micVolume)}%`;
+  }
+
+  _formatBitrateKbps(value) {
+    const kbps = Number(value || 0);
+    if (!Number.isFinite(kbps) || kbps <= 0) return '--';
+    if (kbps >= 1000) return `${(kbps / 1000).toFixed(2)} Mbps`;
+    return `${Math.round(kbps)} kbps`;
+  }
+
+  _formatRttMs(value) {
+    const ms = Number(value || 0);
+    if (!Number.isFinite(ms) || ms <= 0) return '--';
+    return `${Math.round(ms)} ms`;
+  }
+
+  _updateTalkStatsUi() {
+    const bitrateEl = this.querySelector('.hik-talk-bitrate-value');
+    const rttEl = this.querySelector('.hik-talk-rtt-value');
+    if (bitrateEl) bitrateEl.textContent = this._formatBitrateKbps(this._talkStats?.bitrateKbps || 0);
+    if (rttEl) rttEl.textContent = this._formatRttMs(this._talkStats?.rttMs || 0);
+  }
+
+  _stopTalkStats() {
+    if (this._talkStatsTimer) {
+      clearInterval(this._talkStatsTimer);
+      this._talkStatsTimer = null;
+    }
+    this._talkStats = { bitrateKbps: 0, rttMs: 0 };
+    this._updateTalkStatsUi();
+  }
+
+  _startTalkStats(pc) {
+    this._stopTalkStats();
+    const outboundSamples = new Map();
+    this._talkStatsTimer = window.setInterval(async () => {
+      if (!pc) return;
+      try {
+        const report = await pc.getStats();
+        let bitrateKbps = 0;
+        let rttMs = 0;
+        let selectedPair = null;
+        let fallbackPair = null;
+
+        report.forEach((stat) => {
+          const isAudioOutbound = stat.type === 'outbound-rtp' && (
+            stat.kind === 'audio' ||
+            stat.mediaType === 'audio' ||
+            (typeof stat.id === 'string' && stat.id.toLowerCase().includes('audio'))
+          );
+          if (isAudioOutbound && Number.isFinite(stat.bytesSent) && Number.isFinite(stat.timestamp)) {
+            const prev = outboundSamples.get(stat.id);
+            if (prev && stat.timestamp > prev.timestamp && stat.bytesSent >= prev.bytesSent) {
+              const deltaBytes = stat.bytesSent - prev.bytesSent;
+              const deltaMs = stat.timestamp - prev.timestamp;
+              const kbps = (deltaBytes * 8) / (deltaMs / 1000) / 1000;
+              if (Number.isFinite(kbps) && kbps > bitrateKbps) bitrateKbps = kbps;
+            }
+            outboundSamples.set(stat.id, { bytesSent: stat.bytesSent, timestamp: stat.timestamp });
+          }
+
+          if (stat.type === 'transport' && stat.selectedCandidatePairId && report.get(stat.selectedCandidatePairId)) {
+            selectedPair = report.get(stat.selectedCandidatePairId);
+          }
+
+          if (stat.type === 'candidate-pair') {
+            const usable = stat.nominated || stat.selected || stat.state === 'succeeded';
+            if (usable && !fallbackPair) fallbackPair = stat;
+          }
+
+          if ((stat.type === 'remote-inbound-rtp' || stat.type === 'remote-outbound-rtp') &&
+              (stat.kind === 'audio' || stat.mediaType === 'audio' || !stat.kind) &&
+              Number.isFinite(stat.roundTripTime)) {
+            const ms = stat.roundTripTime * 1000;
+            if (Number.isFinite(ms) && ms > 0) rttMs = ms;
+          }
+        });
+
+        const pair = selectedPair || fallbackPair;
+        if ((!rttMs || rttMs <= 0) && pair && Number.isFinite(pair.currentRoundTripTime)) {
+          rttMs = pair.currentRoundTripTime * 1000;
+        }
+
+        this._talkStats = {
+          bitrateKbps: Number.isFinite(bitrateKbps) ? bitrateKbps : 0,
+          rttMs: Number.isFinite(rttMs) ? rttMs : 0,
+        };
+        this._updateTalkStatsUi();
+      } catch (err) {}
+    }, 1500);
   }
 
   _detachTalkReleaseListeners() {
@@ -759,8 +559,6 @@ _toggleDebugFilter(kind, value) {
       show_dvr_info: true,
       show_storage_info: true,
       show_alarm_dashboard: true,
-      show_stream_mode_info: true,
-      show_controls: true,
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
     };
@@ -1365,126 +1163,6 @@ handleDebugAction(ev) {
   return false;
 }
 
-renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges = [] } = {}) {
-  if (this.config.show_controls === false && !this._controlsVisible) return "";
-  return `
-    <div class="hik-panel hik-controls-block">
-      <div class="hik-controls-head">
-        <div class="hik-sub" style="margin:0;"><ha-icon icon="mdi:gamepad-round-up"></ha-icon>Controls</div>
-      </div>
-
-      ${this._controlsVisible ? `
-        <div class="hik-ptz-shell">
-          <div class="hik-console-surface">
-            <div class="hik-console-topbar">
-              <div>
-                <div class="hik-console-kicker">Motion + Lens Console</div>
-                <div class="hik-console-title">Integrated PTZ, zoom, focus and iris</div>
-              </div>
-              <div class="hik-console-badges">
-                <span class="hik-console-badge"><ha-icon icon="mdi:speedometer"></ha-icon>PTZ ${speed}</span>
-                <span class="hik-console-badge"><ha-icon icon="mdi:tune-variant"></ha-icon>Lens ${Number(this.config.lens_step || 60)}</span>
-                <span class="hik-console-badge"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.getPTZDuration()}ms</span>
-                <span class="hik-console-badge"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.getLensDuration()}ms</span>
-                ${cameraAlarmBadges.length ? `<span class="hik-console-badge"><ha-icon icon="mdi:alert-outline"></ha-icon>${cameraAlarmBadges.length} alarm${cameraAlarmBadges.length === 1 ? "" : "s"}</span>` : ""}
-                <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
-                  <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                  <span>Refocus</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="hik-console-grid">
-              <div class="hik-rail zoom">
-                <div class="hik-rail-head"><ha-icon icon="mdi:magnify-scan"></ha-icon><span>Zoom</span></div>
-                <div class="hik-rail-stack vertical">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom in" aria-label="Zoom in">
-                    <ha-icon icon="mdi:magnify-plus-outline"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">In</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom out" aria-label="Zoom out">
-                    <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Out</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="hik-pad-shell">
-                <div class="hik-pad-wrap">
-                  <div class="hik-pad">
-                    <div></div>
-                    ${this.iconButton({ icon: "mdi:pan-up", label: "Move up", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="${speed}"`, disabled: !ptz || this._returningHome })}
-                    <div></div>
-
-                    ${this.iconButton({ icon: "mdi:pan-left", label: "Move left", cls: "ptz-btn", attrs: `data-pan="-${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
-                    ${this.iconButton({ icon: "mdi:crosshairs-gps", label: "Return home", cls: "center", attrs: 'id="hik-center"', disabled: !ptz || this._returningHome })}
-                    ${this.iconButton({ icon: "mdi:pan-right", label: "Move right", cls: "ptz-btn", attrs: `data-pan="${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
-
-                    <div></div>
-                    ${this.iconButton({ icon: "mdi:pan-down", label: "Move down", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="-${speed}"`, disabled: !ptz || this._returningHome })}
-                    <div></div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="hik-rail focus">
-                <div class="hik-rail-head"><ha-icon icon="mdi:image-filter-center-focus"></ha-icon><span>Focus</span></div>
-                <div class="hik-rail-stack vertical">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus near" aria-label="Focus near">
-                    <ha-icon icon="mdi:arrow-expand-horizontal"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">Near</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus far" aria-label="Focus far">
-                    <ha-icon icon="mdi:arrow-collapse-horizontal"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Far</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="hik-rail iris">
-                <div class="hik-rail-head"><ha-icon icon="mdi:camera-iris"></ha-icon><span>Iris</span></div>
-                <div class="hik-rail-stack horizontal">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Open iris" aria-label="Open iris">
-                    <ha-icon icon="mdi:brightness-7"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">Open</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Close iris" aria-label="Close iris">
-                    <ha-icon icon="mdi:brightness-5"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Close</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="hik-rail speed">
-                <div class="hik-speed-wrap">
-                  <div class="hik-speed-label">
-                    <span>PTZ speed</span>
-                    <span class="hik-speed-value">${speed}</span>
-                  </div>
-                  <div class="hik-speed-track">
-                    <input id="hik-speed" type="range" min="1" max="100" step="1" value="${speed}">
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ` : `
-        <div class="hik-empty" style="text-align:center;">
-          <div style="margin-bottom:8px;">Controls hidden</div>
-          <div class="hik-mini-note">Use the toggle on the video panel to reveal the control console.</div>
-        </div>
-      `}
-    </div>
-  `;
-}
-
 renderPlaybackDebug(debugEntries = []) {
   if (!this.shouldShowPlaybackDebug(debugEntries)) return "";
   const failing = debugEntries.filter((entry) => Number(entry?.response?.status || 0) !== 200 || entry?.ok === false || entry?.reason || entry?.error).slice(-3).reverse();
@@ -1533,7 +1211,6 @@ async startPlayback(timestamp = null) {
   const requested = timestamp || state.currentTime || this.formatDateTimeLocal();
   state.currentTime = requested;
   state.paused = false;
-  this._pushDebug("playback", "info", "playback_start_requested", "Requested playback start", { requested_time: requested, entity_id: refs.camera }, "frontend");
   await this._hass.callService("hikvision_ptz", "playback_seek", {
     entity_id: refs.camera,
     timestamp: requested,
@@ -1547,7 +1224,6 @@ async stopPlayback() {
   if (!refs.camera) return;
   const state = this.getPlaybackState(cam.channel);
   state.paused = false;
-  this._pushDebug("playback", "warn", "playback_stop_requested", "Requested return to live mode", { entity_id: refs.camera }, "frontend");
   await this._hass.callService("hikvision_ptz", "playback_stop", {
     entity_id: refs.camera,
   });
@@ -1556,14 +1232,12 @@ async stopPlayback() {
 pausePlayback() {
   const state = this.getPlaybackState();
   state.paused = true;
-  this._pushDebug("playback", "warn", "playback_paused_locally", "Playback paused in the UI", { requested_time: state.currentTime || "" }, "frontend");
   this.render();
 }
 
 async resumePlayback() {
   const state = this.getPlaybackState();
   state.paused = false;
-  this._pushDebug("playback", "info", "playback_resume_requested", "Requested playback resume", { requested_time: state.currentTime || "" }, "frontend");
   await this.startPlayback(state.currentTime || this.formatDateTimeLocal());
 }
 
@@ -1574,11 +1248,6 @@ async seekPlayback(direction = 1) {
   if (Number.isNaN(base.getTime())) return;
   base.setSeconds(base.getSeconds() + seconds);
   state.currentTime = this.formatDateTimeLocal(base);
-  this._pushDebug("playback", "info", "playback_seek_adjusted", direction < 0 ? "Playback seek moved backward" : "Playback seek moved forward", {
-    direction: Number(direction || 1),
-    seconds,
-    requested_time: state.currentTime,
-  }, "frontend");
   if (!state.paused) await this.startPlayback(state.currentTime);
   else this.render();
 }
@@ -1591,7 +1260,6 @@ async seekPlayback(direction = 1) {
     this.stopMove();
     this.selected = nextIndex;
     this._videoSignature = null;
-    this._pushDebug("video", "info", "camera_selected", "Selected camera changed", { index: nextIndex, channel: cameras[nextIndex]?.channel, name: cameras[nextIndex]?.name || "" }, "frontend");
     this.render();
   }
 
@@ -2190,57 +1858,82 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const isWebRtc = this._isWebRtcMode(streamMode, playbackActive ? "playback" : "");
     const muteDuringTalk = this.config.mute_during_talk !== false;
     const talkMode = this._getTalkMode();
+    const talkAvailable = isWebRtc && !playbackActive;
     const speakerActive = this._speakerEnabled && !(this._talkRequested && muteDuringTalk);
     const speakerIcon = speakerActive ? "mdi:volume-high" : "mdi:volume-off";
     const speakerLabel = !this._speakerEnabled ? "Speaker off" : (this._talkRequested && muteDuringTalk ? "Speaker muted during talk" : "Speaker on");
     const talkLabel = talkMode === "toggle"
       ? (this._talkRequested ? "End talk" : "Start talk")
       : (this._talkRequested ? "Talking…" : "Hold to talk");
-    const talkAttrs = talkMode === "toggle"
-      ? 'id="hik-talk-toggle"'
-      : 'id="hik-talk-hold"';
-    const talkHandlers = talkMode === "toggle"
-      ? ""
-      : `data-hold-talk="true"`;
+    const talkAttrs = talkMode === "toggle" ? 'id="hik-talk-toggle"' : 'id="hik-talk-hold"';
+    const talkHandlers = talkMode === "toggle" ? "" : `data-hold-talk="true"`;
+    const statsActive = this._talkRequested || this._talkActive;
+    const talkReason = playbackActive
+      ? "Talk is disabled during playback."
+      : !isWebRtc
+        ? "Microphone features require WebRTC mode."
+        : "Press and hold to transmit microphone audio.";
+
     return `
       <div class="hik-audio-panel">
         <div class="hik-audio-head">
           <div class="hik-sub" style="margin:0;"><ha-icon icon="mdi:volume-source"></ha-icon>Audio Console</div>
           <div class="hik-audio-pills">
             <span class="hik-pill ${speakerActive ? "good" : "neutral"}"><ha-icon icon="${speakerIcon}"></ha-icon>${speakerLabel}</span>
-            <span class="hik-pill ${isWebRtc ? "primary" : "neutral"}"><ha-icon icon="${isWebRtc ? "mdi:wan" : "mdi:lan"}"></ha-icon>${isWebRtc ? "WebRTC audio path" : "Receive-only mode"}</span>
-            ${isWebRtc ? `<span class="hik-pill ${this._talkRequested ? "warn" : "neutral"}"><ha-icon icon="mdi:microphone${this._talkRequested ? '' : '-off'}"></ha-icon>${this._talkRequested ? "Mic live" : "Mic standby"}</span>` : ""}
+            <span class="hik-pill ${isWebRtc ? "primary" : "neutral"}"><ha-icon icon="${isWebRtc ? "mdi:wan" : "mdi:lan"}"></ha-icon>${isWebRtc ? "WebRTC path" : "Receive-only path"}</span>
+            ${talkAvailable ? `<span class="hik-pill ${this._talkRequested ? "warn" : "neutral"}"><ha-icon icon="mdi:microphone${this._talkRequested ? '' : '-off'}"></ha-icon>${this._talkRequested ? "Mic live" : "Mic standby"}</span>` : ""}
           </div>
         </div>
-        <div class="hik-audio-grid">
-          <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
-            <ha-icon icon="${speakerIcon}"></ha-icon>
-            <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
-          </button>
-          <label class="hik-audio-slider">
-            <span>Volume <b class="hik-volume-value">${Math.round(this._volume)}%</b></span>
-            <input id="hik-volume" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
-          </label>
-          <label class="hik-audio-slider">
-            <span>Boost <b class="hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</b></span>
-            <input id="hik-audio-boost" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
-          </label>
-          ${isWebRtc && !playbackActive ? `
-            <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
-              <ha-icon icon="mdi:microphone"></ha-icon>
-              <span>${talkLabel}</span>
+
+        <div class="hik-audio-section">
+          <div class="hik-mini-title">Speaker controls</div>
+          <div class="hik-audio-grid speaker-grid">
+            <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
+              <ha-icon icon="${speakerIcon}"></ha-icon>
+              <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
             </button>
-          ` : `
-            <div class="hik-audio-note">
-              <ha-icon icon="mdi:information-outline"></ha-icon>
-              <span>${playbackActive ? "Talk is disabled during playback." : "Microphone controls appear only in WebRTC mode."}</span>
-            </div>
-          `}
+            <label class="hik-audio-slider">
+              <span>Speaker volume <b class="hik-volume-value">${Math.round(this._volume)}%</b></span>
+              <input id="hik-volume" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+            </label>
+            <label class="hik-audio-slider">
+              <span>Speaker boost <b class="hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</b></span>
+              <input id="hik-audio-boost" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
+            </label>
+          </div>
+          <div class="hik-audio-meter" title="Output level meter">
+            <div class="hik-audio-meter-fill" style="--hik-audio-level:${Math.round(this._audioMeterLevel * 100)}%;"></div>
+          </div>
         </div>
-        <div class="hik-audio-meter" title="Output level meter">
-          <div class="hik-audio-meter-fill" style="--hik-audio-level:${Math.round(this._audioMeterLevel * 100)}%;"></div>
+
+        <div class="hik-audio-section talk-section ${talkAvailable ? '' : 'is-disabled'}">
+          <div class="hik-mini-title">Talk / microphone controls</div>
+          <div class="hik-audio-grid talk-grid">
+            <label class="hik-audio-slider">
+              <span>Mic transmit <b class="hik-mic-volume-value">${Math.round(this._micVolume)}%</b></span>
+              <input id="hik-mic-volume" type="range" min="0" max="300" step="5" value="${Math.round(this._micVolume)}" ${talkAvailable ? '' : 'disabled'}>
+            </label>
+            ${talkAvailable ? `
+              <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
+                <ha-icon icon="mdi:microphone"></ha-icon>
+                <span>${talkLabel}</span>
+              </button>
+            ` : `
+              <div class="hik-audio-note full-span">
+                <ha-icon icon="mdi:information-outline"></ha-icon>
+                <span>${talkReason}</span>
+              </div>
+            `}
+          </div>
+          <div class="hik-audio-meter hik-mic-meter" title="Live mic level meter">
+            <div class="hik-audio-meter-fill hik-mic-meter-fill" style="--hik-mic-level:${Math.round(this._micMeterLevel * 100)}%; width: var(--hik-mic-level);"></div>
+          </div>
+          <div class="hik-status-row hik-talk-stats-row ${statsActive ? '' : 'is-idle'}">
+            <span class="hik-pill neutral"><ha-icon icon="mdi:speedometer"></ha-icon>Talk uplink <b class="hik-talk-bitrate-value">${this._formatBitrateKbps(this._talkStats?.bitrateKbps || 0)}</b></span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:timer-outline"></ha-icon>Talk RTT <b class="hik-talk-rtt-value">${this._formatRttMs(this._talkStats?.rttMs || 0)}</b></span>
+          </div>
+          <div class="hik-mini-note">${talkReason}${talkAvailable ? ` Talk mode: ${talkMode}.` : ''}</div>
         </div>
-        <div class="hik-mini-note">${muteDuringTalk ? "Speaker auto-mutes while you talk to prevent feedback." : "Speaker remains active while talking."}${isWebRtc ? ` Talk mode: ${talkMode}.` : ""}</div>
       </div>
     `;
   }
@@ -2262,21 +1955,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       paused: playbackPaused ? 1 : 0,
     });
 
-    if (this._lastRenderedVideoSignature !== signature) {
-      this._lastRenderedVideoSignature = signature;
-      this._pushDebug("video", playbackMode ? "info" : "debug", "video_render_requested", playbackMode ? "Rendering playback video path" : "Rendering live video path", {
-        camera_entity: cameraEntityId || "",
-        requested_mode: requestedMode,
-        playback_mode: playbackMode,
-        use_webrtc: useWebRtc,
-        use_snapshot: useSnapshot,
-      }, "frontend");
-    }
-
     if (playbackPaused) {
       if (this._videoSignature !== signature) {
         this._cleanupVideoCard();
-        this._pushDebug("video", "warn", "playback_paused", "Playback render paused", { camera_entity: cameraEntityId || "" }, "frontend");
         host.innerHTML = `<div class="hik-empty">Playback paused</div>`;
         this._videoSignature = signature;
       }
@@ -2286,7 +1967,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (!cameraEntityId || !this.getEntity(cameraEntityId)) {
       if (this._videoSignature !== "missing-camera") {
         this._cleanupVideoCard();
-        this._pushDebug("video", "error", "missing_camera_entity", "No camera entity available for video render", { camera_entity: cameraEntityId || "" }, "frontend");
         host.innerHTML = `<div class="hik-empty">No camera entity available</div>`;
         this._videoSignature = "missing-camera";
       }
@@ -2322,14 +2002,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           host.appendChild(webrtcCard);
           this._videoCard = webrtcCard;
           this._videoCardConfig = webrtcConfig;
-          this._pushDebug("video", "info", "webrtc_card_ready", "WebRTC card created successfully", { playback_mode: playbackMode, url: preferredRtspUrl || "" }, "frontend");
           this._syncMediaAudio();
         } catch (err) {
-          this._pushDebug("video", "error", "webrtc_card_failed", "WebRTC card failed to start", { error: String(err?.message || err) }, "frontend");
           if (this._videoSignature === signature) host.innerHTML = `<div class="hik-empty">WebRTC card is not available or failed to start. Switch stream mode to RTSP.</div>`;
         }
-      }).catch((err) => {
-        this._pushDebug("video", "error", "webrtc_helpers_failed", "WebRTC helpers failed to load", { error: String(err?.message || err || "unknown") }, "frontend");
+      }).catch(() => {
         if (this._videoSignature === signature) host.innerHTML = `<div class="hik-empty">WebRTC helpers failed to load.</div>`;
       });
       return;
@@ -2353,14 +2030,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         host.innerHTML = "";
         host.appendChild(videoCard);
         this._videoCard = videoCard;
-        this._pushDebug("video", "info", "video_card_ready", "Video card created successfully", { camera_entity: cameraEntityId || "", snapshot_mode: useSnapshot }, "frontend");
         this._syncMediaAudio();
       } catch (err) {
-        this._pushDebug("video", "error", "video_card_failed", "Unable to create live video card", { error: String(err?.message || err) }, "frontend");
         if (this._videoSignature === signature) host.innerHTML = `<div class="hik-empty">Unable to create live video card</div>`;
       }
-    }).catch((err) => {
-      this._pushDebug("video", "error", "card_helpers_failed", "Unable to load card helpers", { error: String(err?.message || err || "unknown") }, "frontend");
+    }).catch(() => {
       if (this._videoSignature === signature) host.innerHTML = `<div class="hik-empty">Unable to load card helpers</div>`;
     });
   }
@@ -2473,8 +2147,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
 
-    if (this.config.show_stream_mode_info !== false) {
-      infoCards.push(`
+    infoCards.push(`
       <div class="hik-panel hik-info-card">
         <div class="hik-sub"><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Stream Mode Info</div>
         <div class="hik-select-group" style="margin-bottom:12px;">
@@ -2504,7 +2177,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         ])}
       </div>
     `);
-    }
 
     if (this.config.show_alarm_dashboard !== false) {
       infoCards.push(this.renderAlarmDashboard(globalRefs, dvr, refs, storageSummary));
@@ -2620,6 +2292,14 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-console-title { font-size:14px; font-weight:700; }
           .hik-console-badges { display:flex; gap:8px; flex-wrap:wrap; }
           .hik-console-badge { min-height:26px; padding:0 10px; border-radius:999px; background: color-mix(in srgb, var(--hik-accent) 14%, var(--secondary-background-color)); display:inline-flex; align-items:center; gap:6px; font-size:12px; }
+
+          .hik-audio-section { display:grid; gap:10px; margin-top:12px; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--hik-accent) 8%, var(--divider-color)); }
+          .hik-audio-section:first-of-type { margin-top:0; padding-top:0; border-top:none; }
+          .hik-mini-title { font-size:11px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; font-weight:700; }
+          .speaker-grid, .talk-grid { align-items:end; }
+          .full-span { grid-column: 1 / -1; }
+          .talk-section.is-disabled { opacity:0.72; }
+          .hik-talk-stats-row.is-idle .hik-pill { opacity:0.85; }
           .hik-console-action { min-height:30px; padding:0 12px; border-radius:999px; font-size:12px; background: color-mix(in srgb, var(--hik-accent) 18%, var(--secondary-background-color)); }
           .hik-console-grid { display:grid; grid-template-columns:minmax(68px,76px) minmax(0,1fr) minmax(68px,76px); grid-template-areas:'zoom pad focus' 'iris iris iris' 'speed speed speed'; gap:12px; align-items:stretch; }
           .hik-rail { border:1px solid color-mix(in srgb, var(--hik-accent) 9%, var(--divider-color)); border-radius:18px; background: color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%); padding:8px; display:grid; gap:8px; align-content:start; min-width:0; }
@@ -2669,8 +2349,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
           .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
-          .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
-          .hik-overlay-toggle .hik-toggle-btn { width:auto; padding: 0 16px; border-radius:999px; min-height:42px; box-shadow:0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px); }
+          .hik-overlay-toggle { position:absolute; inset:auto 14px 14px auto; z-index:2; }
+          .hik-overlay-toggle .hik-toggle-btn { width:auto; padding: 0 14px; border-radius:999px; min-height:42px; }
           .hik-faint { opacity:0.72; }
           .hik-position-card { margin-top:14px; border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:16px; padding:12px; background: color-mix(in srgb, var(--card-background-color) 92%, var(--hik-accent) 8%); display:grid; gap:12px; }
           .hik-video-overlay-badges { position:absolute; inset:14px auto auto 14px; z-index:3; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; }
@@ -2698,12 +2378,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
           .hik-debug-textarea { width:100%; min-height:220px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
-          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
-          .hik-debug-summary::-webkit-details-marker { display:none; }
-          .hik-debug-toolbar { display:grid; gap:10px; margin:12px 0; }
-          .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
-          .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; }
-          .hik-debug-chip.active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.22); }
           .hik-rec-dot { width:9px; height:9px; border-radius:50%; background:#fff; box-shadow:0 0 0 0 rgba(255,255,255,0.65); animation: hikRecDot 1.4s ease-in-out infinite; }
           @keyframes hikPulseRecording { 0% { background-position: 0% 50%; filter: brightness(0.92); } 50% { background-position: 100% 50%; filter: brightness(1.08); } 100% { background-position: 0% 50%; filter: brightness(0.92); } }
           @keyframes hikRecDot { 0% { transform: scale(0.9); box-shadow:0 0 0 0 rgba(255,255,255,0.65); } 70% { transform: scale(1.08); box-shadow:0 0 0 8px rgba(255,255,255,0); } 100% { transform: scale(0.9); box-shadow:0 0 0 0 rgba(255,255,255,0); } }
@@ -2765,12 +2439,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 <div class="hik-video-block">
                   <div id="hikvision-video-host"></div>
                   ${this.renderPlaybackOverlay(playbackIndicator)}
-                  <div class="hik-overlay-toggle">
+                  ${controlsMode === "toggle" ? `
+                    <div class="hik-overlay-toggle">
                       <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-middle">
                         <ha-icon icon="mdi:tune-variant"></ha-icon>
                         <span>${this._controlsVisible ? "Hide controls" : "Show controls"}</span>
                       </button>
-                  </div>
+                    </div>` : ""}
                 </div>
                 ${this.config.show_status_pills !== false ? `
                 <div class="hik-status-row">
@@ -2781,11 +2456,119 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
-                ${this.renderDebugDashboard(camAttrs)}
-              </div>
-            </div>
+                <div class="hik-controls-block">
+                  <div class="hik-controls-head">
+                    <div class="hik-sub" style="margin:0;"><ha-icon icon="mdi:gamepad-round-up"></ha-icon>Controls</div>
+                    ${controlsMode === "toggle" ? `
+                      <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-top" style="width:auto;padding:0 14px;">
+                        <ha-icon icon="mdi:tune"></ha-icon>
+                        <span>${this._controlsVisible ? "Hide" : "Show"}</span>
+                      </button>` : `<span class="hik-faint">Always visible</span>`}
+                  </div>
 
-            ${this.renderControlsPanel({ online, ptz, speed, cameraAlarmBadges })}
+                  ${controlsMode !== "toggle" || this._controlsVisible ? `
+                    <div class="hik-ptz-shell">
+                      <div class="hik-console-surface">
+                        <div class="hik-console-topbar">
+                          <div>
+                            <div class="hik-console-kicker">Motion + Lens Console</div>
+                            <div class="hik-console-title">Integrated PTZ, zoom, focus and iris</div>
+                          </div>
+                          <div class="hik-console-badges">
+                            <span class="hik-console-badge"><ha-icon icon="mdi:speedometer"></ha-icon>PTZ ${speed}</span>
+                            <span class="hik-console-badge"><ha-icon icon="mdi:tune-variant"></ha-icon>Lens ${Number(this.config.lens_step || 60)}</span>
+                            <span class="hik-console-badge"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.getPTZDuration()}ms</span>
+                            <span class="hik-console-badge"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.getLensDuration()}ms</span>
+                            ${cameraAlarmBadges.length ? `<span class="hik-console-badge"><ha-icon icon="mdi:alert-outline"></ha-icon>${cameraAlarmBadges.length} alarm${cameraAlarmBadges.length === 1 ? "" : "s"}</span>` : ""}
+                            <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
+                              <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                              <span>Refocus</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="hik-console-grid">
+                          <div class="hik-rail zoom">
+                            <div class="hik-rail-head"><ha-icon icon="mdi:magnify-scan"></ha-icon><span>Zoom</span></div>
+                            <div class="hik-rail-stack vertical">
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom in" aria-label="Zoom in">
+                                <ha-icon icon="mdi:magnify-plus-outline"></ha-icon>
+                                <span class="hik-rail-sign">+</span>
+                                <span class="hik-rail-text">In</span>
+                              </button>
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom out" aria-label="Zoom out">
+                                <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
+                                <span class="hik-rail-sign">−</span>
+                                <span class="hik-rail-text">Out</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div class="hik-pad-shell">
+                            <div class="hik-pad-wrap">
+                              <div class="hik-pad">
+                                <div></div>
+                                ${this.iconButton({ icon: "mdi:pan-up", label: "Move up", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="${speed}"`, disabled: !ptz || this._returningHome })}
+                                <div></div>
+
+                                ${this.iconButton({ icon: "mdi:pan-left", label: "Move left", cls: "ptz-btn", attrs: `data-pan="-${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
+                                ${this.iconButton({ icon: "mdi:crosshairs-gps", label: "Return home", cls: "center", attrs: 'id="hik-center"', disabled: !ptz || this._returningHome })}
+                                ${this.iconButton({ icon: "mdi:pan-right", label: "Move right", cls: "ptz-btn", attrs: `data-pan="${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
+
+                                <div></div>
+                                ${this.iconButton({ icon: "mdi:pan-down", label: "Move down", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="-${speed}"`, disabled: !ptz || this._returningHome })}
+                                <div></div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="hik-rail focus">
+                            <div class="hik-rail-head"><ha-icon icon="mdi:image-filter-center-focus"></ha-icon><span>Focus</span></div>
+                            <div class="hik-rail-stack vertical">
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus near" aria-label="Focus near">
+                                <ha-icon icon="mdi:arrow-expand-horizontal"></ha-icon>
+                                <span class="hik-rail-sign">+</span>
+                                <span class="hik-rail-text">Near</span>
+                              </button>
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus far" aria-label="Focus far">
+                                <ha-icon icon="mdi:arrow-collapse-horizontal"></ha-icon>
+                                <span class="hik-rail-sign">−</span>
+                                <span class="hik-rail-text">Far</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div class="hik-rail iris">
+                            <div class="hik-rail-head"><ha-icon icon="mdi:camera-iris"></ha-icon><span>Iris</span></div>
+                            <div class="hik-rail-stack horizontal">
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Open iris" aria-label="Open iris">
+                                <ha-icon icon="mdi:brightness-7"></ha-icon>
+                                <span class="hik-rail-sign">+</span>
+                                <span class="hik-rail-text">Open</span>
+                              </button>
+                              <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Close iris" aria-label="Close iris">
+                                <ha-icon icon="mdi:brightness-5"></ha-icon>
+                                <span class="hik-rail-sign">−</span>
+                                <span class="hik-rail-text">Close</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div class="hik-rail speed">
+                            <div class="hik-speed-wrap">
+                              <div class="hik-speed-label">
+                                <span>PTZ speed</span>
+                                <span class="hik-speed-value">${speed}</span>
+                              </div>
+                              <div class="hik-speed-track">
+                                <input id="hik-speed" type="range" min="1" max="100" step="1" value="${speed}">
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                </div>
 
 
 ${this.config.show_playback_panel !== false ? `
@@ -2820,6 +2603,8 @@ ${this.config.show_playback_panel !== false ? `
   </div>
 ` : ""}
 
+                ${this.renderPlaybackDebug(camAttrs.playback_debug || [])}
+
                 ${this.config.show_position_info !== false ? this.renderPTZIndicator() : ""}
 
                 <div style="margin-top:16px;">
@@ -2832,6 +2617,12 @@ ${this.config.show_playback_panel !== false ? `
                     }).join("") : `<span class="hik-mini-note">No presets configured</span>`}
                   </div>
                 </div>
+              ` : `
+                <div class="hik-empty" style="text-align:center;">
+                  <div style="margin-bottom:8px;">Controls hidden</div>
+                  <div class="hik-mini-note">Use the toggle at the top or on the video panel to reveal the control console.</div>
+                </div>
+              `}
             </div>
           </div>
 
@@ -2879,6 +2670,7 @@ ${this.config.show_playback_panel !== false ? `
     });
     this.querySelector("#hik-volume")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-audio-boost")?.addEventListener("input", (ev) => this._setAudioBoost(ev.target.value));
+    this.querySelector("#hik-mic-volume")?.addEventListener("input", (ev) => this._setMicVolume(ev.target.value));
 
     const holdTalkBtn = this.querySelector("#hik-talk-hold");
     if (holdTalkBtn) this._bindHoldTalkButton(holdTalkBtn);
@@ -2888,6 +2680,7 @@ ${this.config.show_playback_panel !== false ? `
       this._controlsVisible = !this._controlsVisible;
       this.render();
     };
+    this.querySelector("#hik-controls-toggle-top")?.addEventListener("click", toggleControls);
     this.querySelector("#hik-controls-toggle-middle")?.addEventListener("click", toggleControls);
 
     this.querySelectorAll(".ptz-btn").forEach((btn) => {
@@ -2917,39 +2710,10 @@ ${this.config.show_playback_panel !== false ? `
       const state = this.getPlaybackState();
       state.preset = Number(ev.target.value || 1);
     });
-    const debugDashboard = this.querySelector("#hik-debug-dashboard-details");
-    if (debugDashboard) {
-      debugDashboard.addEventListener("toggle", () => {
-        this._debugDashboardOpen = debugDashboard.open === true;
-      });
-    }
-    this.querySelectorAll("[data-debug-filter]").forEach((btn) => btn.addEventListener("click", (ev) => {
+    this.querySelectorAll("[data-debug-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      const target = ev.currentTarget;
-      this._toggleDebugFilter(target?.getAttribute("data-debug-filter"), target?.getAttribute("data-debug-value"));
-    }));
-    this.querySelectorAll("[data-debug-entry-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const container = ev.currentTarget.closest(".hik-debug-block");
-      const textarea = container?.querySelector(".hik-debug-textarea");
-      const text = textarea?.value || textarea?.textContent || "";
-      const action = ev.currentTarget.getAttribute("data-debug-entry-action");
-      if (action === "copy") this.copyDebugText(text);
-      if (action === "download") this.downloadDebugText(text, "hikvision-debug-entry");
-    }));
-    this.querySelectorAll("[data-debug-global-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const action = ev.currentTarget.getAttribute("data-debug-global-action");
-      const combined = this._getFilteredDebugEntries().map((entry) => this.formatDebugEntryText(entry)).join("\n\n");
-      if (action === "copy-all") this.copyDebugText(combined);
-      if (action === "download-all") this.downloadDebugText(combined, "hikvision-debug-dashboard");
-      if (action === "clear") {
-        this._debugEntries = (this._debugEntries || []).filter((entry) => entry.source === "backend");
-        this.render();
-      }
+      this.handleDebugAction(ev);
     }));
     this.querySelector("#hik-playback-start")?.addEventListener("click", () => this.startPlayback());
     this.querySelector("#hik-playback-stop")?.addEventListener("click", () => this.stopPlayback());
@@ -3042,15 +2806,12 @@ class HikvisionPTZCardEditor extends HTMLElement {
             ${this.rowCheckbox("show_status_pills", "Show status pills", this.config.show_status_pills !== false)}
             ${this.rowCheckbox("show_camera_info", "Show Camera Info", this.config.show_camera_info !== false)}
             ${this.rowCheckbox("show_stream_info", "Show Stream Info", this.config.show_stream_info !== false)}
-            ${this.rowCheckbox("show_stream_mode_info", "Show Stream Mode Info", this.config.show_stream_mode_info !== false)}
-            ${this.rowCheckbox("show_alarm_dashboard", "Show Alarm Dashboard", this.config.show_alarm_dashboard !== false)}
-            ${this.rowCheckbox("show_controls", "Show control console by default", this.config.show_controls !== false)}
             ${this.rowCheckbox("show_dvr_info", "Show NVR System Info", this.config.show_dvr_info !== false)}
             ${this.rowCheckbox("show_storage_info", "Show NVR Storage Info", this.config.show_storage_info !== false)}
             ${this.rowCheckbox("show_position_info", "Show PTZ position tracker", this.config.show_position_info !== false)}
             ${this.rowCheckbox("lens_stop_safeguard", "Enable lens stop safeguard", this.config.lens_stop_safeguard === true)}
             ${this.rowCheckbox("show_playback_panel", "Show playback controls", this.config.show_playback_panel !== false)}
-            ${this.rowCheckbox("debug_enabled", "Show unified debug dashboard", this.config.debug?.enabled === true)}
+            ${this.rowCheckbox("show_playback_debug", "Show playback debug panel (failed/non-200 only)", this.config.show_playback_debug === true)}
             ${this.rowCheckbox("show_audio_controls", "Show audio console", this.config.show_audio_controls !== false)}
             ${this.rowCheckbox("mute_during_talk", "Mute speaker while talking", this.config.mute_during_talk !== false)}
           </div>
@@ -3067,7 +2828,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "show_playback_debug", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
@@ -3096,19 +2857,13 @@ class HikvisionPTZCardEditor extends HTMLElement {
       show_status_pills: this.querySelector("#show_status_pills").checked,
       show_camera_info: this.querySelector("#show_camera_info").checked,
       show_stream_info: this.querySelector("#show_stream_info").checked,
-      show_stream_mode_info: this.querySelector("#show_stream_mode_info").checked,
-      show_alarm_dashboard: this.querySelector("#show_alarm_dashboard").checked,
-      show_controls: this.querySelector("#show_controls").checked,
       show_dvr_info: this.querySelector("#show_dvr_info").checked,
       show_storage_info: this.querySelector("#show_storage_info").checked,
       show_position_info: this.querySelector("#show_position_info").checked,
       lens_stop_safeguard: this.querySelector("#lens_stop_safeguard").checked,
       show_playback_panel: this.querySelector("#show_playback_panel").checked,
+      show_playback_debug: this.querySelector("#show_playback_debug").checked,
       show_audio_controls: this.querySelector("#show_audio_controls").checked,
-      debug: {
-        ...(this.config.debug || {}),
-        enabled: this.querySelector("#debug_enabled").checked,
-      },
       mute_during_talk: this.querySelector("#mute_during_talk").checked,
       ptz_steps: {
         pan: Number(this.querySelector("#max_pan_steps").value),
