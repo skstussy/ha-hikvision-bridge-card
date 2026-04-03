@@ -1,0 +1,7 @@
+{
+  "name": "Hikvision PTZ Card",
+  "content_in_root": true,
+  "filename": "hikvision-ptz-card.js",
+  "render_readme": true,
+  "version": "2.6.8"
+}
