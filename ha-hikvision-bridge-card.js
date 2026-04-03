@@ -3,7 +3,7 @@
 class HikvisionPTZCard extends HTMLElement {
   setConfig(config) {
     this.config = {
-      title: "Hikvision PTZ",
+      title: "ha-hikvision-bridge",
       speed: 50,
       lens_step: 60,
       repeat_ms: 350,
@@ -309,7 +309,7 @@ async _refreshBackendDebugEntries(force = false) {
   }
   this._backendDebugFetchInFlight = true;
   try {
-    const payload = { type: "hikvision_ptz/get_debug_events", limit: Number(this.config?.debug?.max_entries ?? 150) || 150 };
+    const payload = { type: "ha-hikvision-bridge/get_debug_events", limit: Number(this.config?.debug?.max_entries ?? 150) || 150 };
     if (cameraId) payload.camera_id = cameraId;
     const result = await this._hass.callWS(payload);
     const events = Array.isArray(result?.events) ? result.events : [];
@@ -578,7 +578,7 @@ _toggleDebugFilter(kind, value) {
     if (!this._hass) throw new Error("No HA connection");
 
     const result = await this._hass.callWS({
-      type: "hikvision_ptz/webrtc_url",
+      type: "ha-hikvision-bridge/webrtc_url",
       url: rtspUrl,
     });
     this._pushAudioDebug("signed_path_received", { hasPath: !!result?.path });
@@ -750,8 +750,8 @@ _toggleDebugFilter(kind, value) {
 
   static getStubConfig() {
     return {
-      type: "custom:hikvision-ptz-card",
-      title: "Hikvision PTZ",
+      type: "custom:ha-hikvision-bridge-card",
+      title: "ha-hikvision-bridge",
       auto_discover: true,
       controls_mode: "always",
       show_camera_info: true,
@@ -767,7 +767,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   static getConfigElement() {
-    return document.createElement("hikvision-ptz-card-editor");
+    return document.createElement("ha-hikvision-bridge-card-editor");
   }
 
   escapeHtml(value) {
@@ -1006,7 +1006,7 @@ _toggleDebugFilter(kind, value) {
     this.render();
 
     try {
-      await this._hass.callService("hikvision_ptz", "ptz_return_to_center", {
+      await this._hass.callService("ha-hikvision-bridge", "ptz_return_to_center", {
         channel: String(cam.channel),
         state,
         speed: Number(this.config.speed || 50),
@@ -1129,7 +1129,7 @@ _toggleDebugFilter(kind, value) {
       ? Number(this.config.speed || 50)
       : Number(this.config.lens_step || 60)));
 
-    this._hass.callService("hikvision_ptz", service, {
+    this._hass.callService("ha-hikvision-bridge", service, {
       channel: String(cam.channel),
       direction: Number(direction || 0),
       speed,
@@ -1145,7 +1145,7 @@ _toggleDebugFilter(kind, value) {
       window.setTimeout(() => {
         const activeCam = this.selectedCamera;
         if (!activeCam || String(activeCam.channel) !== String(cam.channel)) return;
-        this._hass.callService("hikvision_ptz", service, {
+        this._hass.callService("ha-hikvision-bridge", service, {
           channel: String(cam.channel),
           direction: 0,
           speed,
@@ -1175,7 +1175,7 @@ _toggleDebugFilter(kind, value) {
     const run = () => {
       const cam = this.selectedCamera;
       if (!cam || !this._hass || !this.canPtz() || this._returningHome) return;
-      this._hass.callService("hikvision_ptz", "ptz", {
+      this._hass.callService("ha-hikvision-bridge", "ptz", {
         channel: String(cam.channel),
         pan,
         tilt,
@@ -1205,7 +1205,7 @@ _toggleDebugFilter(kind, value) {
   gotoPreset(preset) {
     const cam = this.selectedCamera;
     if (!cam || !this._hass || !this.canPtz()) return;
-    this._hass.callService("hikvision_ptz", "goto_preset", {
+    this._hass.callService("ha-hikvision-bridge", "goto_preset", {
       channel: String(cam.channel),
       preset,
     });
@@ -1551,7 +1551,7 @@ async startPlayback(timestamp = null) {
   state.currentTime = requested;
   state.paused = false;
   this._pushDebug("playback", "info", "playback_start_requested", "Requested playback start", { requested_time: requested, entity_id: refs.camera }, "frontend");
-  await this._hass.callService("hikvision_ptz", "playback_seek", {
+  await this._hass.callService("ha-hikvision-bridge", "playback_seek", {
     entity_id: refs.camera,
     timestamp: requested,
   });
@@ -1565,7 +1565,7 @@ async stopPlayback() {
   const state = this.getPlaybackState(cam.channel);
   state.paused = false;
   this._pushDebug("playback", "warn", "playback_stop_requested", "Requested return to live mode", { entity_id: refs.camera }, "frontend");
-  await this._hass.callService("hikvision_ptz", "playback_stop", {
+  await this._hass.callService("ha-hikvision-bridge", "playback_stop", {
     entity_id: refs.camera,
   });
 }
@@ -2920,7 +2920,7 @@ ${this.config.show_playback_panel !== false ? `
     const streamModeSelect = this.querySelector("#streamMode");
     if (streamModeSelect && refs.camera) {
       streamModeSelect.addEventListener("change", (e) => {
-        this._hass.callService("hikvision_ptz", "set_stream_mode", {
+        this._hass.callService("ha-hikvision-bridge", "set_stream_mode", {
           entity_id: refs.camera,
           mode: e.target.value,
         });
@@ -2930,7 +2930,7 @@ ${this.config.show_playback_panel !== false ? `
     const streamProfileSelect = this.querySelector("#streamProfile");
     if (streamProfileSelect && refs.camera) {
       streamProfileSelect.addEventListener("change", (e) => {
-        this._hass.callService("hikvision_ptz", "set_stream_profile", {
+        this._hass.callService("ha-hikvision-bridge", "set_stream_profile", {
           entity_id: refs.camera,
           profile: e.target.value,
         });
@@ -3046,10 +3046,10 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const tint = Number(this.config.panel_tint ?? 8);
     this.innerHTML = `
       <div style="padding:16px;display:grid;gap:16px;">
-        <div style="font-size:18px;font-weight:700;">Hikvision PTZ Card Editor</div>
+        <div style="font-size:18px;font-weight:700;">ha-hikvision-bridge-card editor</div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "Hikvision PTZ"}" style="width:100%;"></div>
+          <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "ha-hikvision-bridge"}" style="width:100%;"></div>
           <div><label>Default speed</label><br><input id="speed" type="number" min="1" max="100" value="${this.config.speed || 50}" style="width:100%;"></div>
           <div><label>Repeat interval (ms)</label><br><input id="repeat_ms" type="number" min="100" value="${this.config.repeat_ms || 350}" style="width:100%;"></div>
           <div><label>PTZ pulse duration (ms)</label><br><input id="ptz_duration" type="number" min="100" value="${this.config.ptz_duration ?? 300}" style="width:100%;"></div>
@@ -3140,7 +3140,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
   _valueChanged() {
     const config = {
       ...this.config,
-      type: "custom:hikvision-ptz-card",
+      type: "custom:ha-hikvision-bridge-card",
       title: this.querySelector("#title").value,
       speed: Number(this.querySelector("#speed").value),
       repeat_ms: Number(this.querySelector("#repeat_ms").value),
@@ -3185,6 +3185,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("hikvision-ptz-card", HikvisionPTZCard);
+customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
 
-customElements.define("hikvision-ptz-card-editor", HikvisionPTZCardEditor);
+customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
