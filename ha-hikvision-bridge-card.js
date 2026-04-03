@@ -751,7 +751,7 @@ _toggleDebugFilter(kind, value) {
   static getStubConfig() {
     return {
       type: "custom:ha-hikvision-bridge-card",
-      title: "Hikvision PTZ",
+      title: "ha-hikvision-bridge-card",
       auto_discover: true,
       controls_mode: "always",
       show_camera_info: true,
