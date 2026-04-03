@@ -3,7 +3,7 @@
 class HikvisionPTZCard extends HTMLElement {
   setConfig(config) {
     this.config = {
-      title: "Hikvision PTZ",
+      title: "ha-hikvision-bridge-card",
       speed: 50,
       lens_step: 60,
       repeat_ms: 350,
