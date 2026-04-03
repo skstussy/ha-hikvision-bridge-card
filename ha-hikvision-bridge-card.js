@@ -73,6 +73,7 @@ class HikvisionPTZCard extends HTMLElement {
     this._talkActive = this._talkActive || false;
     this._talkHoldActive = this._talkHoldActive || false;
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
+    this._subscribeDebug();
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
