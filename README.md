@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="IMG/logo-main.png" alt="ha-hikvision-ptz-bridge-card banner" width="100%">
+  <img src="IMG/banner-small-ha-hikvision-bridge-card.png" alt="ha-hikvision-ptz-bridge-card banner" width="100%">
 </p>
 
 <p align="center">
-  <img src="IMG/hikvision-bridge-card.png" alt="ha-hikvision-bridge-card logo" width="90">
+  <img src="IMG/applogo-small-ha-hikvision-bridge-card" alt="ha-hikvision-bridge-card logo" width="90">
 </p>
 
 <h1 align="center">hikvision-bridge-card </h1>
