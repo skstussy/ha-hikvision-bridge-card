@@ -1,7 +1,7 @@
 {
-  "name": "ha-hikvision-bridge-card",
+  "name": "HA Hikvision Bridge Card",
   "content_in_root": true,
   "filename": "ha-hikvision-bridge-card.js",
   "render_readme": true,
-  "version": "1.0.0"
+  "version": "2.6.8"
 }
