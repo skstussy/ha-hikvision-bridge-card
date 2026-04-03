@@ -1,5 +1,5 @@
 {
-  "name": "Home Assistant - Hikvision Bridge Card",
+  "name": "ha-hikvision-bridge-card",
   "content_in_root": true,
   "filename": "hikvision-bridge-card.js",
   "render_readme": true,
