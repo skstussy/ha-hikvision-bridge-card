@@ -289,17 +289,6 @@ _syncBackendDebugEntries(debugEntries = []) {
   this._backendDebugIdSet = new Set(normalized.map((entry) => String(entry.idx)));
 }
 
-_scheduleBackendDebugRefresh(delayMs = 5000) {
-  if (this._backendDebugPollHandle) clearTimeout(this._backendDebugPollHandle);
-  if (!this.isDebugEnabled() || !this._hass) return;
-  this._backendDebugPollHandle = setTimeout(() => {
-    this._backendDebugPollHandle = null;
-    this._refreshBackendDebugEntries().catch((err) => {
-      this._pushDebug("backend", "error", "backend_debug_fetch_failed", "Unable to fetch backend debug events", { error: String(err?.message || err) }, "frontend");
-    });
-  }, Math.max(1500, Number(delayMs) || 5000));
-}
-
 async _refreshBackendDebugEntries(force = false) {
   if (!this.isDebugEnabled() || !this._hass || this._backendDebugFetchInFlight) return;
   const cameraId = this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : "";
