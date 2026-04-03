@@ -94,6 +94,11 @@ class HikvisionPTZCard extends HTMLElement {
 
 
   disconnectedCallback() {
+    if (typeof this._debugUnsubscribe === "function") {
+      try { this._debugUnsubscribe(); } catch (err) {}
+    }
+    this._debugUnsubscribe = null;
+    this._debugSubscribed = false;
     this.stopMove();
     this._videoSignature = null;
     this._talkRequested = false;
@@ -250,16 +255,16 @@ _subscribeDebug() {
       const event = msg?.event;
       if (!event) return;
 
-      const entry = this._normalizeDebugEvent ? this._normalizeDebugEvent(event) : event;
-
+      const entry = this._buildBackendDebugEntries([event])[0] || event;
       const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-      this._debugEntries = [...(this._debugEntries || []), entry].slice(-maxEntries);
+      const key = String(entry?.idx || `${entry?.time || ""}-${entry?.message || ""}`);
+      const existing = Array.isArray(this._debugEntries) ? this._debugEntries.filter((item) => String(item?.idx || `${item?.time || ""}-${item?.message || ""}`) !== key) : [];
+      this._debugEntries = [...existing, entry].slice(-maxEntries);
       this.requestUpdate?.();
       this.render?.();
     },
     {
-      type: "ha_hikvision_bridge/subscribe_debug",
-      camera_id: this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : undefined,
+      type: "ha_hikvision_bridge/subscribe_debug"
     }
   );
 }
