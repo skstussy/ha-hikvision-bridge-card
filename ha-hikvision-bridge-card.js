@@ -173,6 +173,8 @@ _pushDebugEntry(entry) {
     this._gridManualFocusUntil = Number.isFinite(this._gridManualFocusUntil) ? this._gridManualFocusUntil : 0;
     this._gridMotionFocusUntil = Number.isFinite(this._gridMotionFocusUntil) ? this._gridMotionFocusUntil : 0;
     this._gridVideoCards = this._gridVideoCards || new Map();
+    this._gridPendingFocusChannel = this._gridPendingFocusChannel || null;
+    this._gridFocusTransitionTimer = this._gridFocusTransitionTimer || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
   }
@@ -2781,7 +2783,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
   _scheduleMediaAudioSync(delay = 0) {
     if (this._gridMode) return;
-    if (this._gridMode) return;
     const runner = () => this._syncMediaAudio();
     if (delay > 0) {
       setTimeout(runner, delay);
@@ -2795,7 +2796,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
     }
     this._mediaSyncObserver = null;
-    if (this._gridMode) return;
     if (this._gridMode) return;
     if (!host || typeof MutationObserver === "undefined") return;
 
@@ -2946,7 +2946,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   _syncMediaAudio() {
-    if (this._gridMode) return;
     if (this._gridMode) return;
     const runSync = () => {
       const host = this.querySelector("#hikvision-video-host");
@@ -3389,6 +3388,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   _cleanupGridVideoCards() {
+    if (this._gridFocusTransitionTimer) {
+      clearTimeout(this._gridFocusTransitionTimer);
+      this._gridFocusTransitionTimer = null;
+    }
+    this._gridPendingFocusChannel = null;
     if (!(this._gridVideoCards instanceof Map)) {
       this._gridVideoCards = new Map();
       return;
@@ -3412,20 +3416,53 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     return active;
   }
 
+  _getPriorityMotionChannel(activeChannels = []) {
+    if (!Array.isArray(activeChannels) || !activeChannels.length) return "";
+    return String(activeChannels[activeChannels.length - 1] || "");
+  }
+
+  _updateGridAudioFocus() {
+    if (!(this._gridVideoCards instanceof Map)) return;
+    this._gridVideoCards.forEach((card, channel) => {
+      const media = this._findNestedMediaElement(card);
+      if (!media) return;
+      const isFocused = String(channel) === String(this._gridFocusChannel || "");
+      try {
+        media.muted = !isFocused || !this._speakerEnabled;
+        media.volume = isFocused && this._speakerEnabled ? this._getVideoVolumeFraction() : 0;
+        if (isFocused && this._speakerEnabled) {
+          const playPromise = media.play?.();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        }
+      } catch (err) {}
+    });
+  }
+
   _resolveGridFocusChannel() {
     const now = Date.now();
     if (this._gridManualFocusUntil > now && this._gridFocusChannel != null) return String(this._gridFocusChannel);
     const active = this._getMotionActiveChannels();
     if (active.length) {
-      const current = String(this._gridFocusChannel || "");
-      const next = String(active[0]);
-      if (!current || current === next || this._gridMotionFocusUntil <= now) {
-        this._gridFocusChannel = next;
+      const next = this._getPriorityMotionChannel(active);
+      if (next && String(next) !== String(this._gridFocusChannel || "")) {
+        this._gridPendingFocusChannel = String(next);
+        if (!this._gridFocusTransitionTimer) {
+          this._gridFocusTransitionTimer = setTimeout(() => {
+            this._gridFocusChannel = String(this._gridPendingFocusChannel || this._gridFocusChannel || next);
+            this._gridPendingFocusChannel = null;
+            this._gridMotionFocusUntil = Date.now() + 12000;
+            this._gridFocusTransitionTimer = null;
+            this.render();
+            setTimeout(() => this._updateGridAudioFocus(), 0);
+          }, 1200);
+        }
+      } else if (next) {
+        this._gridFocusChannel = String(next);
         this._gridMotionFocusUntil = now + 12000;
       }
-      return String(this._gridFocusChannel || next);
+      return String(this._gridFocusChannel || next || "");
     }
-    if (this._gridMotionFocusUntil > now && this._gridFocusChannel != null) return String(this._gridFocusChannel);
+    if (this._gridFocusTransitionTimer || this._gridMotionFocusUntil > now) return String(this._gridFocusChannel || "");
     const selected = this.selectedCamera;
     return selected?.channel != null ? String(selected.channel) : "";
   }
@@ -3447,6 +3484,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-grid-tile-overlay">
             <span class="hik-video-badge live-state"><ha-icon icon="mdi:cctv"></ha-icon>${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}</span>
             ${focused ? `<span class="hik-video-badge paused"><ha-icon icon="mdi:star-four-points-outline"></ha-icon>Focused</span>` : ""}
+            ${(focused && this._gridManualFocusUntil > Date.now()) ? `<span class="hik-video-badge paused"><ha-icon icon="mdi:lock"></ha-icon>Locked</span>` : ""}
             ${motionActive ? `<span class="hik-video-badge recording"><ha-icon icon="mdi:motion-sensor"></ha-icon>Motion</span>` : ""}
             ${!online ? `<span class="hik-video-badge paused"><ha-icon icon="mdi:lan-disconnect"></ha-icon>Offline</span>` : ""}
           </div>
@@ -3516,18 +3554,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           this._gridVideoCards.delete(key);
         }
       });
+      setTimeout(() => this._updateGridAudioFocus(), 120);
     }).catch(() => {});
   }
 
 
   render() {
-    if (this._gridMode) {
-      this._cleanupVideoCard?.();
-      this._videoSignature = null;
-      this.innerHTML = this._renderGridView();
-      setTimeout(() => this._mountGridStreams(), 0);
-      return;
-    }
     if (!this._hass) return;
     const cameras = this.cameras || [];
     const cam = this.selectedCamera;
@@ -3890,6 +3922,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-secondary-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; min-height:0; }
           .hik-grid-tile { position:relative; padding:0; margin:0; overflow:hidden; border-radius:18px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.08); cursor:pointer; box-shadow:0 12px 26px rgba(0,0,0,0.24); min-height:120px; transition:transform 140ms ease, box-shadow 150ms ease, border-color 150ms ease; outline:none; }
           .hik-grid-tile:hover, .hik-grid-tile:focus-visible { transform:translateY(-1px); }
+          .hik-grid-tile.promoted { transform:scale(1.002); }
+          .hik-grid-tile.motion { animation:hikGridMotionPulse 1.5s ease-out infinite; }
+          @keyframes hikGridMotionPulse {
+            0% { box-shadow:0 0 0 0 rgba(255,80,80,0.38), 0 12px 26px rgba(0,0,0,0.24); }
+            70% { box-shadow:0 0 0 12px rgba(255,80,80,0), 0 12px 26px rgba(0,0,0,0.24); }
+            100% { box-shadow:0 0 0 0 rgba(255,80,80,0), 0 12px 26px rgba(0,0,0,0.24); }
+          }
           .hik-grid-tile.promoted { min-height:0; height:100%; box-shadow:0 0 0 2px color-mix(in srgb, var(--hik-accent) 70%, white 10%), 0 16px 28px rgba(0,0,0,0.26); }
           .hik-grid-tile.secondary { min-height:120px; }
           .hik-grid-tile.focused { box-shadow:0 0 0 2px color-mix(in srgb, var(--hik-accent) 70%, white 10%), 0 12px 26px rgba(0,0,0,0.24); }
@@ -4481,8 +4520,14 @@ ${this.config.show_playback_panel !== false ? `
         if (idx >= 0) {
           this.selected = idx;
           this._gridFocusChannel = String(channel);
-          this._gridManualFocusUntil = Date.now() + 30000;
+          this._gridPendingFocusChannel = null;
+          if (this._gridFocusTransitionTimer) {
+            clearTimeout(this._gridFocusTransitionTimer);
+            this._gridFocusTransitionTimer = null;
+          }
+          this._gridManualFocusUntil = Date.now() + 45000;
           this.render();
+          setTimeout(() => this._updateGridAudioFocus(), 0);
         }
       };
       btn.addEventListener("click", focusHandler);
@@ -4785,4 +4830,4 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
 
-/* FINAL GRID PATCH */
+/* phase3 premium grid intelligence applied on 1.2.7 */
