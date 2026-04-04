@@ -1594,7 +1594,6 @@ _toggleDebugFilter(kind, value) {
   }
 
   refsForChannel(channel) {
-    const selected = this.selectedCamera;
     return {
       info: this.findEntityForChannel(channel, "info"),
       stream: this.findEntityForChannel(channel, "stream"),
@@ -1605,7 +1604,7 @@ _toggleDebugFilter(kind, value) {
       intrusion: this.findEntityForChannel(channel, "intrusion"),
       lineCrossing: this.findEntityForChannel(channel, "line_crossing"),
       tamper: this.findEntityForChannel(channel, "tamper"),
-      camera: selected?.camera_entity || this.findEntityForChannel(channel, "camera"),
+      camera: this.findEntityForChannel(channel, "camera"),
     };
   }
 
@@ -2781,6 +2780,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
 
   _scheduleMediaAudioSync(delay = 0) {
+    if (this._gridMode) return;
     const runner = () => this._syncMediaAudio();
     if (delay > 0) {
       setTimeout(runner, delay);
@@ -2794,6 +2794,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
     }
     this._mediaSyncObserver = null;
+    if (this._gridMode) return;
     if (!host || typeof MutationObserver === "undefined") return;
 
     const sync = () => this._syncMediaAudio();
@@ -2943,6 +2944,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   _syncMediaAudio() {
+    if (this._gridMode) return;
     const runSync = () => {
       const host = this.querySelector("#hikvision-video-host");
       const mediaElement = this._findNestedMediaElement(host);
@@ -2976,6 +2978,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
   _setSpeakerEnabled(enabled) {
     this._speakerEnabled = Boolean(enabled);
+    if (this._gridMode) {
+      this.render();
+      return;
+    }
     const host = this.querySelector("#hikvision-video-host");
     const mediaElement = this._audioGraphElement || this._findNestedMediaElement(host);
     this._pushAudioDebug("speaker_toggle", {
@@ -3046,7 +3052,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   _setVolume(value) {
     this._volume = Math.max(0, Math.min(100, Number(value) || 0));
     this._syncAudioGraphState();
-    this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
+    if (!this._gridMode) this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
     const label = this.querySelector(".hik-volume-value");
     if (label) label.textContent = `${Math.round(this._volume)}%`;
   }
@@ -3079,7 +3085,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       this._talkLatched = false;
       this._stopTalkbackDirect();
       this._syncAudioGraphState();
-      this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
+      if (!this._gridMode) this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
       this.render();
       return;
     }
@@ -3096,7 +3102,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
     this._syncAudioGraphState();
-    this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
+    if (!this._gridMode) this._applyAudioFallback(this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host")));
     this.render();
   }
 
@@ -3247,6 +3253,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   renderVideo(cameraEntityId, rtspUrl, directRtspUrl, streamMode, playbackUri = "", playbackPaused = false) {
+    if (this._gridMode) {
+      if (this._videoCard || this._videoSignature) this._cleanupVideoCard();
+      this._videoSignature = null;
+      return;
+    }
     const host = this.querySelector("#hikvision-video-host");
     if (!host) return;
 
@@ -4761,3 +4772,5 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid-motion-focus phase2 promoted layout applied on 1.2.7 */
 
 /* grid focus layout bugfix applied on 1.2.7 */
+
+/* grid focus stability + audio sync suppression applied on 1.2.7 */
