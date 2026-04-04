@@ -1025,7 +1025,7 @@ _toggleDebugFilter(kind, value) {
                       <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
                       <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
                       <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
-                    </button>`;
+                    </div>`;
                 }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
               </div>
             </div>
@@ -3428,7 +3428,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       const motionActive = motionEntity?.state === "on";
       const online = onlineEntity ? onlineEntity.state === "on" : true;
       return `
-        <button type="button" class="hik-grid-tile ${focused ? "focused promoted" : "secondary"} ${motionActive ? "motion" : ""}" data-grid-focus="${this.escapeHtml(String(gridCam.channel))}" title="${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}">
+        <div class="hik-grid-tile ${focused ? "focused promoted" : "secondary"} ${motionActive ? "motion" : ""}" data-grid-focus="${this.escapeHtml(String(gridCam.channel))}" title="${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}" role="button" tabindex="0">
           <div class="hik-grid-media-host" id="hik-grid-host-${this.escapeHtml(String(gridCam.channel))}"></div>
           <div class="hik-grid-tile-overlay">
             <span class="hik-video-badge live-state"><ha-icon icon="mdi:cctv"></ha-icon>${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}</span>
@@ -3440,7 +3440,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             <span>CH ${this.escapeHtml(String(gridCam.channel))}</span>
             <span>${focused ? "Primary view" : "Tap to focus"}</span>
           </div>
-        </button>`;
+        </div>`;
     };
     return `
       <div class="hik-grid-view promoted" id="hik-grid-view">
@@ -3482,6 +3482,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             show_state: false,
           });
           card.hass = this._hass;
+          card.style.display = "block";
+          card.style.width = "100%";
+          card.style.height = "100%";
           host.innerHTML = "";
           host.appendChild(card);
           this._gridVideoCards.set(channel, card);
@@ -3859,20 +3862,21 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
-          .hik-grid-view { position:absolute; inset:0; display:grid; grid-template-rows:minmax(0, 1.5fr) auto; gap:10px; padding:10px; background:rgba(0,0,0,0.18); }
-          .hik-grid-view.promoted { grid-template-rows:minmax(0, 1.6fr) auto; }
-          .hik-grid-primary { min-height:0; }
-          .hik-grid-secondary-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; min-height:120px; }
-          .hik-grid-tile { position:relative; border:none; padding:0; margin:0; overflow:hidden; border-radius:18px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.08); cursor:pointer; box-shadow:0 12px 26px rgba(0,0,0,0.24); min-height:140px; transition:transform 140ms ease, box-shadow 150ms ease, border-color 150ms ease; }
-          .hik-grid-tile:hover { transform:translateY(-1px); }
+          .hik-grid-view { position:absolute; inset:0; display:grid; grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); gap:10px; padding:10px; background:rgba(0,0,0,0.18); }
+          .hik-grid-view.promoted { grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); }
+          .hik-grid-primary { min-height:0; position:relative; }
+          .hik-grid-primary .hik-grid-tile { height:100%; min-height:0; }
+          .hik-grid-secondary-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; min-height:0; }
+          .hik-grid-tile { position:relative; padding:0; margin:0; overflow:hidden; border-radius:18px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.08); cursor:pointer; box-shadow:0 12px 26px rgba(0,0,0,0.24); min-height:120px; transition:transform 140ms ease, box-shadow 150ms ease, border-color 150ms ease; outline:none; }
+          .hik-grid-tile:hover, .hik-grid-tile:focus-visible { transform:translateY(-1px); }
           .hik-grid-tile.promoted { min-height:0; height:100%; box-shadow:0 0 0 2px color-mix(in srgb, var(--hik-accent) 70%, white 10%), 0 16px 28px rgba(0,0,0,0.26); }
           .hik-grid-tile.secondary { min-height:120px; }
           .hik-grid-tile.focused { box-shadow:0 0 0 2px color-mix(in srgb, var(--hik-accent) 70%, white 10%), 0 12px 26px rgba(0,0,0,0.24); }
           .hik-grid-tile.motion { box-shadow:0 0 0 2px rgba(255,80,80,0.55), 0 12px 26px rgba(0,0,0,0.24); }
           .hik-grid-tile.promoted.motion { box-shadow:0 0 0 2px rgba(255,80,80,0.75), 0 16px 28px rgba(0,0,0,0.26); }
-          .hik-grid-media-host { position:absolute; inset:0; }
+          .hik-grid-media-host { position:absolute; inset:0; display:block; }
           .hik-grid-media-host > * { width:100%; height:100%; display:block; }
-          .hik-grid-media-host video, .hik-grid-media-host img, .hik-grid-media-host iframe { width:100%; height:100%; object-fit:cover; background:#000; }
+          .hik-grid-media-host hui-image, .hik-grid-media-host ha-card, .hik-grid-media-host img, .hik-grid-media-host video, .hik-grid-media-host iframe { width:100% !important; height:100% !important; object-fit:cover; background:#000; }
           .hik-grid-tile-overlay { position:absolute; inset:8px 8px auto 8px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:1; }
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
@@ -4056,6 +4060,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-media-topcenter { top:6px; }
             .hik-grid-view { grid-template-rows:minmax(0, 1.4fr) auto; gap:8px; padding:8px; }
             .hik-grid-secondary-row { grid-template-columns:1fr 1fr; gap:8px; }
+            .hik-grid-view.promoted { grid-template-rows:minmax(0, 1fr) minmax(96px, 28%); }
             .hik-video-media-topright { top:46px; gap:6px; max-width:calc(100% - 12px); }
             .hik-video-audio-state { font-size:11px; }
             .hik-video-volume-rail.compact { min-width:132px; }
@@ -4212,7 +4217,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
                     </div>
-                    ${(!playbackActive && !this._playbackOverlayVisible) ? `
+                    ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
                           <span>Mode</span>
@@ -4338,7 +4343,7 @@ ${this.config.show_playback_panel !== false ? `
                     ${presets.length ? presets.map((p) => {
                       const pid = typeof p === "object" ? p.id : p;
                       const pname = typeof p === "object" ? (p.name || `Preset ${p.id}`) : `Preset ${p}`;
-                      return `<button type="button" class="hik-btn hik-preset-btn preset-btn" data-preset="${pid}" ${ptz ? "" : "disabled"}>${this.escapeHtml(pname)}</button>`;
+                      return `<button type="button" class="hik-btn hik-preset-btn preset-btn" data-preset="${pid}" ${ptz ? "" : "disabled"}>${this.escapeHtml(pname)}</div>`;
                     }).join("") : `<span class="hik-mini-note">No presets configured</span>`}
                   </div>
                 </div>
@@ -4445,19 +4450,25 @@ ${this.config.show_playback_panel !== false ? `
       }
       this.render();
     });
-    this.querySelectorAll("[data-grid-focus]").forEach((btn) => btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const channel = ev.currentTarget?.getAttribute("data-grid-focus") || "";
-      const cams = this.cameras || [];
-      const idx = cams.findIndex((item) => String(item.channel) === String(channel));
-      if (idx >= 0) {
-        this.selected = idx;
-        this._gridFocusChannel = String(channel);
-        this._gridManualFocusUntil = Date.now() + 30000;
-        this.render();
-      }
-    }));
+    this.querySelectorAll("[data-grid-focus]").forEach((btn) => {
+      const focusHandler = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const channel = ev.currentTarget?.getAttribute("data-grid-focus") || "";
+        const cams = this.cameras || [];
+        const idx = cams.findIndex((item) => String(item.channel) === String(channel));
+        if (idx >= 0) {
+          this.selected = idx;
+          this._gridFocusChannel = String(channel);
+          this._gridManualFocusUntil = Date.now() + 30000;
+          this.render();
+        }
+      };
+      btn.addEventListener("click", focusHandler);
+      btn.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") focusHandler(ev);
+      });
+    });
     if (this._gridMode) {
       window.setTimeout(() => this._mountGridStreams(), 0);
     } else {
@@ -4748,3 +4759,5 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid-motion-focus phase1 patch applied on 1.2.7 */
 
 /* grid-motion-focus phase2 promoted layout applied on 1.2.7 */
+
+/* grid focus layout bugfix applied on 1.2.7 */
