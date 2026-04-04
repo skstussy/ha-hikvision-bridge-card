@@ -94,7 +94,16 @@ class HikvisionPTZCard extends HTMLElement {
   }
 
 
-  disconnectedCallback() {
+  dis
+  firstUpdated() {
+    this._audioEl = document.createElement('audio');
+    this._audioEl.autoplay = true;
+    this._audioEl.muted = false;
+    this._audioEl.style.display = 'none';
+    this.shadowRoot.appendChild(this._audioEl);
+  }
+
+connectedCallback() {
     if (typeof this._debugUnsubscribe === "function") {
       try { this._debugUnsubscribe(); } catch (err) {}
     }
