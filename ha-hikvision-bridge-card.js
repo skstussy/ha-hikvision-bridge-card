@@ -889,14 +889,14 @@ _toggleDebugFilter(kind, value) {
       <div class="hik-debug-snapshot-grid">
         <span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(snapshot.channel || "-")}</span>
         <span class="hik-pill ${snapshot.online ? "good" : "warn"}"><ha-icon icon="mdi:lan-connect"></ha-icon>${snapshot.online ? "Online" : "Offline"}</span>
-        <span class="hik-pill ${snapshot.ptz_supported ? "good" : "neutral"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_supported))}</span>
-        <span class="hik-pill ${snapshot.webrtc_overlay_active ? "good" : "neutral"}"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC PTZ ${this.escapeHtml(String(snapshot.webrtc_overlay_active))}</span>
+        <span class="hik-pill ${snapshot.ptz_supported ? "good" : "neutral"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${snapshot.ptz_supported ? "Ready" : "Off"}</span>
+        <span class="hik-pill ${snapshot.webrtc_overlay_active ? "good" : "neutral"}"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>Overlay ${this.escapeHtml(String(snapshot.webrtc_overlay_active))}</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:speedometer"></ha-icon>Speed ${this.escapeHtml(String(snapshot.speed || "-"))}</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_duration || "-"))}ms</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.escapeHtml(String(snapshot.lens_duration || "-"))}ms</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:play-network-outline"></ha-icon>${this.escapeHtml(snapshot.stream_mode || "auto")}</span>
-        <span class="hik-pill neutral"><ha-icon icon="mdi:volume-high"></ha-icon>Speaker ${this.escapeHtml(String(snapshot.speaker_enabled))}</span>
-        <span class="hik-pill neutral"><ha-icon icon="mdi:microphone"></ha-icon>Talk ${this.escapeHtml(String(snapshot.talk_active))}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:volume-high"></ha-icon>Speaker ${snapshot.speaker_enabled ? "On" : "Off"}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:microphone"></ha-icon>Talk ${snapshot.talk_active ? "Live" : "Idle"}</span>
       </div>`;
   }
 
@@ -3772,47 +3772,60 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-audio-note.fill { height:100%; }
           .hik-debug-overview { display:grid; gap:12px; }
           .hik-debug-console-shell { margin-top:14px; border:1px solid rgba(255,255,255,0.08); border-radius:18px; background: color-mix(in srgb, var(--secondary-background-color) 88%, rgba(0,0,0,0.18)); overflow:hidden; }
-          .hik-debug-toolbar { position:sticky; top:0; z-index:2; display:grid; gap:10px; padding:12px; margin:0; border-bottom:1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 92%, rgba(0,0,0,0.08)), color-mix(in srgb, var(--card-background-color) 96%, rgba(0,0,0,0.18))); backdrop-filter: blur(10px); }
+          .hik-debug-dashboard { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:24px; background:linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 95%, var(--hik-accent) 5%), color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 20px 36px rgba(0,0,0,0.22); overflow:hidden; }
+          .hik-debug-dashboard details { display:grid; gap:0; }
+          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px 12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.08)); }
+          .hik-debug-summary::-webkit-details-marker { display:none; }
+          .hik-debug-warning-banner { margin:0 14px 12px; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:16px; border:1px solid rgba(245,166,35,0.28); background:linear-gradient(180deg, rgba(245,166,35,0.12), rgba(245,166,35,0.08)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); color:var(--primary-text-color); }
+          .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
+          .hik-debug-overview { padding:0 14px 14px; display:grid; gap:12px; }
+          .hik-debug-snapshot-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+          .hik-debug-overview .hik-pill { min-height:32px; padding:0 12px; border-radius:999px; background:rgba(12,16,22,0.28); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); box-shadow:0 8px 22px rgba(0,0,0,0.18); }
+          .hik-debug-console-shell { margin:0 14px 14px; border-radius:20px; border:1px solid rgba(255,255,255,0.08); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.10)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); overflow:hidden; }
+          .hik-debug-toolbar { position:sticky; top:0; z-index:2; display:grid; gap:10px; padding:14px; margin:0; border-bottom:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(12,16,22,0.72), rgba(12,16,22,0.52)); backdrop-filter:blur(14px) saturate(1.08); }
           .hik-debug-toolbar-head { display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap:wrap; }
-          .hik-debug-search-wrap { display:flex; align-items:center; gap:8px; min-width:260px; flex:1 1 320px; padding:0 12px; min-height:40px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.20); }
-          .hik-debug-search-wrap ha-icon { --mdc-icon-size:18px; opacity:0.7; }
+          .hik-debug-search-wrap { display:flex; align-items:center; gap:8px; min-width:260px; flex:1 1 320px; padding:0 14px; min-height:42px; border-radius:14px; border:1px solid rgba(255,255,255,0.10); background:rgba(10,14,20,0.36); backdrop-filter:blur(12px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+          .hik-debug-search-wrap ha-icon { --mdc-icon-size:18px; opacity:0.72; color:var(--hik-accent); }
           .hik-debug-search { width:100%; border:0; outline:none; background:transparent; color:inherit; font-size:13px; }
-          .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); }
-          .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:10px 12px; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); }
+          .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.06); }
+          .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:12px 14px; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.02)); position:sticky; top:0; z-index:1; backdrop-filter:blur(8px); }
           .hik-debug-feed { max-height:460px; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
-          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:10px 12px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:transparent; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
-          .hik-debug-row:hover { background:rgba(255,255,255,0.04); }
-          .hik-debug-row.selected { background:rgba(255,255,255,0.07); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 70%, #ffffff 10%); }
-          .hik-debug-row.is-error { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--error-color) 60%, transparent); }
-          .hik-debug-row.is-warn { box-shadow: inset 2px 0 0 rgba(245, 166, 35, 0.7); }
+          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
+          .hik-debug-row:hover { background:rgba(255,255,255,0.05); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
+          .hik-debug-row.selected { background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.035)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hik-accent) 72%, #ffffff 8%), 0 0 0 1px rgba(255,255,255,0.04); }
+          .hik-debug-row.is-error { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--error-color) 60%, transparent); background:linear-gradient(180deg, rgba(255,70,70,0.05), rgba(255,255,255,0.01)); }
+          .hik-debug-row.is-warn { box-shadow: inset 2px 0 0 rgba(245, 166, 35, 0.7); background:linear-gradient(180deg, rgba(245,166,35,0.05), rgba(255,255,255,0.01)); }
           .hik-debug-row.is-info { box-shadow: inset 2px 0 0 rgba(90, 169, 255, 0.55); }
           .hik-debug-row.is-debug { box-shadow: inset 2px 0 0 rgba(255,255,255,0.12); }
           .hik-debug-cell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
-          .hik-debug-event-cell { font-weight:600; }
+          .hik-debug-event-cell { font-weight:700; }
           .hik-debug-message-cell { opacity:0.86; }
           .hik-debug-time-cell, .hik-debug-cam-cell { opacity:0.72; font-variant-numeric: tabular-nums; }
-          .hik-debug-level-badge { display:inline-flex; align-items:center; justify-content:center; min-width:68px; padding:4px 8px; border-radius:999px; font-size:10px; letter-spacing:0.06em; font-weight:700; border:1px solid rgba(255,255,255,0.10); background:rgba(255,255,255,0.06); }
-          .hik-debug-level-badge.is-error { background:color-mix(in srgb, var(--error-color) 20%, transparent); border-color:color-mix(in srgb, var(--error-color) 45%, transparent); }
-          .hik-debug-level-badge.is-warn { background:rgba(245, 166, 35, 0.18); border-color:rgba(245, 166, 35, 0.32); }
-          .hik-debug-level-badge.is-info { background:rgba(90, 169, 255, 0.14); border-color:rgba(90, 169, 255, 0.28); }
-          .hik-debug-level-badge.is-debug { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.14); }
-          .hik-debug-detail-pane { display:grid; gap:10px; padding:14px 12px 12px; border-top:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.10)); }
+          .hik-debug-level-badge { display:inline-flex; align-items:center; justify-content:center; min-width:68px; padding:4px 8px; border-radius:999px; font-size:10px; letter-spacing:0.06em; font-weight:700; border:1px solid rgba(255,255,255,0.10); background:rgba(255,255,255,0.06); backdrop-filter:blur(8px); box-shadow:0 8px 20px rgba(0,0,0,0.14); }
+          .hik-debug-level-badge.is-error { background:color-mix(in srgb, var(--error-color) 18%, rgba(10,14,20,0.26)); border-color:color-mix(in srgb, var(--error-color) 45%, transparent); }
+          .hik-debug-level-badge.is-warn { background:rgba(245, 166, 35, 0.16); border-color:rgba(245, 166, 35, 0.28); }
+          .hik-debug-level-badge.is-info { background:rgba(90, 169, 255, 0.14); border-color:rgba(90, 169, 255, 0.24); }
+          .hik-debug-level-badge.is-debug { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10); }
+          .hik-debug-detail-pane { display:grid; gap:12px; padding:16px 14px 14px; border-top:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.12)); }
           .hik-debug-detail-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
           .hik-debug-detail-title { display:grid; gap:4px; }
           .hik-debug-detail-kicker { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.62; }
           .hik-debug-detail-name { font-size:15px; font-weight:700; }
-          .hik-debug-detail-message { font-size:13px; line-height:1.45; opacity:0.9; }
+          .hik-debug-detail-message { font-size:13px; line-height:1.45; opacity:0.9; padding:10px 12px; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); }
           .hik-debug-nested-details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
-          .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; padding:10px; border-radius:12px; background:rgba(0,0,0,0.28); }
+          .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.38; padding:12px; border-radius:14px; background:rgba(10,14,20,0.40); border:1px solid rgba(255,255,255,0.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
           .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:0; }
-          .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
-          .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
-          .hik-debug-textarea { width:100%; min-height:120px; max-height:200px; margin-top:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
-          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
-          .hik-debug-summary::-webkit-details-marker { display:none; }
+          .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(10,14,20,0.34); color:inherit; border-radius:12px; padding:7px 12px; font-size:12px; cursor:pointer; backdrop-filter:blur(10px); box-shadow:0 8px 20px rgba(0,0,0,0.16); transition:transform 120ms ease, background 150ms ease, border-color 150ms ease; }
+          .hik-debug-btn:hover { background:rgba(14,20,28,0.44); transform:translateY(-1px); }
+          .hik-debug-btn.is-active { background:rgba(245,166,35,0.14); border-color:rgba(245,166,35,0.28); }
+          .hik-debug-new-badge { display:inline-flex; align-items:center; min-height:32px; padding:0 11px; border-radius:999px; background:rgba(245,166,35,0.14); border:1px solid rgba(245,166,35,0.28); font-size:12px; backdrop-filter:blur(10px); }
+          .hik-debug-textarea { width:100%; min-height:120px; max-height:200px; margin-top:0; padding:12px; border-radius:14px; border:1px solid rgba(255,255,255,0.10); background:rgba(10,14,20,0.42); color:inherit; font-size:11px; line-height:1.38; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
           .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
-          .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; }
-          .hik-debug-chip.active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.22); }
+          .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(10,14,20,0.28); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; backdrop-filter:blur(8px); transition:background 150ms ease, border-color 150ms ease, transform 120ms ease; }
+          .hik-debug-chip:hover { transform:translateY(-1px); background:rgba(14,20,28,0.38); }
+          .hik-debug-chip.active { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.20); }
           @media (max-width: 980px) {
             .hik-debug-list-head, .hik-debug-row { grid-template-columns: 92px 92px 96px 1.15fr 1.6fr 72px; gap:8px; }
           }
