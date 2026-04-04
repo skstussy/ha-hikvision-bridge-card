@@ -504,7 +504,8 @@ getUserMedia({
       pc.addEventListener("iceconnectionstatechange", () => this._setAudioDebugStatus({ ice: pc.iceConnectionState || "unknown" }));
       pc.addEventListener("signalingstatechange", () => this._setAudioDebugStatus({ signaling: pc.signalingState || "unknown" }));
       this._pushAudioDebug("pc_created", {});
-      this._talkStream.getTracks().forEach((track) => pc.addTrack(track, this._talkStream));
+      this._talkStream.getTracks().forEach((track) => pcthis._addTalkDebugEntry('info','adding track');
+    .addTrack(track, this._talkStream));
 
       const offer = await pc.createOffer({
         offerToReceiveAudio: false,
@@ -542,7 +543,9 @@ getUserMedia({
               this._pushAudioDebug("server_error", { error: msg.value || "unknown" });
             }
             if (msg.type === "webrtc/candidate" && msg.value) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(msg.value)); } catch (e) {}
+              try { await pc.addIceCandidate(new RTCIceCandidate(msg.value)); } catch (e) {
+    this._addTalkDebugEntry('error','exception', e);
+ {}
             }
           } catch (err) {
             cleanup();
