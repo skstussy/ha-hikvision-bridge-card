@@ -2,34 +2,6 @@
 
 class HikvisionPTZCard extends HTMLElement {
 
-  // === TALK DEBUG SYSTEM ===
-  _talkDebugEnabled = true;
-  _talkDebugEntries = [];
-
-  _addTalkDebugEntry(level, message, data = null) {
-    const entry = {
-      ts: new Date().toISOString(),
-      level,
-      message,
-      data
-    };
-    this._talkDebugEntries = [...this._talkDebugEntries, entry].slice(-50);
-    this.requestUpdate();
-  }
-
-  _renderTalkDebug() {
-    if (!this._talkDebugEnabled) return null;
-    return html`
-${this._renderTalkDebug()}
-      <div class="talk-debug">
-        <div><b>Talk Debug</b></div>
-        ${this._talkDebugEntries.map(e => html`
-          <div>[${e.level}] ${e.message}</div>
-        `)}
-      </div>
-    `;
-  }
-
   setConfig(config) {
     this.config = {
       title: "ha-hikvision-bridge-card",
@@ -487,31 +459,55 @@ _toggleDebugFilter(kind, value) {
       if (!rtspUrl) throw new Error("No RTSP URL available for talkback");
       this._pushAudioDebug("rtsp_selected", { rtspUrl });
 
-      this._talkStream = await navigator.mediaDevices.this._addTalkDebugEntry('info','request mic');
-getUserMedia({
+      const micConstraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
         video: false,
-      });
+      };
+      this._pushAudioDebug("mic_request", { constraints: micConstraints });
+      this._talkStream = await navigator.mediaDevices.getUserMedia(micConstraints);
       this._setAudioDebugStatus({ mic: "granted" });
       this._pushAudioDebug("mic_granted", { trackCount: this._talkStream?.getTracks?.().length || 0 });
 
       const pc = new RTCPeerConnection();
-      pc.addEventListener("connectionstatechange", () => this._setAudioDebugStatus({ pc: pc.connectionState || "unknown" }));
-      pc.addEventListener("iceconnectionstatechange", () => this._setAudioDebugStatus({ ice: pc.iceConnectionState || "unknown" }));
-      pc.addEventListener("signalingstatechange", () => this._setAudioDebugStatus({ signaling: pc.signalingState || "unknown" }));
+      pc.addEventListener("connectionstatechange", () => {
+        const state = pc.connectionState || "unknown";
+        this._setAudioDebugStatus({ pc: state });
+        this._pushAudioDebug("pc_state", { state });
+      });
+      pc.addEventListener("iceconnectionstatechange", () => {
+        const state = pc.iceConnectionState || "unknown";
+        this._setAudioDebugStatus({ ice: state });
+        this._pushAudioDebug("ice_state", { state });
+      });
+      pc.addEventListener("signalingstatechange", () => {
+        const state = pc.signalingState || "unknown";
+        this._setAudioDebugStatus({ signaling: state });
+        this._pushAudioDebug("signaling_state", { state });
+      });
       this._pushAudioDebug("pc_created", {});
-      this._talkStream.getTracks().forEach((track) => pcthis._addTalkDebugEntry('info','adding track');
-    .addTrack(track, this._talkStream));
+      this._talkStream.getTracks().forEach((track) => {
+        const sender = pc.addTrack(track, this._talkStream);
+        this._pushAudioDebug("track_added", {
+          kind: track.kind,
+          id: track.id,
+          enabled: track.enabled,
+          muted: typeof track.muted === "boolean" ? track.muted : undefined,
+          readyState: track.readyState,
+          sender: !!sender,
+        });
+      });
 
       const offer = await pc.createOffer({
         offerToReceiveAudio: false,
         offerToReceiveVideo: false,
       });
+      this._pushAudioDebug("offer_created", { hasSdp: !!offer?.sdp, type: offer?.type || "offer" });
       await pc.setLocalDescription(offer);
+      this._pushAudioDebug("local_description_set", { type: pc.localDescription?.type || "", hasSdp: !!pc.localDescription?.sdp });
 
       const wsUrl = await this._getSignedWebRtcUrl(rtspUrl);
       this._pushAudioDebug("signed_ws_url", { wsUrl });
@@ -535,6 +531,7 @@ getUserMedia({
             if (msg.type === "webrtc/answer") {
               this._pushAudioDebug("answer_received", {});
               await pc.setRemoteDescription({ type: "answer", sdp: msg.value });
+              this._pushAudioDebug("remote_description_set", { type: "answer", hasSdp: !!msg.value });
               cleanup();
               resolve();
               return;
@@ -543,9 +540,16 @@ getUserMedia({
               this._pushAudioDebug("server_error", { error: msg.value || "unknown" });
             }
             if (msg.type === "webrtc/candidate" && msg.value) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(msg.value)); } catch (e) {
-    this._addTalkDebugEntry('error','exception', e);
- {}
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(msg.value));
+                this._pushAudioDebug("ice_candidate_received", {
+                  candidate: msg.value?.candidate || "",
+                  sdpMid: msg.value?.sdpMid || "",
+                  sdpMLineIndex: msg.value?.sdpMLineIndex,
+                });
+              } catch (e) {
+                this._pushAudioDebug("ice_candidate_failed", { error: String(e?.message || e) });
+              }
             }
           } catch (err) {
             cleanup();
@@ -564,6 +568,13 @@ getUserMedia({
       pc.onicecandidate = (event) => {
         if (event.candidate && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "webrtc/candidate", value: event.candidate }));
+          this._pushAudioDebug("ice_candidate_sent", {
+            candidate: event.candidate?.candidate || "",
+            sdpMid: event.candidate?.sdpMid || "",
+            sdpMLineIndex: event.candidate?.sdpMLineIndex,
+          });
+        } else if (!event.candidate) {
+          this._pushAudioDebug("ice_gathering_complete", {});
         }
       };
 
@@ -678,7 +689,12 @@ getUserMedia({
   }
 
   _stopTalkbackDirect() {
-    this._pushAudioDebug("talk_stop", {});
+    this._pushAudioDebug("talk_stop", {
+      hadWs: !!this._talkWs,
+      hadPc: !!this._talkPc,
+      hadStream: !!this._talkStream,
+      active: !!this._talkActive,
+    });
     this._setAudioDebugStatus({ requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable" });
     try {
       if (this._talkWs) {
