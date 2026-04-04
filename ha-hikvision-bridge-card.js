@@ -159,6 +159,10 @@ _pushDebugEntry(entry) {
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
     this._debugEntries = Array.isArray(this._debugEntries) ? this._debugEntries : [];
+    this._debugPaused = this._debugPaused ?? false;
+    this._debugVisibleEntries = Array.isArray(this._debugVisibleEntries) ? this._debugVisibleEntries : [];
+    this._debugPendingCount = Number.isFinite(this._debugPendingCount) ? this._debugPendingCount : 0;
+    this._debugFlushTimer = this._debugFlushTimer || null;
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
@@ -179,7 +183,7 @@ _pushDebugEntry(entry) {
   set hass(hass) {
     this._hass = hass;
     if (this._videoCard) this._videoCard.hass = hass;
-    this.render();
+    this._scheduleDebugRefresh();
     if (!this._debugSubscribed) {
     this._subscribeDebug();
   }
@@ -298,7 +302,7 @@ _pushDebugEntry(entry) {
   _setPlaybackRate(value) {
     const parsed = Number(value || 2);
     this._playbackRate = [2,5,10,20].includes(parsed) ? parsed : 2;
-    this.render();
+    this._scheduleDebugRefresh();
   }
 
   _seekPlaybackHold(direction = 1) {
@@ -1108,16 +1112,52 @@ _toggleDebugFilter(kind, value) {
     return entry?.details?.trace_id || "";
   }
 
+
+  _scheduleDebugRefresh() {
+    if (this._debugPaused) {
+      this._debugPendingCount = Math.max(0, Number(this._debugPendingCount || 0)) + 1;
+      return;
+    }
+    if (this._debugFlushTimer) return;
+    this._debugFlushTimer = window.setTimeout(() => {
+      this._debugFlushTimer = null;
+      this._debugVisibleEntries = Array.isArray(this._debugEntries) ? [...this._debugEntries] : [];
+      this._debugPendingCount = 0;
+      this.render();
+    }, 250);
+  }
+
+  _setDebugPaused(paused = false) {
+    this._debugPaused = paused === true;
+    if (!this._debugPaused) {
+      if (this._debugFlushTimer) {
+        clearTimeout(this._debugFlushTimer);
+        this._debugFlushTimer = null;
+      }
+      this._debugVisibleEntries = Array.isArray(this._debugEntries) ? [...this._debugEntries] : [];
+      this._debugPendingCount = 0;
+    }
+    this.render();
+  }
+
+  _debugRenderEntries() {
+    const source = this._debugPaused
+      ? (Array.isArray(this._debugVisibleEntries) && this._debugVisibleEntries.length ? this._debugVisibleEntries : this._debugEntries)
+      : (Array.isArray(this._debugVisibleEntries) && this._debugVisibleEntries.length ? this._debugVisibleEntries : this._debugEntries);
+    return Array.isArray(source) ? source : [];
+  }
+
   renderDebugDashboard(camAttrs = {}) {
     if (!this.isDebugEnabled()) return "";
     this._lastCameraAttrs = camAttrs || {};
     this._syncBackendDebugEntries(camAttrs?.playback_debug || []);
-    const entries = this._getFilteredDebugEntries();
+    const entries = this._getFilteredDebugEntries(this._debugRenderEntries());
     const categorySummary = this._buildDebugCategorySummary();
     const summary = {
       total: (this._debugEntries || []).length,
-      error: (this._debugEntries || []).filter((entry) => entry.level === "error").length,
-      warn: (this._debugEntries || []).filter((entry) => entry.level === "warn").length,
+      visible: (entries || []).length,
+      error: (this._debugRenderEntries() || []).filter((entry) => entry.level === "error").length,
+      warn: (this._debugRenderEntries() || []).filter((entry) => entry.level === "warn").length,
       ...categorySummary,
     };
     const categories = ["all", "audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
@@ -1186,6 +1226,9 @@ _toggleDebugFilter(kind, value) {
                   <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
                 </label>
                 <div class="hik-debug-actions">
+                  <button class="hik-debug-btn ${this._debugPaused ? "is-active" : ""}" data-debug-global-action="toggle-pause">${this._debugPaused ? "Paused" : "Live"}</button>
+                  ${this._debugPaused && Number(this._debugPendingCount || 0) > 0 ? `<span class="hik-debug-new-badge">${this.escapeHtml(String(this._debugPendingCount))} new</span>` : ""}
+                  <button class="hik-debug-btn" data-debug-global-action="jump-latest">Jump latest</button>
                   <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
                   <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
                   <button class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
@@ -3939,6 +3982,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:0; }
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
+          .hik-debug-btn.is-active { background:rgba(245,166,35,0.16); border-color:rgba(245,166,35,0.34); }
+          .hik-debug-new-badge { display:inline-flex; align-items:center; min-height:30px; padding:0 10px; border-radius:999px; background:rgba(245,166,35,0.16); border:1px solid rgba(245,166,35,0.32); font-size:12px; }
           .hik-debug-textarea { width:100%; min-height:120px; max-height:200px; margin-top:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
           .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
           .hik-debug-summary::-webkit-details-marker { display:none; }
@@ -4431,10 +4476,22 @@ ${this.config.show_playback_panel !== false ? `
       ev.stopPropagation();
       const action = ev.currentTarget.getAttribute("data-debug-global-action");
       const combined = this._getFilteredDebugEntries().map((entry) => this.formatDebugEntryText(entry)).join("\n\n");
+      if (action === "toggle-pause") {
+        this._setDebugPaused(!this._debugPaused);
+      }
+      if (action === "jump-latest") {
+        this._setDebugPaused(false);
+        window.setTimeout(() => {
+          const feed = this.querySelector(".hik-debug-feed");
+          if (feed) feed.scrollTop = 0;
+        }, 0);
+      }
       if (action === "copy-all") this.copyDebugText(combined);
       if (action === "download-all") this.downloadDebugText(combined, "hikvision-debug-dashboard");
       if (action === "clear") {
         this._debugEntries = (this._debugEntries || []).filter((entry) => entry.source === "backend");
+        this._debugVisibleEntries = [...this._debugEntries];
+        this._debugPendingCount = 0;
         this.render();
       }
     }));
