@@ -2193,35 +2193,104 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this._audioGraph.gain.gain.value = gainValue;
     mediaElement.volume = 0;
     mediaElement.muted = true;
+    this._pushAudioDebug("speaker_sync", {
+      enabled: this._speakerEnabled,
+      gain: Number(gainValue || 0),
+      graphState: this._audioGraph?.context?.state || "none"
+    });
     if (this._audioGraph.context?.state === "suspended" && this._speakerEnabled) {
       this._audioGraph.context.resume().catch(() => {});
     }
   }
 
   _syncMediaAudio() {
-    requestAnimationFrame(() => {
+    const runSync = () => {
       const host = this.querySelector("#hikvision-video-host");
       const mediaElement = this._findNestedMediaElement(host);
-      if (!mediaElement) return;
-      this._ensureAudioGraph(mediaElement);
+      if (!mediaElement) return false;
+      this._ensureAudioGraph(mediaElement).catch(() => {});
+      if (this._speakerEnabled && mediaElement.play) {
+        try {
+          const playPromise = mediaElement.play();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        } catch (err) {}
+      }
+      return true;
+    };
+
+    requestAnimationFrame(() => {
+      if (runSync()) return;
+      setTimeout(() => { runSync(); }, 250);
     });
   }
 
   _setSpeakerEnabled(enabled) {
     this._speakerEnabled = Boolean(enabled);
-    const mediaElement = this._audioGraphElement || this._findNestedMediaElement(this.querySelector("#hikvision-video-host"));
-    this._syncAudioGraphState(mediaElement);
-    this._applyAudioFallback(mediaElement);
-    if (this._speakerEnabled) {
+    const host = this.querySelector("#hikvision-video-host");
+    const mediaElement = this._audioGraphElement || this._findNestedMediaElement(host);
+    this._pushAudioDebug("speaker_toggle", {
+      enabled: this._speakerEnabled,
+      hasGraph: !!this._audioGraph,
+      hasMedia: !!mediaElement,
+      graphState: this._audioGraph?.context?.state || "none"
+    });
+
+    if (mediaElement) {
+      this._ensureAudioGraph(mediaElement).catch(() => {});
+      this._syncAudioGraphState(mediaElement);
+      this._applyAudioFallback(mediaElement);
+
+      if (this._speakerEnabled) {
+        try {
+          mediaElement.muted = false;
+          const playPromise = mediaElement.play?.();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        } catch (err) {}
+      }
+    } else {
+      this._syncAudioGraphState();
+      this._applyAudioFallback(null);
+    }
+
+    this.render();
+
+    requestAnimationFrame(() => {
+      const nextHost = this.querySelector("#hikvision-video-host");
+      const nextMedia = this._audioGraphElement || this._findNestedMediaElement(nextHost);
+      if (!nextMedia) return;
+      this._ensureAudioGraph(nextMedia).catch(() => {});
+      this._syncAudioGraphState(nextMedia);
+      this._applyAudioFallback(nextMedia);
+
+      if (this._speakerEnabled) {
+        if (this._audioGraph?.context?.state === "suspended") {
+          this._audioGraph.context.resume().catch(() => {});
+        }
+        try {
+          nextMedia.muted = false;
+          const playPromise = nextMedia.play?.();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        } catch (err) {}
+      }
+    });
+
+    setTimeout(() => {
+      if (!this._speakerEnabled) return;
+      const delayedHost = this.querySelector("#hikvision-video-host");
+      const delayedMedia = this._audioGraphElement || this._findNestedMediaElement(delayedHost);
+      if (!delayedMedia) return;
+      this._ensureAudioGraph(delayedMedia).catch(() => {});
+      this._syncAudioGraphState(delayedMedia);
+      this._applyAudioFallback(delayedMedia);
       if (this._audioGraph?.context?.state === "suspended") {
         this._audioGraph.context.resume().catch(() => {});
       }
       try {
-        if (typeof mediaElement?.play === "function") mediaElement.play().catch(() => {});
+        delayedMedia.muted = false;
+        const playPromise = delayedMedia.play?.();
+        if (playPromise?.catch) playPromise.catch(() => {});
       } catch (err) {}
-    }
-    this.render();
-    requestAnimationFrame(() => this._syncMediaAudio());
+    }, 250);
   }
 
   _setVolume(value) {
@@ -2379,7 +2448,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           </div>
 
           <div class="hik-audio-controls-card">
-            <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle" aria-pressed="${speakerActive ? "true" : "false"}" title="${speakerLabel}">
+            <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
               <ha-icon icon="${speakerIcon}"></ha-icon>
               <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
             </button>
@@ -2395,7 +2464,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
           <div class="hik-audio-controls-card">
             ${isWebRtc && !playbackActive ? `
-              <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}" title="${talkLabel}">
+              <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
                 <ha-icon icon="mdi:microphone"></ha-icon>
                 <span>${talkLabel}</span>
               </button>
@@ -2570,7 +2639,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
     const entityName = refs.camera || "-";
     const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_proxy_supported ? "proxy" : (camAttrs.ptz_direct_supported ? "direct" : "none"));
-    const streamMode = String(camAttrs.stream_mode || this.config.video_mode || "rtsp_direct").toLowerCase();
+    const streamMode = String(camAttrs.stream_mode || "rtsp_direct").toLowerCase();
     const videoMethod = camAttrs.video_method || (streamMode === "snapshot" ? "Snapshot" : streamMode === "webrtc_direct" ? "WebRTC Direct" : streamMode === "webrtc" ? "WebRTC" : streamMode === "rtsp_direct" ? "RTSP Direct" : "RTSP");
     const playbackState = this.syncPlaybackState(camAttrs);
     const playbackPresets = this.getPlaybackPresets();
@@ -2870,7 +2939,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-audio-meter-fill.mic { background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color) 78%, #38bdf8), color-mix(in srgb, var(--warning-color) 74%, #f59e0b), color-mix(in srgb, var(--error-color) 82%, #ef4444)); }
           .hik-audio-meter-peak { position:absolute; inset:1px auto 1px 0; left: var(--hik-audio-peak, 0%); width:2px; border-radius:999px; background: rgba(255,255,255,0.92); box-shadow: 0 0 0 1px rgba(0,0,0,0.18); transform: translateX(-1px); transition: left 120ms linear; }
           .hik-audio-meter-caption { font-size:12px; opacity:0.74; }
-          .hik-audio-btn { width:100%; justify-content:center; }\n          .hik-audio-btn.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success-color) 20%, transparent); }
+          .hik-audio-btn { width:100%; justify-content:center; }
           .hik-talk-btn.live { background: color-mix(in srgb, var(--error-color) 20%, var(--card-background-color)); border-color: color-mix(in srgb, var(--error-color) 30%, transparent); animation: hikTalkPulse 1.4s ease-in-out infinite; }
           .hik-audio-slider { display:grid; gap:6px; min-width:0; }
           .hik-audio-slider span { display:flex; justify-content:space-between; gap:8px; font-size:12px; }
@@ -3065,7 +3134,6 @@ ${this.config.show_playback_panel !== false ? `
 
     this.querySelector("#hik-speaker-toggle")?.addEventListener("click", (ev) => {
       ev.preventDefault();
-      ev.stopPropagation();
       this._setSpeakerEnabled(!this._speakerEnabled);
     });
     this.querySelector("#hik-volume")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
