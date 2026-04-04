@@ -94,16 +94,7 @@ class HikvisionPTZCard extends HTMLElement {
   }
 
 
-  dis
-  firstUpdated() {
-    this._audioEl = document.createElement('audio');
-    this._audioEl.autoplay = true;
-    this._audioEl.muted = false;
-    this._audioEl.style.display = 'none';
-    this.shadowRoot.appendChild(this._audioEl);
-  }
-
-connectedCallback() {
+  disconnectedCallback() {
     if (typeof this._debugUnsubscribe === "function") {
       try { this._debugUnsubscribe(); } catch (err) {}
     }
@@ -3178,3 +3169,29 @@ if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-h
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
 
+
+static get styles() {
+  return css`
+    .audio-controls {
+      display:flex;
+      gap:16px;
+      align-items:center;
+      margin-top:8px;
+    }
+    .wave {
+      display:flex;
+      gap:2px;
+      align-items:flex-end;
+      height:20px;
+    }
+    .bar {
+      width:3px;
+      background:#4cafef;
+      transition:height 0.1s ease;
+    }
+    .mic-btn,.spk-btn {
+      font-size:18px;
+      padding:6px;
+    }
+  `;
+}
