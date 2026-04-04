@@ -212,17 +212,54 @@ class HikvisionPTZCard extends HTMLElement {
     const bits = [];
     const push = (value) => {
       if (value == null) return;
+      if (typeof value === "object" && "baseVal" in value) value = value.baseVal;
+      if (Array.isArray(value)) {
+        value.forEach(push);
+        return;
+      }
       const normalized = String(value).trim().toLowerCase();
       if (normalized) bits.push(normalized);
     };
 
-    [node.title, node.ariaLabel, node.getAttribute?.("aria-label"), node.getAttribute?.("label"), node.dataset?.action, node.dataset?.direction, node.dataset?.dir, node.textContent].forEach(push);
-    node.querySelectorAll?.("[icon], ha-icon, mwc-icon-button, ha-icon-button, button").forEach((el) => {
+    const pushClassNames = (value) => {
+      if (value == null) return;
+      if (typeof value === "string") {
+        push(value);
+        return;
+      }
+      if (typeof value === "object" && "baseVal" in value) {
+        push(value.baseVal);
+        return;
+      }
+      if (typeof value === "object" && value.length != null) {
+        Array.from(value).forEach((item) => push(item));
+      }
+    };
+
+    [
+      node.title,
+      node.ariaLabel,
+      node.getAttribute?.("aria-label"),
+      node.getAttribute?.("label"),
+      node.getAttribute?.("icon"),
+      node.getAttribute?.("name"),
+      node.dataset?.action,
+      node.dataset?.direction,
+      node.dataset?.dir,
+      node.dataset?.path,
+      node.textContent,
+    ].forEach(push);
+    pushClassNames(node.className);
+    push(node.tagName);
+    node.querySelectorAll?.("[icon], [class], ha-icon, mwc-icon-button, ha-icon-button, button, div, span, svg, path").forEach((el) => {
       push(el.getAttribute?.("icon"));
       push(el.getAttribute?.("aria-label"));
       push(el.getAttribute?.("label"));
+      push(el.getAttribute?.("name"));
       push(el.title);
       push(el.textContent);
+      push(el.tagName);
+      pushClassNames(el.className);
     });
 
     return bits.join(" ");
