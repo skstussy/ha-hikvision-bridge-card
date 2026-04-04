@@ -287,6 +287,44 @@ _pushDebugEntry(entry) {
     return config;
   }
 
+  _useCustomVideoPtzOverlay(playbackMode = false) {
+    return !playbackMode && this.canPtz() && !this._returningHome;
+  }
+
+  renderVideoPtzOverlay({ online = false, ptz = false, playbackActive = false } = {}) {
+    if (!this._useCustomVideoPtzOverlay(playbackActive) || !online || !ptz) return "";
+    return `
+      <div class="hik-video-ptz-overlay" aria-label="PTZ overlay controls">
+        <div class="hik-video-ptz-cluster">
+          <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" title="Move up" aria-label="Move up">
+            <ha-icon icon="mdi:chevron-up"></ha-icon>
+          </button>
+          <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" title="Move left" aria-label="Move left">
+            <ha-icon icon="mdi:chevron-left"></ha-icon>
+          </button>
+          <button type="button" class="hik-video-ptz-btn center" id="hik-video-center" title="Return home" aria-label="Return home">
+            <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
+          </button>
+          <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" title="Move right" aria-label="Move right">
+            <ha-icon icon="mdi:chevron-right"></ha-icon>
+          </button>
+          <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" title="Move down" aria-label="Move down">
+            <ha-icon icon="mdi:chevron-down"></ha-icon>
+          </button>
+        </div>
+        <div class="hik-video-zoom-rail">
+          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="1" title="Zoom in" aria-label="Zoom in">
+            <ha-icon icon="mdi:magnify-plus"></ha-icon>
+          </button>
+          <div class="hik-video-zoom-label">Zoom</div>
+          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="-1" title="Zoom out" aria-label="Zoom out">
+            <ha-icon icon="mdi:magnify-minus"></ha-icon>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   _getWebRtcPtzActionSignature(node) {
     if (!node) return "";
     const bits = [];
@@ -561,6 +599,23 @@ _pushDebugEntry(entry) {
     if (!card || playbackMode) return;
 
     this._webRtcPtzBindAttempts = 0;
+    if (this._useCustomVideoPtzOverlay(playbackMode)) {
+      this._webRtcPtzBound = true;
+      this._webRtcPtzLastBindReason = "custom_overlay";
+      this._webRtcPtzLastBindAt = new Date().toISOString();
+      this._webRtcPtzLastCandidateCount = 1;
+      this._webRtcPtzLastButtonCount = 7;
+      this._pushDebug("webrtc", "info", "webrtc_ptz_bound", "Using built-in PTZ video overlay controls", {
+        playback_mode: playbackMode,
+        attempt: 1,
+        reason: "custom_overlay",
+        candidate_roots: 1,
+        button_count: 7,
+      }, "frontend");
+      return;
+    }
+
+    this._webRtcPtzBindAttempts = 0;
     this._webRtcPtzLastBindReason = "";
     this._webRtcPtzLastBindAt = "";
     this._webRtcPtzLastCandidateCount = 0;
@@ -685,7 +740,7 @@ _pushDebugEntry(entry) {
     const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
     const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
     return {
-      card_version: "1.0.22",
+      card_version: "1.0.29-ux1",
       selected_camera: cam?.name || "",
       channel: cam?.channel != null ? String(cam.channel) : "",
       online: !!this.isOnline?.(),
@@ -2145,10 +2200,6 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                 <span class="hik-console-badge"><ha-icon icon="mdi:speedometer"></ha-icon>PTZ ${speed}</span>
                 <span class="hik-console-badge"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.getPTZDuration()}ms</span>
                 ${cameraAlarmBadges.length ? `<span class="hik-console-badge"><ha-icon icon="mdi:alert-outline"></ha-icon>${cameraAlarmBadges.length} alarm${cameraAlarmBadges.length === 1 ? "" : "s"}</span>` : ""}
-                <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
-                  <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                  <span>Refocus</span>
-                </button>
               </div>
             </div>
 
@@ -2159,11 +2210,11 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                     <div class="hik-pad-meta-row">
                       <span class="hik-console-badge"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>${ptz ? 'Pan / Tilt / Zoom on live video overlay' : 'PTZ unavailable'}</span>
                     </div>
-                    <div class="hik-webrtc-note">
+                    <div class="hik-webrtc-note compact">
                       <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
                       <div>
-                        <div class="hik-webrtc-note-title">WebRTC PTZ overlay active</div>
-                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Legacy PTZ and zoom controls stay available below for fallback testing and debugging.</div>
+                        <div class="hik-webrtc-note-title">Video overlay controls ready</div>
+                        <div class="hik-webrtc-note-copy">Use the on-video pad for the fastest PTZ moves. The console below remains available for fallback and fine control.</div>
                       </div>
                     </div>
                     <div class="hik-pad hik-pad-fallback">
@@ -2176,6 +2227,12 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                       <div></div>
                       ${this.iconButton({ icon: "mdi:chevron-down", label: "Move down", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="-1"', disabled: !ptz || this._returningHome })}
                       <div></div>
+                    </div>
+                    <div class="hik-console-inline-actions">
+                      <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
+                        <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                        <span>Refocus</span>
+                      </button>
                     </div>
                     <div class="hik-rail zoom fallback">
                       <div class="hik-rail-head"><ha-icon icon="mdi:magnify"></ha-icon><span>Zoom</span><span class="hik-mini-note">Fallback controls</span></div>
@@ -3715,6 +3772,25 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
           .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
+          .hik-video-ptz-overlay { position:absolute; right:16px; bottom:16px; z-index:4; display:grid; grid-template-columns:auto 56px; gap:12px; align-items:end; opacity:0.78; transition:opacity 0.18s ease, transform 0.18s ease; }
+          .hik-video-block:hover .hik-video-ptz-overlay, .hik-video-ptz-overlay:focus-within { opacity:1; transform:translateY(-1px); }
+          .hik-video-ptz-cluster { display:grid; grid-template-columns:repeat(3, 52px); grid-template-rows:repeat(3, 52px); gap:8px; grid-template-areas:
+            ". up ."
+            "left center right"
+            ". down ."; }
+          .hik-video-ptz-btn, .hik-video-zoom-btn { border:1px solid rgba(255,255,255,0.14); background:rgba(9,14,20,0.70); color:inherit; border-radius:16px; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(10px); box-shadow:0 10px 26px rgba(0,0,0,0.28); cursor:pointer; }
+          .hik-video-ptz-btn { width:52px; height:52px; }
+          .hik-video-ptz-btn.up { grid-area:up; }
+          .hik-video-ptz-btn.left { grid-area:left; }
+          .hik-video-ptz-btn.center { grid-area:center; }
+          .hik-video-ptz-btn.right { grid-area:right; }
+          .hik-video-ptz-btn.down { grid-area:down; }
+          .hik-video-ptz-btn ha-icon, .hik-video-zoom-btn ha-icon { --mdc-icon-size:22px; }
+          .hik-video-ptz-btn:hover, .hik-video-zoom-btn:hover { background:rgba(20,28,38,0.88); }
+          .hik-video-ptz-btn:disabled, .hik-video-zoom-btn:disabled { opacity:0.45; cursor:not-allowed; }
+          .hik-video-zoom-rail { display:grid; grid-template-rows:1fr auto 1fr; gap:8px; align-items:center; width:56px; padding:10px 0; border-radius:18px; border:1px solid rgba(255,255,255,0.14); background:rgba(9,14,20,0.70); backdrop-filter:blur(10px); box-shadow:0 10px 26px rgba(0,0,0,0.28); }
+          .hik-video-zoom-btn { width:40px; height:40px; margin:0 auto; border-radius:14px; }
+          .hik-video-zoom-label { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; justify-self:center; }
           .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
           .hik-overlay-toggle .hik-toggle-btn { width:auto; padding: 0 16px; border-radius:999px; min-height:42px; box-shadow:0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px); }
           .hik-faint { opacity:0.72; }
@@ -3757,7 +3833,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
           .hik-debug-textarea { width:100%; min-height:220px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
-          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+          .hik-debug-dashboard { margin-top:18px; }
+          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0; }
           .hik-debug-summary::-webkit-details-marker { display:none; }
           .hik-debug-toolbar { display:grid; gap:10px; margin:12px 0; }
           .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
@@ -3789,7 +3866,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           @media (max-width: 1080px) {
             .hik-grid, .hik-info-grid, .hik-stream-grid { grid-template-columns:1fr; }
           }
+          @media (max-width: 900px) {
+            .hik-video-ptz-overlay { right:12px; bottom:68px; grid-template-columns:1fr; justify-items:end; }
+            .hik-video-zoom-rail { width:52px; }
+          }
           @media (max-width: 700px) {
+            .hik-video-ptz-cluster { grid-template-columns:repeat(3, 46px); grid-template-rows:repeat(3, 46px); gap:6px; }
+            .hik-video-ptz-btn { width:46px; height:46px; }
             .hik-titlebar, .hik-controls-head, .hik-console-topbar { flex-direction:column; align-items:stretch; }
             .hik-meta { grid-template-columns:1fr; }
             .hik-console-badges { width:100%; }
@@ -3827,6 +3910,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 <div class="hik-video-block">
                   <div id="hikvision-video-host"></div>
                   ${this.renderPlaybackOverlay(playbackIndicator)}
+                  ${this.renderVideoPtzOverlay({ online, ptz, playbackActive })}
                   <div class="hik-overlay-toggle">
                       <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-middle">
                         <ha-icon icon="mdi:tune-variant"></ha-icon>
@@ -3843,7 +3927,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
-                ${this.renderDebugDashboard(camAttrs)}
               </div>
             </div>
 
@@ -3898,6 +3981,7 @@ ${this.config.show_playback_panel !== false ? `
           </div>
 
           ${infoCards.length ? `<div class="hik-info-grid">${infoCards.join("")}</div>` : ""}
+          ${this.renderDebugDashboard(camAttrs)}
         </div>
       </ha-card>
     `;
@@ -3967,6 +4051,7 @@ ${this.config.show_playback_panel !== false ? `
     });
 
     this.querySelector("#hik-center")?.addEventListener("click", () => this.handleCenter());
+    this.querySelector("#hik-video-center")?.addEventListener("click", () => this.handleCenter());
     this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: "panel" })));
     this.querySelector("#hik-refocus")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
