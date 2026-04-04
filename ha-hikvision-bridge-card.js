@@ -88,6 +88,9 @@ class HikvisionPTZCard extends HTMLElement {
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
     this._panelOpenState = this._panelOpenState || {};
+    this._webRtcPtzObserver = this._webRtcPtzObserver || null;
+    this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
+    this._webRtcPtzBound = this._webRtcPtzBound || false;
   }
 
   set hass(hass) {
@@ -122,6 +125,7 @@ class HikvisionPTZCard extends HTMLElement {
   }
 
   _cleanupVideoCard() {
+    this._teardownWebRtcPtzBindings();
     if (this._mediaSyncObserver) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
     }
@@ -158,8 +162,35 @@ class HikvisionPTZCard extends HTMLElement {
     host.id = "hikvision-video-host";
   }
 
-  _buildWebRtcCardConfig(url, playbackMode = false) {
+
+  _buildWebRtcPtzConfig(playbackMode = false) {
+    const cam = this.selectedCamera;
+    if (playbackMode || !cam || !this.canPtz() || this._returningHome) return null;
+
+    const speed = Math.max(1, Math.min(100, Number(this.config.speed || 50)));
+    const channel = String(cam.channel);
+    const duration = this.getPTZDuration();
+    const noop = { channel, pan: 0, tilt: 0, duration: 0 };
+
     return {
+      opacity: 0.55,
+      service: "ha_hikvision_bridge.ptz",
+      data_left: { channel, pan: -speed, tilt: 0, duration },
+      data_right: { channel, pan: speed, tilt: 0, duration },
+      data_up: { channel, pan: 0, tilt: speed, duration },
+      data_down: { channel, pan: 0, tilt: -speed, duration },
+      data_zoom_in: { ...noop, zoom: 1 },
+      data_zoom_out: { ...noop, zoom: -1 },
+    };
+  }
+
+  _buildWebRtcCardConfig(url, playbackMode = false) {
+    const style = [
+      ".ptz { right: 10px; left: unset; bottom: 12px; }",
+      ".header { top: unset; bottom: 6px; }",
+    ].join(" ");
+
+    const config = {
       type: "custom:webrtc-camera",
       url,
       mode: "webrtc",
@@ -167,7 +198,162 @@ class HikvisionPTZCard extends HTMLElement {
       muted: !this._speakerEnabled,
       ui: true,
       background: true,
+      style,
     };
+
+    const ptz = this._buildWebRtcPtzConfig(playbackMode);
+    if (ptz) config.ptz = ptz;
+
+    return config;
+  }
+
+  _getWebRtcPtzActionSignature(node) {
+    if (!node) return "";
+    const bits = [];
+    const push = (value) => {
+      if (value == null) return;
+      const normalized = String(value).trim().toLowerCase();
+      if (normalized) bits.push(normalized);
+    };
+
+    [node.title, node.ariaLabel, node.getAttribute?.("aria-label"), node.getAttribute?.("label"), node.dataset?.action, node.dataset?.direction, node.dataset?.dir, node.textContent].forEach(push);
+    node.querySelectorAll?.("[icon], ha-icon, mwc-icon-button, ha-icon-button, button").forEach((el) => {
+      push(el.getAttribute?.("icon"));
+      push(el.getAttribute?.("aria-label"));
+      push(el.getAttribute?.("label"));
+      push(el.title);
+      push(el.textContent);
+    });
+
+    return bits.join(" ");
+  }
+
+  _detectWebRtcPtzAction(node) {
+    const signature = this._getWebRtcPtzActionSignature(node);
+    if (!signature) return "";
+
+    if (signature.includes("zoom out") || signature.includes("magnify-minus") || signature.includes("zoom_out")) return "zoom_out";
+    if (signature.includes("zoom in") || signature.includes("magnify-plus") || signature.includes("zoom_in")) return "zoom_in";
+    if (signature.includes("move left") || signature.includes(" pan left") || signature.startsWith("left") || signature.includes("arrow-left") || signature.includes("chevron-left")) return "left";
+    if (signature.includes("move right") || signature.includes(" pan right") || signature.startsWith("right") || signature.includes("arrow-right") || signature.includes("chevron-right")) return "right";
+    if (signature.includes("move up") || signature.includes(" pan up") || signature.startsWith("up") || signature.includes("arrow-up") || signature.includes("chevron-up")) return "up";
+    if (signature.includes("move down") || signature.includes(" pan down") || signature.startsWith("down") || signature.includes("arrow-down") || signature.includes("chevron-down")) return "down";
+    return "";
+  }
+
+  _handleWebRtcPtzAction(action, phase = "click") {
+    if (!action || !this.canPtz() || this._returningHome) return;
+
+    const speed = Math.max(1, Math.min(100, Number(this.config.speed || 50)));
+    if (phase === "end") {
+      if (["left", "right", "up", "down"].includes(action)) this.stopMove();
+      return;
+    }
+
+    if (action === "zoom_in") {
+      this.callLens("zoom", 1);
+      return;
+    }
+    if (action === "zoom_out") {
+      this.callLens("zoom", -1);
+      return;
+    }
+
+    const pan = action === "left" ? -speed : action === "right" ? speed : 0;
+    const tilt = action === "up" ? speed : action === "down" ? -speed : 0;
+
+    this.stopMove();
+    this.startMove(pan, tilt);
+  }
+
+  _bindWebRtcPtzButtons(root) {
+    if (!root || this._webRtcPtzBound) return false;
+    const ptzRoot = root.querySelector?.(".ptz");
+    if (!ptzRoot) return false;
+
+    const buttons = Array.from(ptzRoot.querySelectorAll("button, ha-icon-button, mwc-icon-button"));
+    if (!buttons.length) return false;
+
+    const cleanup = [];
+    const bind = (target, type, handler, options = undefined) => {
+      target.addEventListener(type, handler, options);
+      cleanup.push(() => target.removeEventListener(type, handler, options));
+    };
+
+    buttons.forEach((button) => {
+      const action = this._detectWebRtcPtzAction(button);
+      if (!action) return;
+
+      const start = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._handleWebRtcPtzAction(action, "start");
+      };
+      const stop = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._handleWebRtcPtzAction(action, "end");
+      };
+      const click = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (action === "zoom_in" || action === "zoom_out") this._handleWebRtcPtzAction(action, "click");
+      };
+
+      if (action === "zoom_in" || action === "zoom_out") {
+        bind(button, "click", click, true);
+        bind(button, "touchstart", click, { passive: false, capture: true });
+      } else {
+        bind(button, "mousedown", start, true);
+        bind(button, "mouseup", stop, true);
+        bind(button, "mouseleave", stop, true);
+        bind(button, "touchstart", start, { passive: false, capture: true });
+        bind(button, "touchend", stop, { capture: true });
+        bind(button, "touchcancel", stop, { capture: true });
+      }
+    });
+
+    this._webRtcPtzCleanup = () => cleanup.splice(0).forEach((fn) => {
+      try { fn(); } catch (err) {}
+    });
+    this._webRtcPtzBound = true;
+    return true;
+  }
+
+  _setupWebRtcPtzBindings(card, playbackMode = false) {
+    this._teardownWebRtcPtzBindings();
+    if (!card || playbackMode) return;
+
+    const tryBind = () => {
+      const root = card.shadowRoot || card.renderRoot || null;
+      if (!root) return false;
+      return this._bindWebRtcPtzButtons(root);
+    };
+
+    if (tryBind()) return;
+
+    const root = card.shadowRoot || card.renderRoot || null;
+    if (!root || typeof MutationObserver === "undefined") return;
+
+    this._webRtcPtzObserver = new MutationObserver(() => {
+      if (tryBind() && this._webRtcPtzObserver) {
+        try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
+        this._webRtcPtzObserver = null;
+      }
+    });
+    this._webRtcPtzObserver.observe(root, { childList: true, subtree: true });
+  }
+
+  _teardownWebRtcPtzBindings() {
+    if (this._webRtcPtzObserver) {
+      try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
+    }
+    this._webRtcPtzObserver = null;
+    if (typeof this._webRtcPtzCleanup === "function") {
+      try { this._webRtcPtzCleanup(); } catch (err) {}
+    }
+    this._webRtcPtzCleanup = null;
+    this._webRtcPtzBound = false;
   }
 
   _syncWebRtcCardConfig(playbackMode = false) {
@@ -1554,41 +1740,22 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
               </div>
             </div>
 
-            <div class="hik-motion-grid">
-              <div class="hik-rail zoom">
-                <div class="hik-rail-head"><ha-icon icon="mdi:magnify-scan"></ha-icon><span>Zoom</span></div>
-                <div class="hik-rail-stack vertical">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom in" aria-label="Zoom in">
-                    <ha-icon icon="mdi:magnify-plus-outline"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">In</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Zoom out" aria-label="Zoom out">
-                    <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Out</span>
-                  </button>
-                </div>
-              </div>
-
+            <div class="hik-motion-grid hik-motion-grid-overlay">
               <div class="hik-pad-shell">
-                <div class="hik-pad-wrap">
-                  <div class="hik-pad-stage">
+                <div class="hik-pad-wrap hik-webrtc-pad-wrap">
+                  <div class="hik-pad-stage hik-webrtc-stage">
                     <div class="hik-pad-meta-row">
-                      <span class="hik-console-badge"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>${ptz ? 'PTZ ready' : 'PTZ unavailable'}</span>
+                      <span class="hik-console-badge"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>${ptz ? 'Pan / Tilt / Zoom on live video overlay' : 'PTZ unavailable'}</span>
                     </div>
-                    <div class="hik-pad">
-                      <div></div>
-                      ${this.iconButton({ icon: "mdi:pan-up", label: "Move up", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="${speed}"`, disabled: !ptz || this._returningHome })}
-                      <div></div>
-
-                      ${this.iconButton({ icon: "mdi:pan-left", label: "Move left", cls: "ptz-btn", attrs: `data-pan="-${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
+                    <div class="hik-webrtc-note">
+                      <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
+                      <div>
+                        <div class="hik-webrtc-note-title">WebRTC PTZ overlay active</div>
+                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Keep using this panel for speed, home, refocus, focus, iris, and presets.</div>
+                      </div>
+                    </div>
+                    <div class="hik-webrtc-inline-actions">
                       ${this.iconButton({ icon: "mdi:crosshairs-gps", label: "Return home", cls: "center", attrs: 'id="hik-center"', disabled: !ptz || this._returningHome })}
-                      ${this.iconButton({ icon: "mdi:pan-right", label: "Move right", cls: "ptz-btn", attrs: `data-pan="${speed}" data-tilt="0"`, disabled: !ptz || this._returningHome })}
-
-                      <div></div>
-                      ${this.iconButton({ icon: "mdi:pan-down", label: "Move down", cls: "ptz-btn", attrs: `data-pan="0" data-tilt="-${speed}"`, disabled: !ptz || this._returningHome })}
-                      <div></div>
                     </div>
                   </div>
                 </div>
@@ -2718,6 +2885,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (this._videoSignature === signature && this._videoCard) {
       this._videoCard.hass = this._hass;
       this._syncWebRtcCardConfig(playbackMode);
+      this._setupWebRtcPtzBindings(this._videoCard, playbackMode);
       if (this._videoCard.parentNode !== host) {
         host.innerHTML = "";
         host.appendChild(this._videoCard);
@@ -2744,6 +2912,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           host.appendChild(webrtcCard);
           this._videoCard = webrtcCard;
           this._videoCardConfig = webrtcConfig;
+          this._setupWebRtcPtzBindings(webrtcCard, playbackMode);
           this._pushDebug("video", "info", "webrtc_card_ready", "WebRTC card created successfully", { playback_mode: playbackMode, url: preferredRtspUrl || "" }, "frontend");
           this._observeMediaElement(host);
           this._syncMediaAudio();
@@ -3044,6 +3213,14 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-icon-btn:disabled, .hik-btn:disabled, .hik-toggle-btn:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
           .hik-toggle-btn { width:100%; background: color-mix(in srgb, var(--hik-accent) 16%, var(--secondary-background-color)); font-weight:600; }
           .hik-ptz-shell { display:grid; gap:14px; }
+          .hik-motion-grid-overlay { grid-template-columns: minmax(0, 1fr); }
+          .hik-webrtc-pad-wrap { min-height: 180px; }
+          .hik-webrtc-stage { display:grid; gap:12px; align-content:start; }
+          .hik-webrtc-note { display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start; padding:14px; border-radius:18px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.03); }
+          .hik-webrtc-note ha-icon { width:22px; height:22px; color:var(--primary-color); }
+          .hik-webrtc-note-title { font-weight:700; font-size:14px; }
+          .hik-webrtc-note-copy { font-size:12px; color:var(--secondary-text-color); line-height:1.45; }
+          .hik-webrtc-inline-actions { display:flex; justify-content:flex-start; }
           .hik-console-surface { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:22px; padding:14px; background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 95%, var(--hik-accent) 5%), color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); display:grid; gap:12px; overflow:hidden; }
           .hik-console-topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
           .hik-console-kicker { font-size:10px; letter-spacing:0.12em; text-transform:uppercase; opacity:0.62; }
