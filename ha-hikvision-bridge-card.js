@@ -121,6 +121,13 @@ class HikvisionPTZCard extends HTMLElement {
   }
 
   _cleanupVideoCard() {
+    if (this._mediaSyncObserver) {
+      try { this._mediaSyncObserver.disconnect(); } catch (err) {}
+    }
+    this._mediaSyncObserver = null;
+    this._teardownAudioGraph?.();
+    this._teardownTalkAudioGraph?.();
+
     const card = this._videoCard;
     this._videoCard = null;
     this._videoCardConfig = null;
@@ -2086,6 +2093,44 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     return null;
   }
 
+
+  _scheduleMediaAudioSync(delay = 0) {
+    const runner = () => this._syncMediaAudio();
+    if (delay > 0) {
+      setTimeout(runner, delay);
+      return;
+    }
+    requestAnimationFrame(runner);
+  }
+
+  _observeMediaElement(host) {
+    if (this._mediaSyncObserver) {
+      try { this._mediaSyncObserver.disconnect(); } catch (err) {}
+    }
+    this._mediaSyncObserver = null;
+    if (!host || typeof MutationObserver === "undefined") return;
+
+    const sync = () => this._syncMediaAudio();
+    this._mediaSyncObserver = new MutationObserver(() => sync());
+    try {
+      this._mediaSyncObserver.observe(host, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["src", "srcObject", "muted", "volume", "autoplay", "playsinline"]
+      });
+    } catch (err) {
+      this._mediaSyncObserver = null;
+      return;
+    }
+
+    this._scheduleMediaAudioSync(0);
+    this._scheduleMediaAudioSync(150);
+    this._scheduleMediaAudioSync(500);
+    this._scheduleMediaAudioSync(1200);
+  }
+
+
   _updateAudioMeter() {
     if (!this._audioGraph?.analyser) return;
     try {
@@ -2207,11 +2252,21 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const runSync = () => {
       const host = this.querySelector("#hikvision-video-host");
       const mediaElement = this._findNestedMediaElement(host);
+      this._pushAudioDebug?.("media_sync_probe", {
+        hasHost: !!host,
+        hasMedia: !!mediaElement,
+        mode: String(this.config.video_mode || "").toLowerCase(),
+        speakerEnabled: !!this._speakerEnabled
+      });
       if (!mediaElement) return false;
+
       this._ensureAudioGraph(mediaElement).catch(() => {});
-      if (this._speakerEnabled && mediaElement.play) {
+      this._applyAudioFallback(mediaElement);
+
+      if (this._speakerEnabled) {
         try {
-          const playPromise = mediaElement.play();
+          mediaElement.muted = false;
+          const playPromise = mediaElement.play?.();
           if (playPromise?.catch) playPromise.catch(() => {});
         } catch (err) {}
       }
@@ -2221,6 +2276,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     requestAnimationFrame(() => {
       if (runSync()) return;
       setTimeout(() => { runSync(); }, 250);
+      setTimeout(() => { runSync(); }, 800);
     });
   }
 
@@ -2562,6 +2618,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           this._videoCard = webrtcCard;
           this._videoCardConfig = webrtcConfig;
           this._pushDebug("video", "info", "webrtc_card_ready", "WebRTC card created successfully", { playback_mode: playbackMode, url: preferredRtspUrl || "" }, "frontend");
+          this._observeMediaElement(host);
           this._syncMediaAudio();
         } catch (err) {
           this._pushDebug("video", "error", "webrtc_card_failed", "WebRTC card failed to start", { error: String(err?.message || err) }, "frontend");
@@ -2593,6 +2650,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         host.appendChild(videoCard);
         this._videoCard = videoCard;
         this._pushDebug("video", "info", "video_card_ready", "Video card created successfully", { camera_entity: cameraEntityId || "", snapshot_mode: useSnapshot }, "frontend");
+        this._observeMediaElement(host);
         this._syncMediaAudio();
       } catch (err) {
         this._pushDebug("video", "error", "video_card_failed", "Unable to create live video card", { error: String(err?.message || err) }, "frontend");
