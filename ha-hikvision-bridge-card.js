@@ -1072,6 +1072,27 @@ _toggleDebugFilter(kind, value) {
     const openAttr = this._debugDashboardOpen ? "open" : "";
     const searchValue = this.escapeHtml(String(this._debugSearchQuery || ""));
     const visibleEntries = entries.slice(0, 80);
+    const entryKey = (entry) => [
+      entry?.time || "",
+      entry?.category || "",
+      entry?.level || "",
+      entry?.event || "",
+      entry?.camera != null ? String(entry.camera) : "",
+      entry?.source || "",
+    ].join("|");
+    const validSelectedKey = visibleEntries.some((entry) => entryKey(entry) === this._debugSelectedKey) ? this._debugSelectedKey : "";
+    const selectedKey = validSelectedKey || (visibleEntries[0] ? entryKey(visibleEntries[0]) : "");
+    this._debugSelectedKey = selectedKey || "";
+    const selectedEntry = visibleEntries.find((entry) => entryKey(entry) === selectedKey) || null;
+    const selectedDebugText = selectedEntry ? this.formatDebugEntryText(selectedEntry) : "";
+    const selectedDetailsText = selectedEntry?.details ? JSON.stringify(selectedEntry.details, null, 2) : "";
+    const rowClass = (entry) => {
+      const level = String(entry?.level || "info").toLowerCase();
+      if (level === "error") return "is-error";
+      if (level === "warn") return "is-warn";
+      if (level === "debug") return "is-debug";
+      return "is-info";
+    };
     return `
       <div class="hik-panel hik-info-card hik-debug-dashboard">
         <details id="hik-debug-dashboard-details" ${openAttr}>
@@ -1118,40 +1139,66 @@ _toggleDebugFilter(kind, value) {
                 ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
               </div>
             </div>
-            <div class="hik-debug-feed" role="log" aria-live="polite">
-              ${visibleEntries.length ? visibleEntries.map((entry, index) => {
-                const debugText = this.formatDebugEntryText(entry);
-                const badgeClass = entry.level === "error" ? "warn" : entry.level === "warn" ? "primary" : "neutral";
-                return `
-                  <details class="hik-debug-block" ${index < 2 ? "open" : ""}>
-                    <summary class="hik-debug-entry-summary">
-                      <div class="hik-debug-entry-topline">
-                        <span class="hik-pill ${badgeClass}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.category || "general")}</span>
-                        <span class="hik-pill neutral"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(entry.level || "info")}</span>
-                        <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(entry.source || "frontend")}</span>
-                        ${entry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(entry.camera))}</span>` : ""}
-                        ${entry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(entry.details.trace_id))}</span>` : ""}
-                      </div>
-                      <div class="hik-debug-entry-main">
-                        <div class="hik-debug-entry-message"><b>${this.escapeHtml(entry.event || "event")}</b><span>${this.escapeHtml(entry.message || "")}</span></div>
-                        <div class="hik-debug-entry-time">${this.escapeHtml(entry.time || "")}</div>
-                      </div>
-                    </summary>
-                    <div class="hik-debug-entry-body">
-                      <div class="hik-debug-actions">
-                        <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
-                        <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
-                      </div>
-                      <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(debugText)}</textarea>
-                      ${entry?.details ? `<details><summary>Details</summary><pre class="hik-debug-pre">${this.escapeHtml(JSON.stringify(entry.details, null, 2))}</pre></details>` : ""}
-                    </div>
-                  </details>`;
-              }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
+            <div class="hik-debug-list-shell">
+              <div class="hik-debug-list-head" role="row">
+                <span>Level</span>
+                <span>Time</span>
+                <span>Category</span>
+                <span>Event</span>
+                <span>Message</span>
+                <span>Cam</span>
+              </div>
+              <div class="hik-debug-feed" role="log" aria-live="polite">
+                ${visibleEntries.length ? visibleEntries.map((entry) => {
+                  const key = entryKey(entry);
+                  const selected = key === selectedKey;
+                  return `
+                    <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" title="${this.escapeHtml(entry.message || entry.event || "")}">
+                      <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
+                      <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
+                      <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
+                      <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
+                      <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
+                      <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
+                    </button>`;
+                }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
+              </div>
             </div>
+            ${selectedEntry ? `
+              <div class="hik-debug-detail-pane">
+                <div class="hik-debug-detail-head">
+                  <div class="hik-debug-detail-title">
+                    <div class="hik-debug-detail-kicker">Selected event</div>
+                    <div class="hik-debug-detail-name">${this.escapeHtml(selectedEntry.event || "event")}</div>
+                  </div>
+                  <div class="hik-debug-actions">
+                    <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
+                    <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
+                  </div>
+                </div>
+                <div class="hik-status-row">
+                  <span class="hik-pill ${rowClass(selectedEntry) === "is-error" ? "warn" : rowClass(selectedEntry) === "is-warn" ? "primary" : "neutral"}"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(selectedEntry.level || "info")}</span>
+                  <span class="hik-pill neutral"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(selectedEntry.time || "")}</span>
+                  <span class="hik-pill neutral"><ha-icon icon="mdi:shape-outline"></ha-icon>${this.escapeHtml(selectedEntry.category || "general")}</span>
+                  <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(selectedEntry.source || "frontend")}</span>
+                  ${selectedEntry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(selectedEntry.camera))}</span>` : ""}
+                  ${selectedEntry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.details.trace_id))}</span>` : ""}
+                </div>
+                <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
+                <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
+                ${selectedEntry?.details ? `
+                  <details class="hik-debug-nested-details">
+                    <summary>Details JSON</summary>
+                    <pre class="hik-debug-pre">${this.escapeHtml(selectedDetailsText)}</pre>
+                  </details>
+                ` : ""}
+              </div>
+            ` : ""}
           </div>
         </details>
       </div>`;
   }
+
 
   async _startTalkbackDirect() {
     try {
@@ -3754,30 +3801,52 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-search-wrap { display:flex; align-items:center; gap:8px; min-width:260px; flex:1 1 320px; padding:0 12px; min-height:40px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.20); }
           .hik-debug-search-wrap ha-icon { --mdc-icon-size:18px; opacity:0.7; }
           .hik-debug-search { width:100%; border:0; outline:none; background:transparent; color:inherit; font-size:13px; }
-          .hik-debug-feed { max-height:560px; overflow:auto; padding:12px; display:grid; gap:10px; overscroll-behavior:contain; }
-          .hik-debug-block { margin:0; border-radius:14px; background: color-mix(in srgb, var(--card-background-color) 76%, rgba(255,255,255,0.03)); border:1px solid rgba(255,255,255,0.06); overflow:hidden; }
-          .hik-debug-block > summary { list-style:none; cursor:pointer; padding:12px; }
-          .hik-debug-block > summary::-webkit-details-marker { display:none; }
-          .hik-debug-entry-summary { display:grid; gap:10px; }
-          .hik-debug-entry-topline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-          .hik-debug-entry-main { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-          .hik-debug-entry-message { min-width:0; display:grid; gap:4px; }
-          .hik-debug-entry-message b { font-size:13px; }
-          .hik-debug-entry-message span { font-size:12px; opacity:0.82; word-break:break-word; }
-          .hik-debug-entry-time { flex:0 0 auto; font-size:11px; opacity:0.65; white-space:nowrap; }
-          .hik-debug-entry-body { border-top:1px solid rgba(255,255,255,0.06); padding:12px; background:rgba(0,0,0,0.10); }
-          .hik-debug-block details { margin-top:8px; }
-          .hik-debug-block details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
-          .hik-debug-pre { margin:8px 0 0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; padding:10px; border-radius:12px; background:rgba(0,0,0,0.28); }
-          .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+          .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); }
+          .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:10px 12px; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); }
+          .hik-debug-feed { max-height:460px; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
+          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:10px 12px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:transparent; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
+          .hik-debug-row:hover { background:rgba(255,255,255,0.04); }
+          .hik-debug-row.selected { background:rgba(255,255,255,0.07); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 70%, #ffffff 10%); }
+          .hik-debug-row.is-error { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--error-color) 60%, transparent); }
+          .hik-debug-row.is-warn { box-shadow: inset 2px 0 0 rgba(245, 166, 35, 0.7); }
+          .hik-debug-row.is-info { box-shadow: inset 2px 0 0 rgba(90, 169, 255, 0.55); }
+          .hik-debug-row.is-debug { box-shadow: inset 2px 0 0 rgba(255,255,255,0.12); }
+          .hik-debug-cell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+          .hik-debug-event-cell { font-weight:600; }
+          .hik-debug-message-cell { opacity:0.86; }
+          .hik-debug-time-cell, .hik-debug-cam-cell { opacity:0.72; font-variant-numeric: tabular-nums; }
+          .hik-debug-level-badge { display:inline-flex; align-items:center; justify-content:center; min-width:68px; padding:4px 8px; border-radius:999px; font-size:10px; letter-spacing:0.06em; font-weight:700; border:1px solid rgba(255,255,255,0.10); background:rgba(255,255,255,0.06); }
+          .hik-debug-level-badge.is-error { background:color-mix(in srgb, var(--error-color) 20%, transparent); border-color:color-mix(in srgb, var(--error-color) 45%, transparent); }
+          .hik-debug-level-badge.is-warn { background:rgba(245, 166, 35, 0.18); border-color:rgba(245, 166, 35, 0.32); }
+          .hik-debug-level-badge.is-info { background:rgba(90, 169, 255, 0.14); border-color:rgba(90, 169, 255, 0.28); }
+          .hik-debug-level-badge.is-debug { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.14); }
+          .hik-debug-detail-pane { display:grid; gap:10px; padding:14px 12px 12px; border-top:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.10)); }
+          .hik-debug-detail-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+          .hik-debug-detail-title { display:grid; gap:4px; }
+          .hik-debug-detail-kicker { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.62; }
+          .hik-debug-detail-name { font-size:15px; font-weight:700; }
+          .hik-debug-detail-message { font-size:13px; line-height:1.45; opacity:0.9; }
+          .hik-debug-nested-details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
+          .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; padding:10px; border-radius:12px; background:rgba(0,0,0,0.28); }
+          .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:0; }
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
-          .hik-debug-textarea { width:100%; min-height:140px; max-height:240px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
+          .hik-debug-textarea { width:100%; min-height:120px; max-height:200px; margin-top:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
           .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
           .hik-debug-summary::-webkit-details-marker { display:none; }
           .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
           .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; }
           .hik-debug-chip.active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.22); }
+          @media (max-width: 980px) {
+            .hik-debug-list-head, .hik-debug-row { grid-template-columns: 92px 92px 96px 1.15fr 1.6fr 72px; gap:8px; }
+          }
+          @media (max-width: 780px) {
+            .hik-debug-list-head { display:none; }
+            .hik-debug-feed { max-height:420px; }
+            .hik-debug-row { grid-template-columns: 86px 92px 1fr 62px; grid-auto-rows:auto; }
+            .hik-debug-row .hik-debug-cell:nth-child(3) { display:none; }
+            .hik-debug-row .hik-debug-cell:nth-child(5) { grid-column: 1 / span 4; white-space:nowrap; }
+          }
           .hik-rec-dot { width:9px; height:9px; border-radius:50%; background:#fff; box-shadow:0 0 0 0 rgba(255,255,255,0.65); animation: hikRecDot 1.4s ease-in-out infinite; }
           @keyframes hikPulseRecording { 0% { background-position: 0% 50%; filter: brightness(0.92); } 50% { background-position: 100% 50%; filter: brightness(1.08); } 100% { background-position: 0% 50%; filter: brightness(0.92); } }
           @keyframes hikRecDot { 0% { transform: scale(0.9); box-shadow:0 0 0 0 rgba(255,255,255,0.65); } 70% { transform: scale(1.08); box-shadow:0 0 0 8px rgba(255,255,255,0); } 100% { transform: scale(0.9); box-shadow:0 0 0 0 rgba(255,255,255,0); } }
@@ -4016,10 +4085,16 @@ ${this.config.show_playback_panel !== false ? `
       this._debugSearchQuery = ev.currentTarget?.value || "";
       this.render();
     });
+    this.querySelectorAll("[data-debug-select]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._debugSelectedKey = ev.currentTarget?.getAttribute("data-debug-select") || "";
+      this.render();
+    }));
     this.querySelectorAll("[data-debug-entry-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      const container = ev.currentTarget.closest(".hik-debug-block");
+      const container = ev.currentTarget.closest(".hik-debug-detail-pane");
       const textarea = container?.querySelector(".hik-debug-textarea");
       const text = textarea?.value || textarea?.textContent || "";
       const action = ev.currentTarget.getAttribute("data-debug-entry-action");
