@@ -2207,8 +2207,8 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                     <div class="hik-webrtc-note">
                       <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
                       <div>
-                        <div class="hik-webrtc-note-title">WebRTC PTZ overlay active</div>
-                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Legacy PTZ and zoom controls stay available below for fallback testing and debugging.</div>
+                        <div class="hik-webrtc-note-title">On-video PTZ controls</div>
+                        <div class="hik-webrtc-note-copy">Use the live video surface for pan, tilt, and zoom. The controls below remain available as a fallback console.</div>
                       </div>
                     </div>
                     <div class="hik-pad hik-pad-fallback">
@@ -3758,6 +3758,38 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-block { position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
+          .hik-video-ptz-overlay { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transform:scale(0.985); transition:opacity 180ms ease, transform 180ms ease; }
+          .hik-video-block:hover .hik-video-ptz-overlay,
+          .hik-video-block:focus-within .hik-video-ptz-overlay,
+          .hik-video-ptz-overlay:focus-within { opacity:1; transform:scale(1); }
+          .hik-video-ptz-overlay.is-disabled { opacity:0.68; }
+          .hik-video-ptz-surface { position:absolute; inset:14px; pointer-events:none; }
+          .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; gap:8px; }
+          .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
+          .hik-video-ptz-chip.subtle { opacity:0.9; }
+          .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
+          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,56px); gap:10px; pointer-events:auto; }
+          .hik-video-ptz-btn { position:relative; min-height:56px; min-width:56px; border:none; border-radius:18px; cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
+          .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
+          .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
+          .hik-video-ptz-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
+          .hik-video-ptz-btn ha-icon { --mdc-icon-size:22px; }
+          .hik-video-ptz-btn.center { overflow:hidden; background:rgba(18,24,32,0.46); }
+          .hik-video-ptz-center-core { position:absolute; inset:10px; border-radius:999px; background:radial-gradient(circle at 50% 45%, rgba(255,255,255,0.18), rgba(255,255,255,0.02) 65%); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08); }
+          .hik-video-ptz-btn.center ha-icon { position:relative; color:var(--hik-accent); --mdc-icon-size:20px; }
+          .hik-video-zoom-rail { position:absolute; right:16px; top:50%; transform:translateY(-50%); width:58px; padding:10px 8px; border-radius:20px; display:grid; gap:10px; place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-zoom-btn { width:42px; height:42px; border:none; border-radius:14px; cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-zoom-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(255,255,255,0.12); box-shadow:0 8px 18px rgba(0,0,0,0.24); }
+          .hik-video-zoom-btn:active:not(:disabled) { transform:scale(0.94); }
+          .hik-video-zoom-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
+          .hik-video-zoom-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
+          .hik-video-zoom-track { width:6px; height:88px; border-radius:999px; position:relative; background:rgba(255,255,255,0.10); overflow:hidden; }
+          .hik-video-zoom-track span { position:absolute; left:0; right:0; top:18%; bottom:18%; border-radius:999px; background:linear-gradient(180deg, color-mix(in srgb, var(--hik-accent) 82%, #fff 8%), rgba(255,255,255,0.10)); opacity:0.9; }
+          .hik-video-refocus-btn { position:absolute; left:16px; bottom:220px; min-height:38px; padding:0 14px; border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-refocus-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
+          .hik-video-refocus-btn:active:not(:disabled) { transform:scale(0.97); }
+          .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
+          .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
           .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
           .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
@@ -3880,6 +3912,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-motion-grid, .hik-lens-grid { grid-template-columns:1fr; }
             .hik-audio-console-grid { grid-template-columns:1fr; }
             .hik-pad { max-width:220px; }
+            .hik-video-ptz-pad { grid-template-columns:repeat(3,50px); gap:8px; left:12px; bottom:12px; }
+            .hik-video-ptz-btn { min-height:50px; min-width:50px; border-radius:16px; }
+            .hik-video-zoom-rail { right:12px; width:52px; padding:8px 7px; }
+            .hik-video-zoom-track { height:72px; }
+            .hik-video-refocus-btn { left:12px; bottom:188px; min-height:34px; padding:0 12px; }
+            .hik-video-refocus-btn span { font-size:12px; }
           }
         </style>
         <div class="hik-wrap">
@@ -3910,6 +3948,57 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
               <div class="hik-merged-shell">
                 <div class="hik-video-block">
                   <div id="hikvision-video-host"></div>
+                  ${(!playbackActive && ptz) ? `
+                    <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
+                      <div class="hik-video-ptz-surface">
+                        <div class="hik-video-ptz-top">
+                          <div class="hik-video-ptz-chip">
+                            <ha-icon icon="mdi:axis-arrow"></ha-icon>
+                            <span>Live PTZ</span>
+                          </div>
+                          <div class="hik-video-ptz-chip subtle">
+                            <ha-icon icon="mdi:speedometer"></ha-icon>
+                            <span>${speed}</span>
+                          </div>
+                        </div>
+                        <div class="hik-video-ptz-pad">
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
+                            <ha-icon icon="mdi:chevron-up"></ha-icon>
+                          </button>
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move left" title="Move left">
+                            <ha-icon icon="mdi:chevron-left"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-ptz-btn center" id="hik-center-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Return home" title="Return home">
+                            <span class="hik-video-ptz-center-core"></span>
+                            <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move right" title="Move right">
+                            <ha-icon icon="mdi:chevron-right"></ha-icon>
+                          </button>
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move down" title="Move down">
+                            <ha-icon icon="mdi:chevron-down"></ha-icon>
+                          </button>
+                          <div></div>
+                        </div>
+                        <div class="hik-video-zoom-rail">
+                          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Zoom in" title="Zoom in">
+                            <ha-icon icon="mdi:magnify-plus"></ha-icon>
+                          </button>
+                          <div class="hik-video-zoom-track"><span></span></div>
+                          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Zoom out" title="Zoom out">
+                            <ha-icon icon="mdi:magnify-minus"></ha-icon>
+                          </button>
+                        </div>
+                        <button type="button" class="hik-video-refocus-btn" id="hik-refocus-overlay" ${(!online || this._returningHome) ? 'disabled' : ''}>
+                          <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                          <span>Refocus</span>
+                        </button>
+                      </div>
+                    </div>
+                  ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-overlay-toggle">
                       <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-middle">
@@ -4040,8 +4129,9 @@ ${this.config.show_playback_panel !== false ? `
     this.querySelectorAll(".ptz-btn").forEach((btn) => {
       const pan = Number(btn.dataset.pan);
       const tilt = Number(btn.dataset.tilt);
-      const start = (ev) => { ev.preventDefault(); this.startMove(pan, tilt); };
-      const stop = () => this.stopMove();
+      const source = btn.closest(".hik-video-ptz-overlay") ? "overlay" : "panel";
+      const start = (ev) => { ev.preventDefault(); this.startMove(pan, tilt, { source }); };
+      const stop = () => this.stopMove({ source });
       btn.addEventListener("mousedown", start);
       btn.addEventListener("mouseup", stop);
       btn.addEventListener("mouseleave", stop);
@@ -4051,8 +4141,10 @@ ${this.config.show_playback_panel !== false ? `
     });
 
     this.querySelector("#hik-center")?.addEventListener("click", () => this.handleCenter());
-    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: "panel" })));
+    this.querySelector("#hik-center-overlay")?.addEventListener("click", () => this.handleCenter());
+    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: btn.closest(".hik-video-ptz-overlay") ? "overlay" : "panel" })));
     this.querySelector("#hik-refocus")?.addEventListener("click", () => this.handleRefocus());
+    this.querySelector("#hik-refocus-overlay")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
     this.querySelector("#hik-return-home")?.addEventListener("click", () => this.handleReturnHome());
     this.querySelectorAll(".preset-btn").forEach((btn) => btn.addEventListener("click", () => this.gotoPreset(Number(btn.dataset.preset))));
