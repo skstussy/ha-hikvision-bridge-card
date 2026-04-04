@@ -11,7 +11,7 @@ _renderWebRtcPtzStatus() {
   return html`
     <div class="debug-card">
       <h3>WebRTC PTZ Status</h3>
-      <div>Bound: ${s.webrtc_ptz_bound ? "✅" : "❌"}</div>
+      <div>Bound: ${s.webrtc_overlay_active ? "✅" : "❌"}</div>
       <div>Attempts: ${s.webrtc_ptz_attempts || 0}</div>
       <div>Candidate Roots: ${s.webrtc_ptz_candidate_roots || 0}</div>
       <div>Buttons Found: ${s.webrtc_ptz_button_count || 0}</div>
@@ -167,15 +167,8 @@ _pushDebugEntry(entry) {
     this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
     this._lastDebugSnapshot = this._lastDebugSnapshot || null;
     this._panelOpenState = this._panelOpenState || {};
-    this._webRtcPtzObserver = this._webRtcPtzObserver || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
-    this._webRtcPtzRetryTimers = Array.isArray(this._webRtcPtzRetryTimers) ? this._webRtcPtzRetryTimers : [];
-    this._webRtcPtzBindAttempts = Number.isFinite(this._webRtcPtzBindAttempts) ? this._webRtcPtzBindAttempts : 0;
-    this._webRtcPtzLastBindReason = this._webRtcPtzLastBindReason || "";
-    this._webRtcPtzLastBindAt = this._webRtcPtzLastBindAt || "";
-    this._webRtcPtzLastCandidateCount = Number.isFinite(this._webRtcPtzLastCandidateCount) ? this._webRtcPtzLastCandidateCount : 0;
-    this._webRtcPtzLastButtonCount = Number.isFinite(this._webRtcPtzLastButtonCount) ? this._webRtcPtzLastButtonCount : 0;
   }
 
   set hass(hass) {
@@ -410,180 +403,19 @@ _pushDebugEntry(entry) {
     this.startMove(pan, tilt, { trace_id: traceId, source: "webrtc", action });
   }
 
-  _clearWebRtcPtzRetryTimers() {
-    (this._webRtcPtzRetryTimers || []).forEach((timer) => {
-      try { clearTimeout(timer); } catch (err) {}
-    });
-    this._webRtcPtzRetryTimers = [];
-  }
+  _clearWebRtcPtzRetryTimers() {}
+
 
   _getWebRtcCandidateRoots(root) {
-    const candidates = [];
-    const seen = new Set();
-    const push = (node) => {
-      if (!node || seen.has(node)) return;
-      seen.add(node);
-      candidates.push(node);
-    };
-    push(root);
-    push(this._videoCard);
-    push(this._videoCard?.shadowRoot || this._videoCard?.renderRoot || null);
-    const walker = (node, depth = 0) => {
-      if (!node || depth > 5) return;
-      try {
-        const elements = [];
-        if (typeof node.querySelectorAll === "function") {
-          elements.push(...node.querySelectorAll("webrtc-camera, .webrtc-camera, [class*='webrtc'], [class*='ptz'], ha-card, *"));
-        } else if (node.children) {
-          elements.push(...node.children);
-        }
-        elements.forEach((el) => {
-          push(el);
-          if (el?.shadowRoot) push(el.shadowRoot);
-          if (el?.renderRoot) push(el.renderRoot);
-          if (el?.shadowRoot) walker(el.shadowRoot, depth + 1);
-          if (el?.renderRoot && el.renderRoot !== el.shadowRoot) walker(el.renderRoot, depth + 1);
-        });
-      } catch (err) {}
-    };
-    walker(root, 0);
-    return candidates;
+    return [];
   }
 
   _findWebRtcPtzRoot(root) {
-    const selectors = [
-      ".ptz",
-      "[class~='ptz']",
-      "[class*='ptz']",
-      "[part='ptz']",
-      "[data-action*='zoom']",
-      "button[title*='Zoom'],button[aria-label*='Zoom'],button[title*='zoom'],button[aria-label*='zoom']",
-    ];
-    const candidates = this._getWebRtcCandidateRoots(root);
-    let ptzRoot = null;
-    let buttonCount = 0;
-    for (const candidate of candidates) {
-      if (!candidate || typeof candidate.querySelector !== "function") continue;
-      for (const selector of selectors) {
-        let found = null;
-        try { found = candidate.querySelector(selector); } catch (err) { found = null; }
-        if (!found) continue;
-        const resolved = found.matches?.("button, ha-icon-button, mwc-icon-button") ? found.parentElement || found : found;
-        const buttons = Array.from(resolved?.querySelectorAll?.("button, ha-icon-button, mwc-icon-button") || []);
-        if (buttons.length >= 2 || selector === ".ptz" || selector.includes("zoom")) {
-          ptzRoot = resolved;
-          buttonCount = buttons.length;
-          break;
-        }
-      }
-      if (ptzRoot) break;
-    }
-    this._webRtcPtzLastCandidateCount = candidates.length;
-    this._webRtcPtzLastButtonCount = buttonCount;
-    return { ptzRoot, candidates, buttonCount };
+    return { ptzRoot: null, candidates: [], buttonCount: 0 };
   }
 
   _bindWebRtcPtzButtons(root) {
-    if (!root || this._webRtcPtzBound) return false;
-    const discovery = this._findWebRtcPtzRoot(root);
-    const ptzRoot = discovery.ptzRoot;
-    if (!ptzRoot) {
-      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe_legacy", "WebRTC PTZ probe found no PTZ root", {
-        candidate_roots: discovery.candidates.length,
-        button_count: discovery.buttonCount,
-      }, "frontend");
-      return false;
-    }
-
-    const buttons = Array.from(ptzRoot.querySelectorAll("button, ha-icon-button, mwc-icon-button"));
-    if (!buttons.length) {
-      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe_legacy", "WebRTC PTZ root found but no buttons detected", {
-        candidate_roots: discovery.candidates.length,
-        button_count: 0,
-        ptz_root_class: ptzRoot.className || ptzRoot.getAttribute?.("class") || "",
-      }, "frontend");
-      return false;
-    }
-
-    const cleanup = [];
-    const bind = (target, type, handler, options = undefined) => {
-      target.addEventListener(type, handler, options);
-      cleanup.push(() => target.removeEventListener(type, handler, options));
-    };
-    const halt = (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.stopImmediatePropagation?.();
-    };
-    const getActionFromEvent = (ev, traceId = "") => {
-      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
-      for (const node of path) {
-        if (!node || node === window || node === document || node === ptzRoot) continue;
-        const action = this._detectWebRtcPtzAction(node, traceId);
-        if (action) return action;
-      }
-      return this._detectWebRtcPtzAction(ev.target, traceId);
-    };
-    const delegatedZoom = (ev) => {
-      const traceId = this._nextDebugTraceId("ptz");
-      const action = getActionFromEvent(ev, traceId);
-      if (action !== "zoom_in" && action !== "zoom_out") return;
-      halt(ev);
-      this._pushTraceDebug("controls", "info", "webrtc_ptz_input", "Intercepted delegated WebRTC PTZ zoom input", { action, event_type: ev.type }, traceId, "frontend");
-      this._handleWebRtcPtzAction(action, "click", traceId);
-    };
-
-    bind(ptzRoot, "pointerdown", delegatedZoom, true);
-    bind(ptzRoot, "mousedown", delegatedZoom, true);
-    bind(ptzRoot, "touchstart", delegatedZoom, { passive: false, capture: true });
-    bind(ptzRoot, "click", delegatedZoom, true);
-
-    buttons.forEach((button) => {
-      const action = this._detectWebRtcPtzAction(button);
-      if (!action) return;
-
-      const start = (ev) => {
-        const traceId = this._nextDebugTraceId("ptz");
-        halt(ev);
-        this._pushTraceDebug("controls", "info", "webrtc_ptz_input", "WebRTC PTZ button press", { action, event_type: ev.type }, traceId, "frontend");
-        this._handleWebRtcPtzAction(action, "start", traceId);
-      };
-      const stop = (ev) => {
-        const traceId = this._nextDebugTraceId("ptz");
-        halt(ev);
-        this._pushTraceDebug("controls", "debug", "webrtc_ptz_release", "WebRTC PTZ button release", { action, event_type: ev.type }, traceId, "frontend");
-        this._handleWebRtcPtzAction(action, "end", traceId);
-      };
-      const click = (ev) => {
-        const traceId = this._nextDebugTraceId("ptz");
-        halt(ev);
-        this._pushTraceDebug("controls", "info", "webrtc_ptz_click", "WebRTC PTZ zoom button click", { action, event_type: ev.type }, traceId, "frontend");
-        if (action === "zoom_in" || action === "zoom_out") this._handleWebRtcPtzAction(action, "click", traceId);
-      };
-
-      if (action === "zoom_in" || action === "zoom_out") {
-        bind(button, "pointerdown", click, true);
-        bind(button, "mousedown", click, true);
-        bind(button, "click", click, true);
-        bind(button, "touchstart", click, { passive: false, capture: true });
-      } else {
-        bind(button, "pointerdown", start, true);
-        bind(button, "mousedown", start, true);
-        bind(button, "mouseup", stop, true);
-        bind(button, "mouseleave", stop, true);
-        bind(button, "pointerup", stop, true);
-        bind(button, "pointercancel", stop, true);
-        bind(button, "touchstart", start, { passive: false, capture: true });
-        bind(button, "touchend", stop, { capture: true });
-        bind(button, "touchcancel", stop, { capture: true });
-      }
-    });
-
-    this._webRtcPtzCleanup = () => cleanup.splice(0).forEach((fn) => {
-      try { fn(); } catch (err) {}
-    });
-    this._webRtcPtzBound = true;
-    return true;
+    return false;
   }
 
 
@@ -603,26 +435,15 @@ _pushDebugEntry(entry) {
     this._webRtcPtzLastCandidateCount = 0;
     this._webRtcPtzLastButtonCount = 0;
     this._webRtcPtzBound = true;
-    this._pushDebug("webrtc", "info", "webrtc_ptz_probe_disabled", "Skipping legacy WebRTC PTZ button probing; using custom overlay controls", {
-      playback_mode: false,
-      mode: "custom_overlay",
-    }, "frontend");
   }
 
 
   _teardownWebRtcPtzBindings() {
-    this._clearWebRtcPtzRetryTimers();
-    if (this._webRtcPtzObserver) {
-      try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
-    }
-    this._webRtcPtzObserver = null;
     if (typeof this._webRtcPtzCleanup === "function") {
       try { this._webRtcPtzCleanup(); } catch (err) {}
     }
     this._webRtcPtzCleanup = null;
     this._webRtcPtzBound = false;
-    this._webRtcPtzLastCandidateCount = 0;
-    this._webRtcPtzLastButtonCount = 0;
   }
 
   _syncWebRtcCardConfig(playbackMode = false) {
@@ -688,7 +509,7 @@ _pushDebugEntry(entry) {
       playback_active: cameraEntity?.attributes?.playback_active === true,
       playback_requested_time: playbackState?.currentTime || cameraEntity?.attributes?.playback_requested_time || "",
       webrtc_configured: !!this._videoCardConfig && this._videoCardConfig?.type === "custom:webrtc-camera",
-      webrtc_ptz_bound: !!this._webRtcPtzBound,
+      webrtc_overlay_active: !!this._webRtcPtzBound,
       webrtc_ptz_attempts: this._webRtcPtzBindAttempts || 0,
       webrtc_ptz_last_bind_reason: this._webRtcPtzLastBindReason || "",
       webrtc_ptz_last_bind_at: this._webRtcPtzLastBindAt || "",
@@ -1069,7 +890,7 @@ _toggleDebugFilter(kind, value) {
         <span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(snapshot.channel || "-")}</span>
         <span class="hik-pill ${snapshot.online ? "good" : "warn"}"><ha-icon icon="mdi:lan-connect"></ha-icon>${snapshot.online ? "Online" : "Offline"}</span>
         <span class="hik-pill ${snapshot.ptz_supported ? "good" : "neutral"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_supported))}</span>
-        <span class="hik-pill ${snapshot.webrtc_ptz_bound ? "good" : "neutral"}"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC PTZ ${this.escapeHtml(String(snapshot.webrtc_ptz_bound))}</span>
+        <span class="hik-pill ${snapshot.webrtc_overlay_active ? "good" : "neutral"}"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC PTZ ${this.escapeHtml(String(snapshot.webrtc_overlay_active))}</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:speedometer"></ha-icon>Speed ${this.escapeHtml(String(snapshot.speed || "-"))}</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_duration || "-"))}ms</span>
         <span class="hik-pill neutral"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.escapeHtml(String(snapshot.lens_duration || "-"))}ms</span>
