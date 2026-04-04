@@ -2546,13 +2546,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     const requestedMode = String(streamMode || this.config.video_mode || "rtsp_direct").toLowerCase();
     const playbackMode = Boolean(playbackUri);
-    const useSnapshot = !playbackMode && requestedMode === "snapshot";
-    const preferredRtspUrl = playbackMode
-      ? playbackUri
-      : (requestedMode === "webrtc_direct" || requestedMode === "rtsp_direct"
-          ? (directRtspUrl || rtspUrl)
-          : (rtspUrl || directRtspUrl));
     const useWebRtc = playbackMode || (!useSnapshot && Boolean(preferredRtspUrl));
+    const useSnapshot = !playbackMode && requestedMode === "snapshot";
+    const preferredRtspUrl = playbackMode ? playbackUri : (requestedMode === "webrtc_direct" || requestedMode === "rtsp_direct" ? (directRtspUrl || rtspUrl) : (rtspUrl || directRtspUrl));
     this._preferredRtspUrl = preferredRtspUrl || "";
     const signature = JSON.stringify({
       entity: cameraEntityId || "",
