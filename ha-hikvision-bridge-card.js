@@ -1,6 +1,35 @@
 /* UI Split Patch 2.6.1 */
 
 class HikvisionPTZCard extends HTMLElement {
+
+  // === TALK DEBUG SYSTEM ===
+  _talkDebugEnabled = true;
+  _talkDebugEntries = [];
+
+  _addTalkDebugEntry(level, message, data = null) {
+    const entry = {
+      ts: new Date().toISOString(),
+      level,
+      message,
+      data
+    };
+    this._talkDebugEntries = [...this._talkDebugEntries, entry].slice(-50);
+    this.requestUpdate();
+  }
+
+  _renderTalkDebug() {
+    if (!this._talkDebugEnabled) return null;
+    return html`
+${this._renderTalkDebug()}
+      <div class="talk-debug">
+        <div><b>Talk Debug</b></div>
+        ${this._talkDebugEntries.map(e => html`
+          <div>[${e.level}] ${e.message}</div>
+        `)}
+      </div>
+    `;
+  }
+
   setConfig(config) {
     this.config = {
       title: "ha-hikvision-bridge-card",
@@ -458,7 +487,8 @@ _toggleDebugFilter(kind, value) {
       if (!rtspUrl) throw new Error("No RTSP URL available for talkback");
       this._pushAudioDebug("rtsp_selected", { rtspUrl });
 
-      this._talkStream = await navigator.mediaDevices.getUserMedia({
+      this._talkStream = await navigator.mediaDevices.this._addTalkDebugEntry('info','request mic');
+getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
