@@ -2546,7 +2546,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     const requestedMode = String(streamMode || this.config.video_mode || "rtsp_direct").toLowerCase();
     const playbackMode = Boolean(playbackUri);
-    const useWebRtc = playbackMode || requestedMode === "webrtc" || requestedMode === "webrtc_direct";
+    const useWebRtc = playbackMode || (!useSnapshot && Boolean(preferredRtspUrl));
     const useSnapshot = !playbackMode && requestedMode === "snapshot";
     const preferredRtspUrl = playbackMode ? playbackUri : (requestedMode === "webrtc_direct" || requestedMode === "rtsp_direct" ? (directRtspUrl || rtspUrl) : (rtspUrl || directRtspUrl));
     this._preferredRtspUrl = preferredRtspUrl || "";
@@ -2795,8 +2795,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           ["WebRTC path", ["webrtc", "webrtc_direct"].includes(streamMode) ? "Enabled" : "Disabled"],
           ["RTSP source", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? "Direct RTSP" : streamMode === "snapshot" ? "Camera snapshot" : "ISAPI RTSP"],
           ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
-          ["Muted UI", ["webrtc", "webrtc_direct"].includes(streamMode) ? "Yes" : "Managed by HA card"],
-          ["Card helper", ["webrtc", "webrtc_direct"].includes(streamMode) ? "custom:webrtc-camera" : "picture-entity"],
+          ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
+          ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
           ["Preferred URL", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-")],
         ])}
       </div>
