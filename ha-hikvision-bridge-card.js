@@ -93,6 +93,12 @@ class HikvisionPTZCard extends HTMLElement {
     this._webRtcPtzObserver = this._webRtcPtzObserver || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
+    this._webRtcPtzRetryTimers = Array.isArray(this._webRtcPtzRetryTimers) ? this._webRtcPtzRetryTimers : [];
+    this._webRtcPtzBindAttempts = Number.isFinite(this._webRtcPtzBindAttempts) ? this._webRtcPtzBindAttempts : 0;
+    this._webRtcPtzLastBindReason = this._webRtcPtzLastBindReason || "";
+    this._webRtcPtzLastBindAt = this._webRtcPtzLastBindAt || "";
+    this._webRtcPtzLastCandidateCount = Number.isFinite(this._webRtcPtzLastCandidateCount) ? this._webRtcPtzLastCandidateCount : 0;
+    this._webRtcPtzLastButtonCount = Number.isFinite(this._webRtcPtzLastButtonCount) ? this._webRtcPtzLastButtonCount : 0;
   }
 
   set hass(hass) {
@@ -302,13 +308,100 @@ class HikvisionPTZCard extends HTMLElement {
     this.startMove(pan, tilt, { trace_id: traceId, source: "webrtc", action });
   }
 
+  _clearWebRtcPtzRetryTimers() {
+    (this._webRtcPtzRetryTimers || []).forEach((timer) => {
+      try { clearTimeout(timer); } catch (err) {}
+    });
+    this._webRtcPtzRetryTimers = [];
+  }
+
+  _getWebRtcCandidateRoots(root) {
+    const candidates = [];
+    const seen = new Set();
+    const push = (node) => {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      candidates.push(node);
+    };
+    push(root);
+    push(this._videoCard);
+    push(this._videoCard?.shadowRoot || this._videoCard?.renderRoot || null);
+    const walker = (node, depth = 0) => {
+      if (!node || depth > 5) return;
+      try {
+        const elements = [];
+        if (typeof node.querySelectorAll === "function") {
+          elements.push(...node.querySelectorAll("webrtc-camera, .webrtc-camera, [class*='webrtc'], [class*='ptz'], ha-card, *"));
+        } else if (node.children) {
+          elements.push(...node.children);
+        }
+        elements.forEach((el) => {
+          push(el);
+          if (el?.shadowRoot) push(el.shadowRoot);
+          if (el?.renderRoot) push(el.renderRoot);
+          if (el?.shadowRoot) walker(el.shadowRoot, depth + 1);
+          if (el?.renderRoot && el.renderRoot !== el.shadowRoot) walker(el.renderRoot, depth + 1);
+        });
+      } catch (err) {}
+    };
+    walker(root, 0);
+    return candidates;
+  }
+
+  _findWebRtcPtzRoot(root) {
+    const selectors = [
+      ".ptz",
+      "[class~='ptz']",
+      "[class*='ptz']",
+      "[part='ptz']",
+      "[data-action*='zoom']",
+      "button[title*='Zoom'],button[aria-label*='Zoom'],button[title*='zoom'],button[aria-label*='zoom']",
+    ];
+    const candidates = this._getWebRtcCandidateRoots(root);
+    let ptzRoot = null;
+    let buttonCount = 0;
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate.querySelector !== "function") continue;
+      for (const selector of selectors) {
+        let found = null;
+        try { found = candidate.querySelector(selector); } catch (err) { found = null; }
+        if (!found) continue;
+        const resolved = found.matches?.("button, ha-icon-button, mwc-icon-button") ? found.parentElement || found : found;
+        const buttons = Array.from(resolved?.querySelectorAll?.("button, ha-icon-button, mwc-icon-button") || []);
+        if (buttons.length >= 2 || selector === ".ptz" || selector.includes("zoom")) {
+          ptzRoot = resolved;
+          buttonCount = buttons.length;
+          break;
+        }
+      }
+      if (ptzRoot) break;
+    }
+    this._webRtcPtzLastCandidateCount = candidates.length;
+    this._webRtcPtzLastButtonCount = buttonCount;
+    return { ptzRoot, candidates, buttonCount };
+  }
+
   _bindWebRtcPtzButtons(root) {
     if (!root || this._webRtcPtzBound) return false;
-    const ptzRoot = root.querySelector?.(".ptz");
-    if (!ptzRoot) return false;
+    const discovery = this._findWebRtcPtzRoot(root);
+    const ptzRoot = discovery.ptzRoot;
+    if (!ptzRoot) {
+      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe", "WebRTC PTZ probe found no PTZ root", {
+        candidate_roots: discovery.candidates.length,
+        button_count: discovery.buttonCount,
+      }, "frontend");
+      return false;
+    }
 
     const buttons = Array.from(ptzRoot.querySelectorAll("button, ha-icon-button, mwc-icon-button"));
-    if (!buttons.length) return false;
+    if (!buttons.length) {
+      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe", "WebRTC PTZ root found but no buttons detected", {
+        candidate_roots: discovery.candidates.length,
+        button_count: 0,
+        ptz_root_class: ptzRoot.className || ptzRoot.getAttribute?.("class") || "",
+      }, "frontend");
+      return false;
+    }
 
     const cleanup = [];
     const bind = (target, type, handler, options = undefined) => {
@@ -395,32 +488,69 @@ class HikvisionPTZCard extends HTMLElement {
     this._teardownWebRtcPtzBindings();
     if (!card || playbackMode) return;
 
-    const tryBind = () => {
+    this._webRtcPtzBindAttempts = 0;
+    this._webRtcPtzLastBindReason = "";
+    this._webRtcPtzLastBindAt = "";
+    this._webRtcPtzLastCandidateCount = 0;
+    this._webRtcPtzLastButtonCount = 0;
+
+    const tryBind = (reason = "initial") => {
+      this._webRtcPtzBindAttempts += 1;
       const root = card.shadowRoot || card.renderRoot || null;
       if (!root) {
-        this._pushDebug("webrtc", "warn", "webrtc_ptz_root_missing", "WebRTC card root not ready for PTZ binding", {}, "frontend");
+        this._webRtcPtzLastBindReason = "root_missing";
+        this._webRtcPtzLastBindAt = new Date().toISOString();
+        this._pushDebug("webrtc", "warn", "webrtc_ptz_root_missing", "WebRTC card root not ready for PTZ binding", {
+          attempt: this._webRtcPtzBindAttempts,
+          reason,
+        }, "frontend");
         return false;
       }
       const bound = this._bindWebRtcPtzButtons(root);
-      this._pushDebug("webrtc", bound ? "info" : "warn", bound ? "webrtc_ptz_bound" : "webrtc_ptz_buttons_missing", bound ? "Bound WebRTC PTZ overlay handlers" : "WebRTC PTZ overlay buttons not found yet", { playback_mode: playbackMode }, "frontend");
+      this._webRtcPtzLastBindReason = bound ? `bound:${reason}` : `buttons_missing:${reason}`;
+      this._webRtcPtzLastBindAt = new Date().toISOString();
+      this._pushDebug("webrtc", bound ? "info" : "warn", bound ? "webrtc_ptz_bound" : "webrtc_ptz_buttons_missing", bound ? "Bound WebRTC PTZ overlay handlers" : "WebRTC PTZ overlay buttons not found yet", {
+        playback_mode: playbackMode,
+        attempt: this._webRtcPtzBindAttempts,
+        reason,
+        candidate_roots: this._webRtcPtzLastCandidateCount,
+        button_count: this._webRtcPtzLastButtonCount,
+      }, "frontend");
       return bound;
     };
 
-    if (tryBind()) return;
+    if (tryBind("initial")) return;
 
     const root = card.shadowRoot || card.renderRoot || null;
-    if (!root || typeof MutationObserver === "undefined") return;
+    if (typeof MutationObserver !== "undefined") {
+      this._webRtcPtzObserver = new MutationObserver((mutations) => {
+        const summary = (mutations || []).slice(0, 5).map((m) => ({ type: m.type, added: m.addedNodes?.length || 0, removed: m.removedNodes?.length || 0 }));
+        this._pushDebug("webrtc", "debug", "webrtc_ptz_mutation", "Observed WebRTC PTZ DOM mutation", {
+          attempt: this._webRtcPtzBindAttempts,
+          mutation_count: (mutations || []).length,
+          summary,
+        }, "frontend");
+        if (tryBind("mutation") && this._webRtcPtzObserver) {
+          try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
+          this._webRtcPtzObserver = null;
+        }
+      });
+      try {
+        this._webRtcPtzObserver.observe(root || card, { childList: true, subtree: true, attributes: true });
+      } catch (err) {}
+    }
 
-    this._webRtcPtzObserver = new MutationObserver(() => {
-      if (tryBind() && this._webRtcPtzObserver) {
-        try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
-        this._webRtcPtzObserver = null;
-      }
+    [100, 250, 500, 1000, 2000, 3500].forEach((delay) => {
+      const timer = setTimeout(() => {
+        if (this._webRtcPtzBound) return;
+        tryBind(`retry_${delay}ms`);
+      }, delay);
+      this._webRtcPtzRetryTimers.push(timer);
     });
-    this._webRtcPtzObserver.observe(root, { childList: true, subtree: true });
   }
 
   _teardownWebRtcPtzBindings() {
+    this._clearWebRtcPtzRetryTimers();
     if (this._webRtcPtzObserver) {
       try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
     }
@@ -496,6 +626,11 @@ class HikvisionPTZCard extends HTMLElement {
       playback_requested_time: playbackState?.currentTime || cameraEntity?.attributes?.playback_requested_time || "",
       webrtc_configured: !!this._videoCardConfig && this._videoCardConfig?.type === "custom:webrtc-camera",
       webrtc_ptz_bound: !!this._webRtcPtzBound,
+      webrtc_ptz_attempts: this._webRtcPtzBindAttempts || 0,
+      webrtc_ptz_last_bind_reason: this._webRtcPtzLastBindReason || "",
+      webrtc_ptz_last_bind_at: this._webRtcPtzLastBindAt || "",
+      webrtc_ptz_candidate_roots: this._webRtcPtzLastCandidateCount || 0,
+      webrtc_ptz_button_count: this._webRtcPtzLastButtonCount || 0,
       speed: Math.max(1, Math.min(100, Number(this.config?.speed || 50))),
       ptz_duration: this.getPTZDuration?.(),
       lens_duration: this.getLensDuration?.(),
