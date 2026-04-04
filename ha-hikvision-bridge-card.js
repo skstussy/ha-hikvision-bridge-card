@@ -287,44 +287,6 @@ _pushDebugEntry(entry) {
     return config;
   }
 
-  _useCustomVideoPtzOverlay(playbackMode = false) {
-    return !playbackMode && this.canPtz() && !this._returningHome;
-  }
-
-  renderVideoPtzOverlay({ online = false, ptz = false, playbackActive = false } = {}) {
-    if (!this._useCustomVideoPtzOverlay(playbackActive) || !online || !ptz) return "";
-    return `
-      <div class="hik-video-ptz-overlay" aria-label="PTZ overlay controls">
-        <div class="hik-video-ptz-cluster">
-          <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" title="Move up" aria-label="Move up">
-            <ha-icon icon="mdi:chevron-up"></ha-icon>
-          </button>
-          <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" title="Move left" aria-label="Move left">
-            <ha-icon icon="mdi:chevron-left"></ha-icon>
-          </button>
-          <button type="button" class="hik-video-ptz-btn center" id="hik-video-center" title="Return home" aria-label="Return home">
-            <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
-          </button>
-          <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" title="Move right" aria-label="Move right">
-            <ha-icon icon="mdi:chevron-right"></ha-icon>
-          </button>
-          <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" title="Move down" aria-label="Move down">
-            <ha-icon icon="mdi:chevron-down"></ha-icon>
-          </button>
-        </div>
-        <div class="hik-video-zoom-rail">
-          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="1" title="Zoom in" aria-label="Zoom in">
-            <ha-icon icon="mdi:magnify-plus"></ha-icon>
-          </button>
-          <div class="hik-video-zoom-label">Zoom</div>
-          <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="-1" title="Zoom out" aria-label="Zoom out">
-            <ha-icon icon="mdi:magnify-minus"></ha-icon>
-          </button>
-        </div>
-      </div>
-    `;
-  }
-
   _getWebRtcPtzActionSignature(node) {
     if (!node) return "";
     const bits = [];
@@ -599,23 +561,6 @@ _pushDebugEntry(entry) {
     if (!card || playbackMode) return;
 
     this._webRtcPtzBindAttempts = 0;
-    if (this._useCustomVideoPtzOverlay(playbackMode)) {
-      this._webRtcPtzBound = true;
-      this._webRtcPtzLastBindReason = "custom_overlay";
-      this._webRtcPtzLastBindAt = new Date().toISOString();
-      this._webRtcPtzLastCandidateCount = 1;
-      this._webRtcPtzLastButtonCount = 7;
-      this._pushDebug("webrtc", "info", "webrtc_ptz_bound", "Using built-in PTZ video overlay controls", {
-        playback_mode: playbackMode,
-        attempt: 1,
-        reason: "custom_overlay",
-        candidate_roots: 1,
-        button_count: 7,
-      }, "frontend");
-      return;
-    }
-
-    this._webRtcPtzBindAttempts = 0;
     this._webRtcPtzLastBindReason = "";
     this._webRtcPtzLastBindAt = "";
     this._webRtcPtzLastCandidateCount = 0;
@@ -740,7 +685,7 @@ _pushDebugEntry(entry) {
     const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
     const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
     return {
-      card_version: "1.0.29-ux1",
+      card_version: "1.0.22",
       selected_camera: cam?.name || "",
       channel: cam?.channel != null ? String(cam.channel) : "",
       online: !!this.isOnline?.(),
@@ -930,10 +875,27 @@ _toggleDebugFilter(kind, value) {
   _getFilteredDebugEntries() {
     const categoryFilters = new Set(this._debugFilters?.categories || ["all"]);
     const levelFilters = new Set(this._debugFilters?.levels || ["all"]);
+    const query = String(this._debugSearchQuery || "").trim().toLowerCase();
     return (this._debugEntries || []).filter((entry) => {
       const categoryMatch = categoryFilters.has("all") || categoryFilters.has(String(entry?.category || "").toLowerCase());
       const levelMatch = levelFilters.has("all") || levelFilters.has(String(entry?.level || "").toLowerCase());
-      return categoryMatch && levelMatch;
+      if (!categoryMatch || !levelMatch) return false;
+      if (!query) return true;
+      const haystack = [
+        entry?.time,
+        entry?.source,
+        entry?.category,
+        entry?.level,
+        entry?.event,
+        entry?.message,
+        entry?.camera,
+        entry?.details?.trace_id,
+        (() => {
+          try { return JSON.stringify(this._sanitizeDebugObject(entry?.details || {})); }
+          catch (err) { return ""; }
+        })(),
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
     }).slice().reverse();
   }
 
@@ -1147,6 +1109,8 @@ _toggleDebugFilter(kind, value) {
     const categories = ["all", "audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
     const levels = ["all", "error", "warn", "info", "debug"];
     const openAttr = this._debugDashboardOpen ? "open" : "";
+    const searchValue = this.escapeHtml(String(this._debugSearchQuery || ""));
+    const visibleEntries = entries.slice(0, 80);
     return `
       <div class="hik-panel hik-info-card hik-debug-dashboard">
         <details id="hik-debug-dashboard-details" ${openAttr}>
@@ -1154,58 +1118,76 @@ _toggleDebugFilter(kind, value) {
             <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
             <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
           </summary>
-          <div class="hik-mini-note">Current snapshot</div>
-          ${this._renderDebugSnapshot(camAttrs)}
-          <div class="hik-status-row">
-            <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
-            <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:alert-outline"></ha-icon>Warn ${this.escapeHtml(String(summary.warn))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:microphone-outline"></ha-icon>Audio ${this.escapeHtml(String(summary.audio))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Controls ${this.escapeHtml(String(summary.controls))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(summary.ptz))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC ${this.escapeHtml(String(summary.webrtc))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:api"></ha-icon>Service ${this.escapeHtml(String(summary.service))}</span>
-            <span class="hik-pill neutral"><ha-icon icon="mdi:state-machine"></ha-icon>State ${this.escapeHtml(String(summary.state))}</span>
-          </div>
-          <div class="hik-debug-toolbar">
-            <div class="hik-debug-filter-group">
-              ${categories.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.categories || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="categories" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-            </div>
-            <div class="hik-debug-filter-group">
-              ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-            </div>
-            <div class="hik-debug-actions">
-              <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
-              <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
-              <button class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
-              <button class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
+          <div class="hik-debug-overview">
+            <div class="hik-mini-note">Current snapshot</div>
+            ${this._renderDebugSnapshot(camAttrs)}
+            <div class="hik-status-row">
+              <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
+              <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:alert-outline"></ha-icon>Warn ${this.escapeHtml(String(summary.warn))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:microphone-outline"></ha-icon>Audio ${this.escapeHtml(String(summary.audio))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Controls ${this.escapeHtml(String(summary.controls))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(summary.ptz))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC ${this.escapeHtml(String(summary.webrtc))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:api"></ha-icon>Service ${this.escapeHtml(String(summary.service))}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:state-machine"></ha-icon>State ${this.escapeHtml(String(summary.state))}</span>
             </div>
           </div>
-          ${entries.length ? entries.slice(0, 40).map((entry, index) => {
-            const debugText = this.formatDebugEntryText(entry);
-            const badgeClass = entry.level === "error" ? "warn" : entry.level === "warn" ? "primary" : "neutral";
-            return `
-              <div class="hik-debug-block">
-                <div class="hik-status-row">
-                  <span class="hik-pill ${badgeClass}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.category || "general")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(entry.level || "info")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(entry.source || "frontend")}</span>
-                  ${entry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(entry.camera))}</span>` : ""}
-                  ${entry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(entry.details.trace_id))}</span>` : ""}
-                </div>
-                <div class="hik-mini-note"><b>${this.escapeHtml(entry.event || "event")}</b> · ${this.escapeHtml(entry.message || "")}</div>
-                <div class="hik-mini-note">${this.escapeHtml(entry.time || "")}</div>
+          <div class="hik-debug-console-shell">
+            <div class="hik-debug-toolbar">
+              <div class="hik-debug-toolbar-head">
+                <label class="hik-debug-search-wrap">
+                  <ha-icon icon="mdi:magnify"></ha-icon>
+                  <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
+                </label>
                 <div class="hik-debug-actions">
-                  <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
-                  <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
+                  <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
+                  <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
+                  <button class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
+                  <button class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
                 </div>
-                <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(debugText)}</textarea>
-                ${entry?.details ? `<details ${index === 0 ? "open" : ""}><summary>Details</summary><pre class="hik-debug-pre">${this.escapeHtml(JSON.stringify(entry.details, null, 2))}</pre></details>` : ""}
-              </div>`;
-          }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
+              </div>
+              <div class="hik-debug-filter-group">
+                ${categories.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.categories || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="categories" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
+              </div>
+              <div class="hik-debug-filter-group">
+                ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
+              </div>
+            </div>
+            <div class="hik-debug-feed" role="log" aria-live="polite">
+              ${visibleEntries.length ? visibleEntries.map((entry, index) => {
+                const debugText = this.formatDebugEntryText(entry);
+                const badgeClass = entry.level === "error" ? "warn" : entry.level === "warn" ? "primary" : "neutral";
+                return `
+                  <details class="hik-debug-block" ${index < 2 ? "open" : ""}>
+                    <summary class="hik-debug-entry-summary">
+                      <div class="hik-debug-entry-topline">
+                        <span class="hik-pill ${badgeClass}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.category || "general")}</span>
+                        <span class="hik-pill neutral"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(entry.level || "info")}</span>
+                        <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(entry.source || "frontend")}</span>
+                        ${entry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(entry.camera))}</span>` : ""}
+                        ${entry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(entry.details.trace_id))}</span>` : ""}
+                      </div>
+                      <div class="hik-debug-entry-main">
+                        <div class="hik-debug-entry-message"><b>${this.escapeHtml(entry.event || "event")}</b><span>${this.escapeHtml(entry.message || "")}</span></div>
+                        <div class="hik-debug-entry-time">${this.escapeHtml(entry.time || "")}</div>
+                      </div>
+                    </summary>
+                    <div class="hik-debug-entry-body">
+                      <div class="hik-debug-actions">
+                        <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
+                        <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
+                      </div>
+                      <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(debugText)}</textarea>
+                      ${entry?.details ? `<details><summary>Details</summary><pre class="hik-debug-pre">${this.escapeHtml(JSON.stringify(entry.details, null, 2))}</pre></details>` : ""}
+                    </div>
+                  </details>`;
+              }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
+            </div>
+          </div>
         </details>
       </div>`;
   }
@@ -2200,6 +2182,10 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                 <span class="hik-console-badge"><ha-icon icon="mdi:speedometer"></ha-icon>PTZ ${speed}</span>
                 <span class="hik-console-badge"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.getPTZDuration()}ms</span>
                 ${cameraAlarmBadges.length ? `<span class="hik-console-badge"><ha-icon icon="mdi:alert-outline"></ha-icon>${cameraAlarmBadges.length} alarm${cameraAlarmBadges.length === 1 ? "" : "s"}</span>` : ""}
+                <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
+                  <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                  <span>Refocus</span>
+                </button>
               </div>
             </div>
 
@@ -2210,11 +2196,11 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                     <div class="hik-pad-meta-row">
                       <span class="hik-console-badge"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>${ptz ? 'Pan / Tilt / Zoom on live video overlay' : 'PTZ unavailable'}</span>
                     </div>
-                    <div class="hik-webrtc-note compact">
+                    <div class="hik-webrtc-note">
                       <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
                       <div>
-                        <div class="hik-webrtc-note-title">Video overlay controls ready</div>
-                        <div class="hik-webrtc-note-copy">Use the on-video pad for the fastest PTZ moves. The console below remains available for fallback and fine control.</div>
+                        <div class="hik-webrtc-note-title">WebRTC PTZ overlay active</div>
+                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Legacy PTZ and zoom controls stay available below for fallback testing and debugging.</div>
                       </div>
                     </div>
                     <div class="hik-pad hik-pad-fallback">
@@ -2227,12 +2213,6 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                       <div></div>
                       ${this.iconButton({ icon: "mdi:chevron-down", label: "Move down", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="-1"', disabled: !ptz || this._returningHome })}
                       <div></div>
-                    </div>
-                    <div class="hik-console-inline-actions">
-                      <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
-                        <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                        <span>Refocus</span>
-                      </button>
                     </div>
                     <div class="hik-rail zoom fallback">
                       <div class="hik-rail-head"><ha-icon icon="mdi:magnify"></ha-icon><span>Zoom</span><span class="hik-mini-note">Fallback controls</span></div>
@@ -3772,25 +3752,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
           .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
-          .hik-video-ptz-overlay { position:absolute; right:16px; bottom:16px; z-index:4; display:grid; grid-template-columns:auto 56px; gap:12px; align-items:end; opacity:0.78; transition:opacity 0.18s ease, transform 0.18s ease; }
-          .hik-video-block:hover .hik-video-ptz-overlay, .hik-video-ptz-overlay:focus-within { opacity:1; transform:translateY(-1px); }
-          .hik-video-ptz-cluster { display:grid; grid-template-columns:repeat(3, 52px); grid-template-rows:repeat(3, 52px); gap:8px; grid-template-areas:
-            ". up ."
-            "left center right"
-            ". down ."; }
-          .hik-video-ptz-btn, .hik-video-zoom-btn { border:1px solid rgba(255,255,255,0.14); background:rgba(9,14,20,0.70); color:inherit; border-radius:16px; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(10px); box-shadow:0 10px 26px rgba(0,0,0,0.28); cursor:pointer; }
-          .hik-video-ptz-btn { width:52px; height:52px; }
-          .hik-video-ptz-btn.up { grid-area:up; }
-          .hik-video-ptz-btn.left { grid-area:left; }
-          .hik-video-ptz-btn.center { grid-area:center; }
-          .hik-video-ptz-btn.right { grid-area:right; }
-          .hik-video-ptz-btn.down { grid-area:down; }
-          .hik-video-ptz-btn ha-icon, .hik-video-zoom-btn ha-icon { --mdc-icon-size:22px; }
-          .hik-video-ptz-btn:hover, .hik-video-zoom-btn:hover { background:rgba(20,28,38,0.88); }
-          .hik-video-ptz-btn:disabled, .hik-video-zoom-btn:disabled { opacity:0.45; cursor:not-allowed; }
-          .hik-video-zoom-rail { display:grid; grid-template-rows:1fr auto 1fr; gap:8px; align-items:center; width:56px; padding:10px 0; border-radius:18px; border:1px solid rgba(255,255,255,0.14); background:rgba(9,14,20,0.70); backdrop-filter:blur(10px); box-shadow:0 10px 26px rgba(0,0,0,0.28); }
-          .hik-video-zoom-btn { width:40px; height:40px; margin:0 auto; border-radius:14px; }
-          .hik-video-zoom-label { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; justify-self:center; }
           .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
           .hik-overlay-toggle .hik-toggle-btn { width:auto; padding: 0 16px; border-radius:999px; min-height:42px; box-shadow:0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px); }
           .hik-faint { opacity:0.72; }
@@ -3825,18 +3786,34 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-audio-note { min-height:44px; display:flex; gap:8px; align-items:center; padding:0 12px; border-radius:12px; border:1px dashed color-mix(in srgb, var(--hik-accent) 16%, var(--divider-color)); }
           .hik-audio-note.compact { min-height:auto; padding:10px 12px; }
           .hik-audio-note.fill { height:100%; }
-          .hik-debug-block { margin-top:12px; padding:12px; border-radius:14px; background: color-mix(in srgb, var(--card-background-color) 70%, rgba(255,255,255,0.03)); border:1px solid rgba(255,255,255,0.06); }
+          .hik-debug-overview { display:grid; gap:12px; }
+          .hik-debug-console-shell { margin-top:14px; border:1px solid rgba(255,255,255,0.08); border-radius:18px; background: color-mix(in srgb, var(--secondary-background-color) 88%, rgba(0,0,0,0.18)); overflow:hidden; }
+          .hik-debug-toolbar { position:sticky; top:0; z-index:2; display:grid; gap:10px; padding:12px; margin:0; border-bottom:1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 92%, rgba(0,0,0,0.08)), color-mix(in srgb, var(--card-background-color) 96%, rgba(0,0,0,0.18))); backdrop-filter: blur(10px); }
+          .hik-debug-toolbar-head { display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap:wrap; }
+          .hik-debug-search-wrap { display:flex; align-items:center; gap:8px; min-width:260px; flex:1 1 320px; padding:0 12px; min-height:40px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.20); }
+          .hik-debug-search-wrap ha-icon { --mdc-icon-size:18px; opacity:0.7; }
+          .hik-debug-search { width:100%; border:0; outline:none; background:transparent; color:inherit; font-size:13px; }
+          .hik-debug-feed { max-height:560px; overflow:auto; padding:12px; display:grid; gap:10px; overscroll-behavior:contain; }
+          .hik-debug-block { margin:0; border-radius:14px; background: color-mix(in srgb, var(--card-background-color) 76%, rgba(255,255,255,0.03)); border:1px solid rgba(255,255,255,0.06); overflow:hidden; }
+          .hik-debug-block > summary { list-style:none; cursor:pointer; padding:12px; }
+          .hik-debug-block > summary::-webkit-details-marker { display:none; }
+          .hik-debug-entry-summary { display:grid; gap:10px; }
+          .hik-debug-entry-topline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+          .hik-debug-entry-main { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+          .hik-debug-entry-message { min-width:0; display:grid; gap:4px; }
+          .hik-debug-entry-message b { font-size:13px; }
+          .hik-debug-entry-message span { font-size:12px; opacity:0.82; word-break:break-word; }
+          .hik-debug-entry-time { flex:0 0 auto; font-size:11px; opacity:0.65; white-space:nowrap; }
+          .hik-debug-entry-body { border-top:1px solid rgba(255,255,255,0.06); padding:12px; background:rgba(0,0,0,0.10); }
           .hik-debug-block details { margin-top:8px; }
-          .hik-debug-block summary { cursor:pointer; font-size:12px; opacity:0.9; }
-          .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; padding:10px; border-radius:12px; background:rgba(0,0,0,0.28); }
+          .hik-debug-block details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
+          .hik-debug-pre { margin:8px 0 0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; padding:10px; border-radius:12px; background:rgba(0,0,0,0.28); }
           .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
-          .hik-debug-textarea { width:100%; min-height:220px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
-          .hik-debug-dashboard { margin-top:18px; }
-          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0; }
+          .hik-debug-textarea { width:100%; min-height:140px; max-height:240px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
+          .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
           .hik-debug-summary::-webkit-details-marker { display:none; }
-          .hik-debug-toolbar { display:grid; gap:10px; margin:12px 0; }
           .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
           .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; }
           .hik-debug-chip.active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.22); }
@@ -3866,13 +3843,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           @media (max-width: 1080px) {
             .hik-grid, .hik-info-grid, .hik-stream-grid { grid-template-columns:1fr; }
           }
-          @media (max-width: 900px) {
-            .hik-video-ptz-overlay { right:12px; bottom:68px; grid-template-columns:1fr; justify-items:end; }
-            .hik-video-zoom-rail { width:52px; }
-          }
           @media (max-width: 700px) {
-            .hik-video-ptz-cluster { grid-template-columns:repeat(3, 46px); grid-template-rows:repeat(3, 46px); gap:6px; }
-            .hik-video-ptz-btn { width:46px; height:46px; }
             .hik-titlebar, .hik-controls-head, .hik-console-topbar { flex-direction:column; align-items:stretch; }
             .hik-meta { grid-template-columns:1fr; }
             .hik-console-badges { width:100%; }
@@ -3910,7 +3881,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 <div class="hik-video-block">
                   <div id="hikvision-video-host"></div>
                   ${this.renderPlaybackOverlay(playbackIndicator)}
-                  ${this.renderVideoPtzOverlay({ online, ptz, playbackActive })}
                   <div class="hik-overlay-toggle">
                       <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-middle">
                         <ha-icon icon="mdi:tune-variant"></ha-icon>
@@ -3927,6 +3897,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
+                ${this.renderDebugDashboard(camAttrs)}
               </div>
             </div>
 
@@ -3981,7 +3952,6 @@ ${this.config.show_playback_panel !== false ? `
           </div>
 
           ${infoCards.length ? `<div class="hik-info-grid">${infoCards.join("")}</div>` : ""}
-          ${this.renderDebugDashboard(camAttrs)}
         </div>
       </ha-card>
     `;
@@ -4051,7 +4021,6 @@ ${this.config.show_playback_panel !== false ? `
     });
 
     this.querySelector("#hik-center")?.addEventListener("click", () => this.handleCenter());
-    this.querySelector("#hik-video-center")?.addEventListener("click", () => this.handleCenter());
     this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: "panel" })));
     this.querySelector("#hik-refocus")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
@@ -4082,6 +4051,10 @@ ${this.config.show_playback_panel !== false ? `
       const target = ev.currentTarget;
       this._toggleDebugFilter(target?.getAttribute("data-debug-filter"), target?.getAttribute("data-debug-value"));
     }));
+    this.querySelector("[data-debug-search]")?.addEventListener("input", (ev) => {
+      this._debugSearchQuery = ev.currentTarget?.value || "";
+      this.render();
+    });
     this.querySelectorAll("[data-debug-entry-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
