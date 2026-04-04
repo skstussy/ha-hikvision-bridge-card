@@ -244,24 +244,7 @@ _pushDebugEntry(entry) {
 
 
   _buildWebRtcPtzConfig(playbackMode = false) {
-    const cam = this.selectedCamera;
-    if (playbackMode || !cam || !this.canPtz() || this._returningHome) return null;
-
-    const speed = Math.max(1, Math.min(100, Number(this.config.speed || 50)));
-    const channel = String(cam.channel);
-    const duration = this.getPTZDuration();
-    const noop = { channel, pan: 0, tilt: 0, duration: 0 };
-
-    return {
-      opacity: 0.55,
-      service: "ha_hikvision_bridge.ptz",
-      data_left: { channel, pan: -speed, tilt: 0, duration },
-      data_right: { channel, pan: speed, tilt: 0, duration },
-      data_up: { channel, pan: 0, tilt: speed, duration },
-      data_down: { channel, pan: 0, tilt: -speed, duration },
-      data_zoom_in: { ...noop },
-      data_zoom_out: { ...noop },
-    };
+    return null;
   }
 
   _buildWebRtcCardConfig(url, playbackMode = false) {
@@ -1100,6 +1083,13 @@ _toggleDebugFilter(kind, value) {
             <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
             <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
           </summary>
+          <div class="hik-debug-warning-banner">
+            <ha-icon icon="mdi:alert-outline"></ha-icon>
+            <div>
+              <b>Debug mode enabled</b>
+              <span>Verbose diagnostics can reduce browser performance. Disable when not actively troubleshooting.</span>
+            </div>
+          </div>
           <div class="hik-debug-overview">
             <div class="hik-mini-note">Current snapshot</div>
             ${this._renderDebugSnapshot(camAttrs)}
@@ -3766,6 +3756,24 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-refocus-btn:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
+          .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
+          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:8px; pointer-events:auto; }
+          .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:10px; align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
+          .hik-video-media-btn { min-width:42px; height:42px; border:none; border-radius:14px; display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
+          .hik-video-media-btn:active:not(:disabled) { transform:scale(0.95); }
+          .hik-video-media-btn.live { box-shadow:0 0 0 1px rgba(255,80,80,0.45), 0 12px 26px rgba(0,0,0,0.28); background:rgba(80,16,16,0.46); }
+          .hik-video-media-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
+          .hik-video-mini-select { min-height:42px; padding:6px 10px; border-radius:14px; display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
+          .hik-video-mini-select select { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
+          .hik-video-volume-rail { min-height:42px; padding:0 12px; border-radius:14px; display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
+          .hik-video-volume-rail input { width:110px; }
+          .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
+          .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
           .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
           .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
@@ -3894,6 +3902,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-zoom-track { height:72px; }
             .hik-video-refocus-btn { left:12px; bottom:188px; min-height:34px; padding:0 12px; }
             .hik-video-refocus-btn span { font-size:12px; }
+            .hik-video-media-topright { gap:6px; }
+            .hik-video-media-btn { min-width:38px; height:38px; border-radius:12px; }
+            .hik-video-media-bottom { bottom:10px; gap:8px; width:calc(100% - 24px); }
+            .hik-video-mini-select { min-height:38px; padding:5px 8px; }
+            .hik-video-mini-select select { min-width:88px; font-size:11px; }
+            .hik-video-volume-rail { min-height:38px; padding:0 10px; }
+            .hik-video-volume-rail input { width:74px; }
           }
         </style>
         <div class="hik-wrap">
@@ -3903,9 +3918,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
               <div class="hik-title">${this.escapeHtml(this.config.title)}</div>
               <div class="hik-subtitle">Elite PTZ console with configurable sections, NVR overview, and storage summary</div>
             </div>
-            <div class="hik-pill ${online ? "good" : "warn"}">
-              <ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>
-              ${online ? "Online" : "Offline"}
+            <div class="hik-row">
+              <div class="hik-pill ${online ? "good" : "warn"}">
+                <ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>
+                ${online ? "Online" : "Offline"}
+              </div>
+              ${this.isDebugEnabled() ? `<div class="hik-pill warn"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</div>` : ""}
             </div>
           </div>` : ""}
 
@@ -3976,11 +3994,44 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     </div>
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
-                  <div class="hik-overlay-toggle">
-                      <button type="button" class="hik-toggle-btn" id="hik-controls-toggle-middle">
-                        <ha-icon icon="mdi:tune-variant"></ha-icon>
-                        <span>${this._controlsVisible ? "Hide controls" : "Show controls"}</span>
+                  <div class="hik-video-media-overlay">
+                    <div class="hik-video-media-topright">
+                      <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
+                        <ha-icon icon="mdi:chevron-left"></ha-icon>
                       </button>
+                      <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-next" title="Next camera" aria-label="Next camera">
+                        <ha-icon icon="mdi:chevron-right"></ha-icon>
+                      </button>
+                      <button type="button" class="hik-video-media-btn" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}">
+                        <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                      </button>
+                      ${(!playbackActive && isWebRtc) ? `
+                        <button type="button" class="hik-video-media-btn ${this._talkRequested ? "live" : ""}" id="hik-talk-toggle-overlay" title="${this._talkRequested ? "Stop talk" : "Start talk"}" aria-label="${this._talkRequested ? "Stop talk" : "Start talk"}">
+                          <ha-icon icon="mdi:microphone"></ha-icon>
+                        </button>
+                      ` : ""}
+                      <button type="button" class="hik-video-media-btn" id="hik-controls-toggle-middle" title="${this._controlsVisible ? "Hide controls" : "Show controls"}" aria-label="${this._controlsVisible ? "Hide controls" : "Show controls"}">
+                        <ha-icon icon="mdi:tune-variant"></ha-icon>
+                      </button>
+                    </div>
+                    <div class="hik-video-media-bottom">
+                      <label class="hik-video-mini-select">
+                        <span>Mode</span>
+                        <select id="streamMode-overlay">
+                          ${['snapshot','rtsp_direct','webrtc_direct'].map((mode) => `<option value="${mode}" ${String(streamMode || '').toLowerCase() === mode ? 'selected' : ''}>${mode.replace('_',' ')}</option>`).join("")}
+                        </select>
+                      </label>
+                      <label class="hik-video-mini-select">
+                        <span>Profile</span>
+                        <select id="streamProfile-overlay">
+                          ${["main","sub"].map((profile) => `<option value="${profile}" ${String(camAttrs.stream_profile || "").toLowerCase() === profile ? "selected" : ""}>${profile}</option>`).join("")}
+                        </select>
+                      </label>
+                      <label class="hik-video-volume-rail">
+                        <ha-icon icon="mdi:volume-medium"></ha-icon>
+                        <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+                      </label>
+                    </div>
                   </div>
                 </div>
                 ${this.config.show_status_pills !== false ? `
@@ -4066,35 +4117,63 @@ ${this.config.show_playback_panel !== false ? `
       btn.addEventListener("pointerup", handler);
     });
     const streamModeSelect = this.querySelector("#streamMode");
-    if (streamModeSelect && refs.camera) {
-      streamModeSelect.addEventListener("change", (e) => {
-        this._hass.callService("ha_hikvision_bridge", "set_stream_mode", {
-          entity_id: refs.camera,
-          mode: e.target.value,
-        });
+    const streamModeOverlay = this.querySelector("#streamMode-overlay");
+    const applyStreamMode = (value) => {
+      this._hass.callService("ha_hikvision_bridge", "set_stream_mode", {
+        entity_id: refs.camera,
+        mode: value,
       });
+    };
+    if (streamModeSelect && refs.camera) {
+      streamModeSelect.addEventListener("change", (e) => applyStreamMode(e.target.value));
+    }
+    if (streamModeOverlay && refs.camera) {
+      streamModeOverlay.addEventListener("change", (e) => applyStreamMode(e.target.value));
     }
 
     const streamProfileSelect = this.querySelector("#streamProfile");
-    if (streamProfileSelect && refs.camera) {
-      streamProfileSelect.addEventListener("change", (e) => {
-        this._hass.callService("ha_hikvision_bridge", "set_stream_profile", {
-          entity_id: refs.camera,
-          profile: e.target.value,
-        });
+    const streamProfileOverlay = this.querySelector("#streamProfile-overlay");
+    const applyStreamProfile = (value) => {
+      this._hass.callService("ha_hikvision_bridge", "set_stream_profile", {
+        entity_id: refs.camera,
+        profile: value,
       });
+    };
+    if (streamProfileSelect && refs.camera) {
+      streamProfileSelect.addEventListener("change", (e) => applyStreamProfile(e.target.value));
+    }
+    if (streamProfileOverlay && refs.camera) {
+      streamProfileOverlay.addEventListener("change", (e) => applyStreamProfile(e.target.value));
     }
 
     this.querySelector("#hik-speaker-toggle")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       this._setSpeakerEnabled(!this._speakerEnabled);
     });
+    this.querySelector("#hik-speaker-toggle-overlay")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      this._setSpeakerEnabled(!this._speakerEnabled);
+    });
     this.querySelector("#hik-volume")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
+    this.querySelector("#hik-volume-overlay")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-audio-boost")?.addEventListener("input", (ev) => this._setAudioBoost(ev.target.value));
 
     const holdTalkBtn = this.querySelector("#hik-talk-hold");
     if (holdTalkBtn) this._bindHoldTalkButton(holdTalkBtn);
     this.querySelector("#hik-talk-toggle")?.addEventListener("click", (ev) => this._handleTalkToggle(ev));
+    this.querySelector("#hik-talk-toggle-overlay")?.addEventListener("click", (ev) => this._handleTalkToggle(ev));
+    this.querySelector("#hik-overlay-cycle-prev")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const cams = Array.isArray(this.config?.cameras) ? this.config.cameras : [];
+      if (!cams.length) return;
+      this.selectCamera((Number(this.selected || 0) - 1 + cams.length) % cams.length);
+    });
+    this.querySelector("#hik-overlay-cycle-next")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const cams = Array.isArray(this.config?.cameras) ? this.config.cameras : [];
+      if (!cams.length) return;
+      this.selectCamera((Number(this.selected || 0) + 1) % cams.length);
+    });
 
     const toggleControls = () => {
       this._controlsVisible = !this._controlsVisible;
