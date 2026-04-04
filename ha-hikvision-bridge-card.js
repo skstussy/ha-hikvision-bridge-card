@@ -1,6 +1,78 @@
 /* UI Split Patch 2.6.1 */
 
 class HikvisionPTZCard extends HTMLElement {
+_toggleDebugExpand(entry) {
+  entry._expanded = !entry._expanded;
+  this.requestUpdate();
+}
+
+_renderWebRtcPtzStatus() {
+  const s = this._debugSnapshot || {};
+  return html\`
+    <div class="debug-card">
+      <h3>WebRTC PTZ Status</h3>
+      <div>Bound: \${s.webrtc_ptz_bound ? "✅" : "❌"}</div>
+      <div>Attempts: \${s.webrtc_ptz_attempts || 0}</div>
+      <div>Candidate Roots: \${s.webrtc_ptz_candidate_roots || 0}</div>
+      <div>Buttons Found: \${s.webrtc_ptz_button_count || 0}</div>
+      <div>Last Reason: \${s.webrtc_ptz_last_bind_reason || "-"}</div>
+      <div>Last Update: \${s.webrtc_ptz_last_bind_at || "-"}</div>
+    </div>
+  \`;
+}
+
+_renderDebugRow(entry) {
+  return html\`
+    <div class="debug-row" @click=\${() => this._toggleDebugExpand(entry)}>
+      <div class="time">\${new Date(entry.time).toLocaleTimeString()}</div>
+      <div class="cat">\${entry.category}</div>
+      <div class="lvl \${entry.level}">\${entry.level}</div>
+      <div class="evt">\${entry.event}</div>
+      <div class="cam">\${entry.camera || "-"}</div>
+      <div class="cnt">\${entry.count > 1 ? "×" + entry.count : ""}</div>
+    </div>
+    \${entry._expanded ? html\`
+      <div class="debug-details">
+        <pre>\${JSON.stringify(entry.details, null, 2)}</pre>
+      </div>
+    \` : ""}
+  \`;
+}
+
+
+_pushDebugEntry(entry) {
+  if (!this._debugEntries) this._debugEntries = [];
+
+  const fingerprint = [
+    entry.category,
+    entry.level,
+    entry.event,
+    entry.message,
+    entry.camera,
+    entry.details?.reason || ""
+  ].join("|");
+
+  const existing = this._debugEntries.find(e => e._fp === fingerprint);
+
+  if (existing) {
+    existing.count = (existing.count || 1) + 1;
+    existing.last_seen = entry.time;
+    existing.details = entry.details;
+    return;
+  }
+
+  entry._fp = fingerprint;
+  entry.count = 1;
+  entry.last_seen = entry.time;
+
+  this._debugEntries.unshift(entry);
+
+  if (this._debugEntries.length > 300) {
+    this._debugEntries.pop();
+  }
+}
+
+
 
   setConfig(config) {
     this.config = {
@@ -4121,57 +4193,3 @@ if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-h
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
 
-
-
-// ===== DEBUG UX PHASE 2 =====
-
-_renderWebRtcPtzStatus() {
-  const s = this._debugSnapshot || {};
-  return html`
-    <div class="debug-card">
-      <h3>WebRTC PTZ Status</h3>
-      <div>Bound: ${s.webrtc_ptz_bound ? "✅" : "❌"}</div>
-      <div>Attempts: ${s.webrtc_ptz_attempts || 0}</div>
-      <div>Candidate Roots: ${s.webrtc_ptz_candidate_roots || 0}</div>
-      <div>Buttons Found: ${s.webrtc_ptz_button_count || 0}</div>
-      <div>Last Reason: ${s.webrtc_ptz_last_bind_reason || "-"}</div>
-      <div>Last Update: ${s.webrtc_ptz_last_bind_at || "-"}</div>
-    </div>
-  `;
-}
-
-_renderDebugRow(entry) {
-  return html`
-    <div class="debug-row" @click=${() => this._toggleDebugExpand(entry)}>
-      <div>${new Date(entry.time).toLocaleTimeString()}</div>
-      <div>${entry.category}</div>
-      <div>${entry.level}</div>
-      <div>${entry.event}</div>
-      <div>${entry.camera || "-"}</div>
-      <div>${entry.count > 1 ? "×" + entry.count : ""}</div>
-    </div>
-    ${entry._expanded ? html`
-      <div class="debug-details">
-        <pre>${JSON.stringify(entry.details, null, 2)}</pre>
-      </div>
-    ` : ""}
-  `;
-}
-
-// ===== END PHASE 2 =====
-
-const style = document.createElement('style');
-style.innerHTML = `
-.debug-row {
-  display: grid;
-  grid-template-columns: 80px 90px 80px 1fr 60px 50px;
-  padding: 6px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-  cursor: pointer;
-  font-size: 12px;
-}
-.debug-row:hover { background: rgba(255,255,255,0.05); }
-.debug-details { padding: 8px; background: rgba(0,0,0,0.3); font-size: 11px; }
-.debug-card { padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,0.4); border-radius: 6px; }
-`;
-document.head.appendChild(style);
