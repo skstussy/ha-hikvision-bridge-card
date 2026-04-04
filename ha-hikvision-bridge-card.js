@@ -458,7 +458,7 @@ _pushDebugEntry(entry) {
     const discovery = this._findWebRtcPtzRoot(root);
     const ptzRoot = discovery.ptzRoot;
     if (!ptzRoot) {
-      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe", "WebRTC PTZ probe found no PTZ root", {
+      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe_legacy", "WebRTC PTZ probe found no PTZ root", {
         candidate_roots: discovery.candidates.length,
         button_count: discovery.buttonCount,
       }, "frontend");
@@ -467,7 +467,7 @@ _pushDebugEntry(entry) {
 
     const buttons = Array.from(ptzRoot.querySelectorAll("button, ha-icon-button, mwc-icon-button"));
     if (!buttons.length) {
-      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe", "WebRTC PTZ root found but no buttons detected", {
+      this._pushDebug("webrtc", "debug", "webrtc_ptz_probe_legacy", "WebRTC PTZ root found but no buttons detected", {
         candidate_roots: discovery.candidates.length,
         button_count: 0,
         ptz_root_class: ptzRoot.className || ptzRoot.getAttribute?.("class") || "",
@@ -556,70 +556,29 @@ _pushDebugEntry(entry) {
     return true;
   }
 
+
   _setupWebRtcPtzBindings(card, playbackMode = false) {
     this._teardownWebRtcPtzBindings();
-    if (!card || playbackMode) return;
-
     this._webRtcPtzBindAttempts = 0;
-    this._webRtcPtzLastBindReason = "";
-    this._webRtcPtzLastBindAt = "";
+    this._webRtcPtzLastBindAt = new Date().toISOString();
+    if (!card) {
+      this._webRtcPtzLastBindReason = "disabled:no_card";
+      return;
+    }
+    if (playbackMode) {
+      this._webRtcPtzLastBindReason = "disabled:playback_mode";
+      return;
+    }
+    this._webRtcPtzLastBindReason = "disabled:custom_overlay";
     this._webRtcPtzLastCandidateCount = 0;
     this._webRtcPtzLastButtonCount = 0;
-
-    const tryBind = (reason = "initial") => {
-      this._webRtcPtzBindAttempts += 1;
-      const root = card.shadowRoot || card.renderRoot || null;
-      if (!root) {
-        this._webRtcPtzLastBindReason = "root_missing";
-        this._webRtcPtzLastBindAt = new Date().toISOString();
-        this._pushDebug("webrtc", "warn", "webrtc_ptz_root_missing", "WebRTC card root not ready for PTZ binding", {
-          attempt: this._webRtcPtzBindAttempts,
-          reason,
-        }, "frontend");
-        return false;
-      }
-      const bound = this._bindWebRtcPtzButtons(root);
-      this._webRtcPtzLastBindReason = bound ? `bound:${reason}` : `buttons_missing:${reason}`;
-      this._webRtcPtzLastBindAt = new Date().toISOString();
-      this._pushDebug("webrtc", bound ? "info" : "warn", bound ? "webrtc_ptz_bound" : "webrtc_ptz_buttons_missing", bound ? "Bound WebRTC PTZ overlay handlers" : "WebRTC PTZ overlay buttons not found yet", {
-        playback_mode: playbackMode,
-        attempt: this._webRtcPtzBindAttempts,
-        reason,
-        candidate_roots: this._webRtcPtzLastCandidateCount,
-        button_count: this._webRtcPtzLastButtonCount,
-      }, "frontend");
-      return bound;
-    };
-
-    if (tryBind("initial")) return;
-
-    const root = card.shadowRoot || card.renderRoot || null;
-    if (typeof MutationObserver !== "undefined") {
-      this._webRtcPtzObserver = new MutationObserver((mutations) => {
-        const summary = (mutations || []).slice(0, 5).map((m) => ({ type: m.type, added: m.addedNodes?.length || 0, removed: m.removedNodes?.length || 0 }));
-        this._pushDebug("webrtc", "debug", "webrtc_ptz_mutation", "Observed WebRTC PTZ DOM mutation", {
-          attempt: this._webRtcPtzBindAttempts,
-          mutation_count: (mutations || []).length,
-          summary,
-        }, "frontend");
-        if (tryBind("mutation") && this._webRtcPtzObserver) {
-          try { this._webRtcPtzObserver.disconnect(); } catch (err) {}
-          this._webRtcPtzObserver = null;
-        }
-      });
-      try {
-        this._webRtcPtzObserver.observe(root || card, { childList: true, subtree: true, attributes: true });
-      } catch (err) {}
-    }
-
-    [100, 250, 500, 1000, 2000, 3500].forEach((delay) => {
-      const timer = setTimeout(() => {
-        if (this._webRtcPtzBound) return;
-        tryBind(`retry_${delay}ms`);
-      }, delay);
-      this._webRtcPtzRetryTimers.push(timer);
-    });
+    this._webRtcPtzBound = true;
+    this._pushDebug("webrtc", "info", "webrtc_ptz_probe_disabled", "Skipping legacy WebRTC PTZ button probing; using custom overlay controls", {
+      playback_mode: false,
+      mode: "custom_overlay",
+    }, "frontend");
   }
+
 
   _teardownWebRtcPtzBindings() {
     this._clearWebRtcPtzRetryTimers();
@@ -632,6 +591,8 @@ _pushDebugEntry(entry) {
     }
     this._webRtcPtzCleanup = null;
     this._webRtcPtzBound = false;
+    this._webRtcPtzLastCandidateCount = 0;
+    this._webRtcPtzLastButtonCount = 0;
   }
 
   _syncWebRtcCardConfig(playbackMode = false) {
@@ -1110,16 +1071,15 @@ _toggleDebugFilter(kind, value) {
     const levels = ["all", "error", "warn", "info", "debug"];
     const openAttr = this._debugDashboardOpen ? "open" : "";
     const searchValue = this.escapeHtml(String(this._debugSearchQuery || ""));
-    const visibleEntries = entries.slice(0, 100);
+    const visibleEntries = entries.slice(0, 80);
     return `
-      <section class="hik-panel hik-info-card hik-debug-dashboard" aria-label="Debug dashboard">
+      <div class="hik-panel hik-info-card hik-debug-dashboard">
         <details id="hik-debug-dashboard-details" ${openAttr}>
           <summary class="hik-debug-summary">
             <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
             <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
           </summary>
           <div class="hik-debug-overview">
-            <div class="hik-debug-intro">Diagnostics stay outside the live video area. Use the filters to narrow the event feed, then expand a row only when you need the full payload.</div>
             <div class="hik-mini-note">Current snapshot</div>
             ${this._renderDebugSnapshot(camAttrs)}
             <div class="hik-status-row">
@@ -1163,7 +1123,7 @@ _toggleDebugFilter(kind, value) {
                 const debugText = this.formatDebugEntryText(entry);
                 const badgeClass = entry.level === "error" ? "warn" : entry.level === "warn" ? "primary" : "neutral";
                 return `
-                  <details class="hik-debug-block" ${entry.level === "error" || entry.level === "warn" ? "open" : ""}>
+                  <details class="hik-debug-block" ${index < 2 ? "open" : ""}>
                     <summary class="hik-debug-entry-summary">
                       <div class="hik-debug-entry-topline">
                         <span class="hik-pill ${badgeClass}"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(entry.category || "general")}</span>
@@ -1190,7 +1150,7 @@ _toggleDebugFilter(kind, value) {
             </div>
           </div>
         </details>
-      </section>`;
+      </div>`;
   }
 
   async _startTalkbackDirect() {
@@ -3637,12 +3597,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-chip.active { outline: 2px solid var(--hik-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--hik-accent) 35%, transparent); }
           .hik-chip ha-icon { --mdc-icon-size: 16px; color: var(--hik-accent); }
           .hik-grid { display:grid; grid-template-columns: minmax(320px, 1fr); gap:14px; }
-          .hik-debug-dashboard { margin-top:16px; padding:0; overflow:hidden; }
-          .hik-debug-dashboard details { display:block; }
-          .hik-debug-dashboard .hik-debug-summary { padding:16px 18px; background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 96%, rgba(255,255,255,0.03)), color-mix(in srgb, var(--card-background-color) 91%, rgba(255,255,255,0.02))); }
-          .hik-debug-dashboard .hik-debug-summary .hik-sub { margin-bottom:0; }
-          .hik-debug-dashboard .hik-debug-overview, .hik-debug-dashboard .hik-debug-console-shell { margin:0 16px 16px; }
-          .hik-debug-intro { font-size:12px; line-height:1.5; color:var(--secondary-text-color); padding:0 0 4px; }
           .hik-panel { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:18px; padding:14px; background: color-mix(in srgb, var(--card-background-color) calc(100% - var(--hik-panel-tint)), var(--hik-accent) var(--hik-panel-tint)); }
           .hik-expandable-panel { padding:0; overflow:hidden; }
           .hik-expandable-details { display:block; }
@@ -3794,15 +3748,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-audio-note.compact { min-height:auto; padding:10px 12px; }
           .hik-audio-note.fill { height:100%; }
           .hik-debug-overview { display:grid; gap:12px; }
-          .hik-debug-snapshot-grid { display:flex; gap:8px; flex-wrap:wrap; }
-          .hik-debug-overview .hik-status-row { margin-top:0; }
-          .hik-debug-console-shell { margin-top:14px; border:1px solid rgba(255,255,255,0.08); border-radius:18px; background: color-mix(in srgb, var(--secondary-background-color) 88%, rgba(0,0,0,0.18)); overflow:hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
+          .hik-debug-console-shell { margin-top:14px; border:1px solid rgba(255,255,255,0.08); border-radius:18px; background: color-mix(in srgb, var(--secondary-background-color) 88%, rgba(0,0,0,0.18)); overflow:hidden; }
           .hik-debug-toolbar { position:sticky; top:0; z-index:2; display:grid; gap:10px; padding:12px; margin:0; border-bottom:1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 92%, rgba(0,0,0,0.08)), color-mix(in srgb, var(--card-background-color) 96%, rgba(0,0,0,0.18))); backdrop-filter: blur(10px); }
           .hik-debug-toolbar-head { display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap:wrap; }
           .hik-debug-search-wrap { display:flex; align-items:center; gap:8px; min-width:260px; flex:1 1 320px; padding:0 12px; min-height:40px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.20); }
           .hik-debug-search-wrap ha-icon { --mdc-icon-size:18px; opacity:0.7; }
           .hik-debug-search { width:100%; border:0; outline:none; background:transparent; color:inherit; font-size:13px; }
-          .hik-debug-feed { max-height:420px; overflow:auto; padding:12px; display:grid; gap:10px; overscroll-behavior:contain; }
+          .hik-debug-feed { max-height:560px; overflow:auto; padding:12px; display:grid; gap:10px; overscroll-behavior:contain; }
           .hik-debug-block { margin:0; border-radius:14px; background: color-mix(in srgb, var(--card-background-color) 76%, rgba(255,255,255,0.03)); border:1px solid rgba(255,255,255,0.06); overflow:hidden; }
           .hik-debug-block > summary { list-style:none; cursor:pointer; padding:12px; }
           .hik-debug-block > summary::-webkit-details-marker { display:none; }
@@ -3820,7 +3772,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
           .hik-debug-btn { border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:inherit; border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer; }
           .hik-debug-btn:hover { background:rgba(255,255,255,0.10); }
-          .hik-debug-textarea { width:100%; min-height:108px; max-height:180px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
+          .hik-debug-textarea { width:100%; min-height:140px; max-height:240px; margin-top:10px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background:rgba(0,0,0,0.28); color:inherit; font-size:11px; line-height:1.35; font-family:monospace; resize:vertical; box-sizing:border-box; white-space:pre; }
           .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; }
           .hik-debug-summary::-webkit-details-marker { display:none; }
           .hik-debug-filter-group { display:flex; gap:8px; flex-wrap:wrap; }
@@ -3906,6 +3858,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
+                ${this.renderDebugDashboard(camAttrs)}
               </div>
             </div>
 
@@ -3958,8 +3911,6 @@ ${this.config.show_playback_panel !== false ? `
                 </div>
             </div>
           </div>
-
-          ${this.renderDebugDashboard(camAttrs)}
 
           ${infoCards.length ? `<div class="hik-info-grid">${infoCards.join("")}</div>` : ""}
         </div>
