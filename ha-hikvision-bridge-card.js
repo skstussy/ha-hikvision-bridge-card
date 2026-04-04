@@ -232,13 +232,27 @@ class HikvisionPTZCard extends HTMLElement {
     const signature = this._getWebRtcPtzActionSignature(node);
     if (!signature) return "";
 
-    if (signature.includes("zoom out") || signature.includes("magnify-minus") || signature.includes("zoom_out")) return "zoom_out";
-    if (signature.includes("zoom in") || signature.includes("magnify-plus") || signature.includes("zoom_in")) return "zoom_in";
-    if (signature.includes("move left") || signature.includes(" pan left") || signature.startsWith("left") || signature.includes("arrow-left") || signature.includes("chevron-left")) return "left";
-    if (signature.includes("move right") || signature.includes(" pan right") || signature.startsWith("right") || signature.includes("arrow-right") || signature.includes("chevron-right")) return "right";
-    if (signature.includes("move up") || signature.includes(" pan up") || signature.startsWith("up") || signature.includes("arrow-up") || signature.includes("chevron-up")) return "up";
-    if (signature.includes("move down") || signature.includes(" pan down") || signature.startsWith("down") || signature.includes("arrow-down") || signature.includes("chevron-down")) return "down";
+    const has = (...terms) => terms.some((term) => signature.includes(term));
+    const hasZoomWord = has("zoom", "magnify", "loupe", "search");
+
+    if (has("zoom out", "magnify-minus", "zoom_out") || (hasZoomWord && has("minus", "remove", "subtract", "mdi:minus", "mdi:magnify-minus", "-"))) return "zoom_out";
+    if (has("zoom in", "magnify-plus", "zoom_in") || (hasZoomWord && has("plus", "add", "expand", "mdi:plus", "mdi:magnify-plus", "+"))) return "zoom_in";
+    if (has("move left", " pan left", "arrow-left", "chevron-left", "keyboardarrowleft") || signature.startsWith("left")) return "left";
+    if (has("move right", " pan right", "arrow-right", "chevron-right", "keyboardarrowright") || signature.startsWith("right")) return "right";
+    if (has("move up", " pan up", "arrow-up", "chevron-up", "keyboardarrowup") || signature.startsWith("up")) return "up";
+    if (has("move down", " pan down", "arrow-down", "chevron-down", "keyboardarrowdown") || signature.startsWith("down")) return "down";
     return "";
+  }
+
+  _triggerLegacyZoom(direction = 0) {
+    const dir = Number(direction || 0);
+    const legacyButton = this.querySelector(`.lens-btn[data-service="zoom"][data-direction="${dir}"]`);
+    if (legacyButton && typeof legacyButton.click === "function") {
+      legacyButton.click();
+      return true;
+    }
+    this.callLens("zoom", dir);
+    return true;
   }
 
   _handleWebRtcPtzAction(action, phase = "click") {
@@ -251,11 +265,11 @@ class HikvisionPTZCard extends HTMLElement {
     }
 
     if (action === "zoom_in") {
-      this.callLens("zoom", 1);
+      this._triggerLegacyZoom(1);
       return;
     }
     if (action === "zoom_out") {
-      this.callLens("zoom", -1);
+      this._triggerLegacyZoom(-1);
       return;
     }
 
@@ -279,16 +293,36 @@ class HikvisionPTZCard extends HTMLElement {
       target.addEventListener(type, handler, options);
       cleanup.push(() => target.removeEventListener(type, handler, options));
     };
+    const halt = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation?.();
+    };
+    const getActionFromEvent = (ev) => {
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      for (const node of path) {
+        if (!node || node === window || node === document || node === ptzRoot) continue;
+        const action = this._detectWebRtcPtzAction(node);
+        if (action) return action;
+      }
+      return this._detectWebRtcPtzAction(ev.target);
+    };
+    const delegatedZoom = (ev) => {
+      const action = getActionFromEvent(ev);
+      if (action !== "zoom_in" && action !== "zoom_out") return;
+      halt(ev);
+      this._handleWebRtcPtzAction(action, "click");
+    };
+
+    bind(ptzRoot, "pointerdown", delegatedZoom, true);
+    bind(ptzRoot, "mousedown", delegatedZoom, true);
+    bind(ptzRoot, "touchstart", delegatedZoom, { passive: false, capture: true });
+    bind(ptzRoot, "click", delegatedZoom, true);
 
     buttons.forEach((button) => {
       const action = this._detectWebRtcPtzAction(button);
       if (!action) return;
 
-      const halt = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation?.();
-      };
       const start = (ev) => {
         halt(ev);
         this._handleWebRtcPtzAction(action, "start");
@@ -303,12 +337,17 @@ class HikvisionPTZCard extends HTMLElement {
       };
 
       if (action === "zoom_in" || action === "zoom_out") {
+        bind(button, "pointerdown", click, true);
+        bind(button, "mousedown", click, true);
         bind(button, "click", click, true);
         bind(button, "touchstart", click, { passive: false, capture: true });
       } else {
+        bind(button, "pointerdown", start, true);
         bind(button, "mousedown", start, true);
         bind(button, "mouseup", stop, true);
         bind(button, "mouseleave", stop, true);
+        bind(button, "pointerup", stop, true);
+        bind(button, "pointercancel", stop, true);
         bind(button, "touchstart", start, { passive: false, capture: true });
         bind(button, "touchend", stop, { capture: true });
         bind(button, "touchcancel", stop, { capture: true });
