@@ -2781,6 +2781,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
   _scheduleMediaAudioSync(delay = 0) {
     if (this._gridMode) return;
+    if (this._gridMode) return;
     const runner = () => this._syncMediaAudio();
     if (delay > 0) {
       setTimeout(runner, delay);
@@ -2794,6 +2795,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
     }
     this._mediaSyncObserver = null;
+    if (this._gridMode) return;
     if (this._gridMode) return;
     if (!host || typeof MutationObserver === "undefined") return;
 
@@ -2944,6 +2946,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   _syncMediaAudio() {
+    if (this._gridMode) return;
     if (this._gridMode) return;
     const runSync = () => {
       const host = this.querySelector("#hikvision-video-host");
@@ -3518,6 +3521,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
 
   render() {
+    if (this._gridMode) {
+      this._cleanupVideoCard?.();
+      this._videoSignature = null;
+      this.innerHTML = this._renderGridView();
+      setTimeout(() => this._mountGridStreams(), 0);
+      return;
+    }
     if (!this._hass) return;
     const cameras = this.cameras || [];
     const cam = this.selectedCamera;
@@ -4774,3 +4784,5 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid focus layout bugfix applied on 1.2.7 */
 
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
+
+/* FINAL GRID PATCH */
