@@ -3721,7 +3721,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
-          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; z-index:1; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); }
+          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -3752,7 +3752,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-mini-select { min-height:clamp(34px, 3.8vw, 42px); padding:clamp(4px, 0.6vw, 6px) clamp(8px, 0.8vw, 10px); border-radius:clamp(10px, 1vw, 14px); display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-mini-select.wide { min-width:min(240px, 56vw); }
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
           .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
-          .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
+          .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
@@ -4264,15 +4264,15 @@ ${this.config.show_playback_panel !== false ? `
     const bindOverlayCycle = (selector, delta) => {
       const btn = this.querySelector(selector);
       if (!btn) return;
-      const handler = (ev) => {
+      btn.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        const cams = Array.isArray(this.cameras) ? this.cameras : [];
+        const cams = this.cameras || [];
         if (!cams.length) return;
-        this.selectCamera((Number(this.selected || 0) + delta + cams.length) % cams.length);
-      };
-      btn.addEventListener("click", handler);
-      btn.addEventListener("pointerup", handler);
+        const currentIndex = Math.max(0, Math.min(Number(this.selected || 0), cams.length - 1));
+        const nextIndex = (currentIndex + delta + cams.length) % cams.length;
+        this.selectCamera(nextIndex);
+      });
     };
     bindOverlayCycle("#hik-overlay-cycle-prev", -1);
     bindOverlayCycle("#hik-overlay-cycle-next", 1);
@@ -4555,3 +4555,5 @@ if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-h
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
 
+
+/* current-ui-overlay-patch: top-center camera nav + top-right audio cluster applied on 1.2.7 */
