@@ -1753,11 +1753,34 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                       <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
                       <div>
                         <div class="hik-webrtc-note-title">WebRTC PTZ overlay active</div>
-                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Keep using this panel for speed, home, refocus, focus, iris, and presets.</div>
+                        <div class="hik-webrtc-note-copy">Use the live video overlay for pan, tilt, and zoom. Legacy PTZ and zoom controls stay available below for fallback testing and debugging.</div>
                       </div>
                     </div>
-                    <div class="hik-webrtc-inline-actions">
+                    <div class="hik-pad hik-pad-fallback">
+                      <div></div>
+                      ${this.iconButton({ icon: "mdi:chevron-up", label: "Move up", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="1"', disabled: !ptz || this._returningHome })}
+                      <div></div>
+                      ${this.iconButton({ icon: "mdi:chevron-left", label: "Move left", cls: "ptz-btn", attrs: 'data-pan="-1" data-tilt="0"', disabled: !ptz || this._returningHome })}
                       ${this.iconButton({ icon: "mdi:crosshairs-gps", label: "Return home", cls: "center", attrs: 'id="hik-center"', disabled: !ptz || this._returningHome })}
+                      ${this.iconButton({ icon: "mdi:chevron-right", label: "Move right", cls: "ptz-btn", attrs: 'data-pan="1" data-tilt="0"', disabled: !ptz || this._returningHome })}
+                      <div></div>
+                      ${this.iconButton({ icon: "mdi:chevron-down", label: "Move down", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="-1"', disabled: !ptz || this._returningHome })}
+                      <div></div>
+                    </div>
+                    <div class="hik-rail zoom fallback">
+                      <div class="hik-rail-head"><ha-icon icon="mdi:magnify"></ha-icon><span>Zoom</span><span class="hik-mini-note">Fallback controls</span></div>
+                      <div class="hik-rail-stack horizontal lens-pair">
+                        <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome || !ptz) ? 'disabled' : ''} title="Zoom in" aria-label="Zoom in">
+                          <ha-icon icon="mdi:magnify-plus"></ha-icon>
+                          <span class="hik-rail-sign">+</span>
+                          <span class="hik-rail-text">In</span>
+                        </button>
+                        <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome || !ptz) ? 'disabled' : ''} title="Zoom out" aria-label="Zoom out">
+                          <ha-icon icon="mdi:magnify-minus"></ha-icon>
+                          <span class="hik-rail-sign">−</span>
+                          <span class="hik-rail-text">Out</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
