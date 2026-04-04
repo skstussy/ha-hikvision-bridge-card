@@ -129,6 +129,8 @@ _pushDebugEntry(entry) {
     this._videoCardConfig = this._videoCardConfig || null;
     this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
     this._playbackOverlayVisible = this._playbackOverlayVisible ?? false;
+    this._playbackRate = this._playbackRate ?? 2;
+    this._playbackSeekHoldTimer = this._playbackSeekHoldTimer || null;
     this._ptzStateMap = this._ptzStateMap || {};
     this._playbackStateMap = this._playbackStateMap || {};
     this._returningHome = false;
@@ -250,8 +252,8 @@ _pushDebugEntry(entry) {
 
   _buildWebRtcCardConfig(url, playbackMode = false) {
     const style = [
-      ".ptz { right: 10px; left: unset; bottom: 12px; }",
-      ".header { top: unset; bottom: 6px; }",
+      ".ptz, .header, .menu, .toolbar, .controls { display:none !important; opacity:0 !important; pointer-events:none !important; }",
+      ":host { --controls-display:none; }",
     ].join(" ");
 
     const config = {
@@ -265,10 +267,77 @@ _pushDebugEntry(entry) {
       style,
     };
 
-    const ptz = this._buildWebRtcPtzConfig(playbackMode);
-    if (ptz) config.ptz = ptz;
-
     return config;
+  }
+
+  _toggleFullscreenVideo() {
+    const el = this.querySelector(".hik-video-block");
+    if (!el) return;
+    const doc = document;
+    const isFs = doc.fullscreenElement === el;
+    if (isFs) {
+      doc.exitFullscreen?.().catch?.(() => {});
+    } else {
+      el.requestFullscreen?.().catch?.(() => {});
+    }
+  }
+
+  _playbackTickerText() {
+    const cam = this.selectedCamera || {};
+    const refs = cam?.channel != null ? this.refsForChannel?.(cam.channel) || {} : {};
+    const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
+    const attrs = cameraEntity?.attributes || {};
+    const value = attrs.playback_requested_time || attrs.playback_clip_start_time || "";
+    return value ? this.formatDateTimeLocal(value) : "";
+  }
+
+  _getPlaybackRate() {
+    return Number(this._playbackRate || 2);
+  }
+
+  _setPlaybackRate(value) {
+    const parsed = Number(value || 2);
+    this._playbackRate = [2,5,10,20].includes(parsed) ? parsed : 2;
+    this.render();
+  }
+
+  _seekPlaybackHold(direction = 1) {
+    const rate = this._getPlaybackRate();
+    this.seekPlayback(Number(direction || 1) * rate);
+  }
+
+  _bindPlaybackSeekHold(button, direction = 1) {
+    if (!button) return;
+    let timer = null;
+    let holdTriggered = false;
+    const start = (ev) => {
+      ev.preventDefault();
+      holdTriggered = false;
+      timer = window.setTimeout(() => {
+        holdTriggered = true;
+        this._seekPlaybackHold(direction);
+        this._playbackSeekHoldTimer = window.setInterval(() => this._seekPlaybackHold(direction), 300);
+      }, 420);
+    };
+    const stop = (ev) => {
+      ev?.preventDefault?.();
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (this._playbackSeekHoldTimer) {
+        clearInterval(this._playbackSeekHoldTimer);
+        this._playbackSeekHoldTimer = null;
+      }
+      if (!holdTriggered) this.seekPlayback(direction);
+      holdTriggered = false;
+    };
+    button.addEventListener("mousedown", start);
+    button.addEventListener("touchstart", start, { passive: false });
+    button.addEventListener("mouseup", stop);
+    button.addEventListener("mouseleave", stop);
+    button.addEventListener("touchend", stop);
+    button.addEventListener("touchcancel", stop);
   }
 
   _getWebRtcPtzActionSignature(node) {
@@ -3930,7 +3999,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-mini-select select, .hik-video-mini-input { min-width:88px; font-size:11px; }
             .hik-video-volume-rail input { width:74px; }
             .hik-video-playback-panel { width:calc(100% - 24px); bottom:10px; padding:10px; }
-            .hik-video-playback-grid { grid-template-columns:1fr; }
+            .hik-video-playback-grid { grid-template-columns:1fr; } .hik-video-playback-ticker { flex-direction:column; align-items:flex-start; }
           }
         </style>
         <div class="hik-wrap">
@@ -4052,6 +4121,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </button>
                         ` : ""}
                       ` : ""}
+                      ${(!playbackActive && !this._playbackOverlayVisible) ? `
+                        <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
+                          <ha-icon icon="mdi:fullscreen"></ha-icon>
+                        </button>
+                      ` : ""}
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
@@ -4085,6 +4159,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </div>
                           <div class="hik-video-playback-state">${playbackActive ? (playbackState.paused ? "Paused" : "Playing recording") : "Ready to start recording playback"}</div>
                         </div>
+                        <div class="hik-video-playback-ticker">
+                          <span class="hik-video-playback-ticker-label">${playbackActive ? "Recording time" : "Selected time"}</span>
+                          <span class="hik-video-playback-ticker-value">${this.escapeHtml(this._playbackTickerText() || playbackState.currentTime || "")}</span>
+                        </div>
                         <div class="hik-video-playback-grid">
                           <label class="hik-video-mini-select wide">
                             <span>Start</span>
@@ -4096,11 +4174,28 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                               ${playbackPresets.map((value) => `<option value="${value}" ${Number(playbackState.preset) === Number(value) ? "selected" : ""}>${this.escapeHtml(this.formatPlaybackPreset(value))}</option>`).join("")}
                             </select>
                           </label>
+                          <label class="hik-video-mini-select">
+                            <span>Rate</span>
+                            <select id="hik-playback-rate-overlay">
+                              ${[2,5,10,20].map((value) => `<option value="${value}" ${this._getPlaybackRate() === value ? "selected" : ""}>x${value}</option>`).join("")}
+                            </select>
+                          </label>
+                          <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-playback-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
+                            <span class="hik-video-audio-icon">
+                              <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                            </span>
+                            <span class="hik-video-audio-meta">
+                              <span class="hik-video-audio-label">Speaker</span>
+                              <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
+                            </span>
+                            <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
+                          </button>
+                          <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen-playback" title="Fullscreen"><ha-icon icon="mdi:fullscreen"></ha-icon></button>
                         </div>
                         <div class="hik-video-playback-actions">
-                          <button type="button" class="hik-video-media-btn" id="hik-playback-back-overlay" title="Back"><ha-icon icon="mdi:rewind"></ha-icon></button>
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-back-overlay" title="Back / hold to rewind"><ha-icon icon="mdi:rewind"></ha-icon></button>
                           ${playbackState.paused ? `<button type="button" class="hik-video-media-btn is-active" id="hik-playback-resume-overlay" title="Play"><ha-icon icon="mdi:play"></ha-icon></button>` : `<button type="button" class="hik-video-media-btn is-active" id="hik-playback-pause-overlay" title="Pause"><ha-icon icon="mdi:pause"></ha-icon></button>`}
-                          <button type="button" class="hik-video-media-btn" id="hik-playback-forward-overlay" title="Forward"><ha-icon icon="mdi:fast-forward"></ha-icon></button>
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-forward-overlay" title="Forward / hold to fast forward"><ha-icon icon="mdi:fast-forward"></ha-icon></button>
                           <button type="button" class="hik-video-media-btn" id="hik-playback-start-overlay" title="Start playback"><ha-icon icon="mdi:calendar-play"></ha-icon></button>
                           <button type="button" class="hik-video-media-btn" id="hik-playback-stop-overlay" title="Return to live"><ha-icon icon="mdi:cctv-off"></ha-icon></button>
                         </div>
@@ -4228,6 +4323,12 @@ ${this.config.show_playback_panel !== false ? `
       ev.preventDefault();
       this._setSpeakerEnabled(!this._speakerEnabled);
     });
+    this.querySelector("#hik-speaker-toggle-playback-overlay")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      this._setSpeakerEnabled(!this._speakerEnabled);
+    });
+    this.querySelector("#hik-overlay-fullscreen")?.addEventListener("click", (ev) => { ev.preventDefault(); this._toggleFullscreenVideo(); });
+    this.querySelector("#hik-overlay-fullscreen-playback")?.addEventListener("click", (ev) => { ev.preventDefault(); this._toggleFullscreenVideo(); });
     this.querySelector("#hik-volume")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-volume-overlay")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-audio-boost")?.addEventListener("input", (ev) => this._setAudioBoost(ev.target.value));
@@ -4344,11 +4445,11 @@ ${this.config.show_playback_panel !== false ? `
     this.querySelector("#hik-playback-back")?.addEventListener("click", () => this.seekPlayback(-1));
     this.querySelector("#hik-playback-forward")?.addEventListener("click", () => this.seekPlayback(1));
     this.querySelector("#hik-playback-start-overlay")?.addEventListener("click", () => this.startPlayback());
-    this.querySelector("#hik-playback-stop-overlay")?.addEventListener("click", () => { this.stopPlayback(); this._playbackOverlayVisible = false; });
+    this.querySelector("#hik-playback-stop-overlay")?.addEventListener("click", () => { this.stopPlayback(); this._playbackOverlayVisible = false; this.render(); });
     this.querySelector("#hik-playback-pause-overlay")?.addEventListener("click", () => this.pausePlayback());
     this.querySelector("#hik-playback-resume-overlay")?.addEventListener("click", () => this.resumePlayback());
-    this.querySelector("#hik-playback-back-overlay")?.addEventListener("click", () => this.seekPlayback(-1));
-    this.querySelector("#hik-playback-forward-overlay")?.addEventListener("click", () => this.seekPlayback(1));
+    this._bindPlaybackSeekHold(this.querySelector("#hik-playback-back-overlay"), -1);
+    this._bindPlaybackSeekHold(this.querySelector("#hik-playback-forward-overlay"), 1);
     this.querySelector("#hik-playback-time-overlay")?.addEventListener("change", (ev) => {
       const state = this.getPlaybackState();
       state.currentTime = ev.target.value;
@@ -4356,6 +4457,9 @@ ${this.config.show_playback_panel !== false ? `
     this.querySelector("#hik-playback-preset-overlay")?.addEventListener("change", (ev) => {
       const state = this.getPlaybackState();
       state.preset = Number(ev.target.value || 1);
+    });
+    this.querySelector("#hik-playback-rate-overlay")?.addEventListener("change", (ev) => {
+      this._setPlaybackRate(ev.target.value);
     });
     this.querySelector("#hik-speed")?.addEventListener("input", (ev) => {
       this.config = { ...this.config, speed: Number(ev.target.value) };
