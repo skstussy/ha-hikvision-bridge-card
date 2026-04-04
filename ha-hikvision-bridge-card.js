@@ -179,8 +179,8 @@ class HikvisionPTZCard extends HTMLElement {
       data_right: { channel, pan: speed, tilt: 0, duration },
       data_up: { channel, pan: 0, tilt: speed, duration },
       data_down: { channel, pan: 0, tilt: -speed, duration },
-      data_zoom_in: { ...noop, zoom: 1 },
-      data_zoom_out: { ...noop, zoom: -1 },
+      data_zoom_in: { ...noop },
+      data_zoom_out: { ...noop },
     };
   }
 
@@ -284,19 +284,21 @@ class HikvisionPTZCard extends HTMLElement {
       const action = this._detectWebRtcPtzAction(button);
       if (!action) return;
 
-      const start = (ev) => {
+      const halt = (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+        ev.stopImmediatePropagation?.();
+      };
+      const start = (ev) => {
+        halt(ev);
         this._handleWebRtcPtzAction(action, "start");
       };
       const stop = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
+        halt(ev);
         this._handleWebRtcPtzAction(action, "end");
       };
       const click = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
+        halt(ev);
         if (action === "zoom_in" || action === "zoom_out") this._handleWebRtcPtzAction(action, "click");
       };
 
