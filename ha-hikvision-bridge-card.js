@@ -157,7 +157,7 @@ _pushDebugEntry(entry) {
     this._talkActive = this._talkActive || false;
     this._talkHoldActive = this._talkHoldActive || false;
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
-    this._subscribeDebug();
+    this._videoAccessoryPanel = this._videoAccessoryPanel || "";
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
@@ -182,10 +182,8 @@ _pushDebugEntry(entry) {
   set hass(hass) {
     this._hass = hass;
     if (this._videoCard) this._videoCard.hass = hass;
+    this._syncDebugRuntime();
     this.render();
-    if (!this._debugSubscribed) {
-    this._subscribeDebug();
-  }
   }
 
 
@@ -590,7 +588,42 @@ _pushDebugEntry(entry) {
     return "debug";
   }
 
+  _isDebugPanelActive() {
+    return this.config?.debug?.enabled === true && this._videoAccessoryPanel === "debug";
+  }
+
+  _syncDebugRuntime() {
+    const shouldRun = this._isDebugPanelActive() && !!this._hass;
+    if (shouldRun) {
+      this._subscribeDebug();
+      return;
+    }
+    if (typeof this._debugUnsubscribe === "function") {
+      try { this._debugUnsubscribe(); } catch (err) {}
+    }
+    this._debugUnsubscribe = null;
+    this._debugSubscribed = false;
+  }
+
+  _toggleVideoAccessoryPanel(panel = "") {
+    const next = String(panel || "");
+    this._videoAccessoryPanel = this._videoAccessoryPanel === next ? "" : next;
+    this._syncDebugRuntime();
+    this.render();
+  }
+
+  _renderVideoAccessoryPanel(content = "") {
+    const panel = String(this._videoAccessoryPanel || "");
+    if (!panel || !content) return "";
+    return `
+      <div class="hik-video-accessory-wrap">
+        ${content}
+      </div>
+    `;
+  }
+
   _pushDebug(category = "general", level = "info", event = "event", message = "", details = {}, source = "frontend") {
+    if (!this._isDebugPanelActive()) return null;
     const entry = {
       idx: ++this._debugSeq,
       time: new Date().toISOString(),
@@ -611,7 +644,7 @@ _pushDebugEntry(entry) {
   }
 
 _subscribeDebug() {
-  if (!this._hass || this._debugSubscribed) return;
+  if (!this._isDebugPanelActive() || !this._hass || this._debugSubscribed) return;
 
   this._debugSubscribed = true;
 
@@ -3690,9 +3723,36 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
 
-    if (this.config.show_stream_mode_info !== false) {
+    if (this.config.show_alarm_dashboard !== false) {
+      infoCards.push(this.renderAlarmDashboard(globalRefs, dvr, refs, storageSummary));
+    }
+
+    if (this.config.show_dvr_info !== false) {
       infoCards.push(`
-      <div class="hik-panel hik-info-card">
+        <div class="hik-panel hik-info-card">
+          <div class="hik-sub"><ha-icon icon="mdi:server"></ha-icon>NVR System Info</div>
+          ${this.buildMetaGrid([
+            ["Entity", globalRefs.dvr || "Auto-detect pending"],
+            ["Name", this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], dvrEntity?.state || "-")],
+            ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
+            ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
+            ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
+            ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
+            ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
+            ["Active alarms", this.pickValue([dvr], ["active_alarm_count"], nvrAlarmBadges.filter((badge) => badge.level === "warn").length || 0)],
+            ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
+          ])}
+          ${nvrAlarmBadges.length ? `<div class="hik-status-row">${nvrAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}</div>` : ""}
+        </div>
+      `);
+    }
+
+    if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
+    if (this.config.show_storage_info === false && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (this.config.debug?.enabled !== true && this._videoAccessoryPanel === "debug") this._videoAccessoryPanel = "";
+
+    const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
+      <div class="hik-panel hik-info-card hik-video-accessory-panel">
         <div class="hik-sub"><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Stream Mode Info</div>
         <div class="hik-select-group" style="margin-bottom:12px;">
           <div class="hik-select-wrap">
@@ -3720,58 +3780,40 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           ["Preferred URL", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-")],
         ])}
       </div>
-    `);
-    }
+    ` : "";
 
-    if (this.config.show_alarm_dashboard !== false) {
-      infoCards.push(this.renderAlarmDashboard(globalRefs, dvr, refs, storageSummary));
-    }
+    const storageAccessoryPanel = this.config.show_storage_info !== false ? `
+      <div class="hik-panel hik-info-card hik-video-accessory-panel">
+        <div class="hik-sub"><ha-icon icon="mdi:harddisk"></ha-icon>NVR Storage Info</div>
+        ${this.buildMetaGrid([
+          ["Entity", globalRefs.dvr || globalRefs.storage || "Auto-detect pending"],
+          ["Disk mode", storageSummary.diskMode],
+          ["Total capacity", storageSummary.total],
+          ["Total used", storageSummary.used],
+          ["Total free", storageSummary.free],
+          ["Disks", storageSummary.disks],
+          ["Overall health", storageSummary.health],
+        ])}
+        ${(storageSummary.hdds || []).length ? `<div class="hik-storage-list">${storageSummary.hdds.map((disk) => `
+          <div class="hik-storage-item ${this.escapeHtml(disk.health_color || "yellow")}">
+            <div class="hik-storage-row">
+              <b>${this.escapeHtml(disk.name || `HDD ${disk.id || "?"}`)}</b>
+              <span class="hik-health-chip ${this.escapeHtml(disk.health_color || "yellow")}"><span class="hik-health-dot"></span>${this.escapeHtml(String(disk.status || "unknown").toUpperCase())}</span>
+            </div>
+            <span>${this.escapeHtml(`${disk.type || "Disk"} · Size ${disk.capacity_text}`)}</span>
+            <span>${this.escapeHtml(`Used ${disk.used_text} · Free ${disk.free_text}`)}</span>
+          </div>`).join("")}</div>` : `<div class="hik-empty-note">No HDD data available</div>`}
+      </div>
+    ` : "";
 
-    if (this.config.show_dvr_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:server"></ha-icon>NVR System Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", globalRefs.dvr || "Auto-detect pending"],
-            ["Name", this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], dvrEntity?.state || "-")],
-            ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
-            ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
-            ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
-            ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
-            ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
-            ["Active alarms", this.pickValue([dvr], ["active_alarm_count"], nvrAlarmBadges.filter((badge) => badge.level === "warn").length || 0)],
-            ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
-          ])}
-          ${nvrAlarmBadges.length ? `<div class="hik-status-row">${nvrAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}</div>` : ""}
-        </div>
-      `);
-    }
-
-    if (this.config.show_storage_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:harddisk"></ha-icon>NVR Storage Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", globalRefs.dvr || globalRefs.storage || "Auto-detect pending"],
-            ["Disk mode", storageSummary.diskMode],
-            ["Total capacity", storageSummary.total],
-            ["Total used", storageSummary.used],
-            ["Total free", storageSummary.free],
-            ["Disks", storageSummary.disks],
-            ["Overall health", storageSummary.health],
-          ])}
-          ${(storageSummary.hdds || []).length ? `<div class="hik-storage-list">${storageSummary.hdds.map((disk) => `
-            <div class="hik-storage-item ${this.escapeHtml(disk.health_color || "yellow")}">
-              <div class="hik-storage-row">
-                <b>${this.escapeHtml(disk.name || `HDD ${disk.id || "?"}`)}</b>
-                <span class="hik-health-chip ${this.escapeHtml(disk.health_color || "yellow")}"><span class="hik-health-dot"></span>${this.escapeHtml(String(disk.status || "unknown").toUpperCase())}</span>
-              </div>
-              <span>${this.escapeHtml(`${disk.type || "Disk"} · Size ${disk.capacity_text}`)}</span>
-              <span>${this.escapeHtml(`Used ${disk.used_text} · Free ${disk.free_text}`)}</span>
-            </div>`).join("")}</div>` : `<div class="hik-empty-note">No HDD data available</div>`}
-        </div>
-      `);
-    }
+    const debugAccessoryPanel = this.config.debug?.enabled === true && this._videoAccessoryPanel === "debug" ? this.renderDebugDashboard(camAttrs) : "";
+    const videoAccessoryPanelContent = this._videoAccessoryPanel === "stream_mode"
+      ? streamModeAccessoryPanel
+      : this._videoAccessoryPanel === "storage"
+        ? storageAccessoryPanel
+        : this._videoAccessoryPanel === "debug"
+          ? debugAccessoryPanel
+          : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -3898,7 +3940,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-playback-input-wrap span { font-size:12px; opacity:0.82; }
           .hik-playback-actions { flex-wrap:wrap; }
           .hik-preset-btn { padding: 0 14px; min-width: unset; }
-          .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; }
+          .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; } .hik-video-accessory-wrap { margin-top:14px; } .hik-video-accessory-wrap > .hik-panel { margin:0; } .hik-video-accessory-panel { width:100%; }
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
           .hik-video-block { --hik-ov-btn: clamp(34px, 4.2vw, 56px); --hik-ov-radius: clamp(12px, 1.2vw, 18px); --hik-ov-gap: clamp(6px, 0.8vw, 10px); --hik-ov-icon: clamp(14px, 1.7vw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
@@ -4295,6 +4337,21 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
                       ` : ""}
+                      ${this.config.show_stream_mode_info !== false ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}" id="hik-overlay-stream-mode-toggle" title="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}" aria-label="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}">
+                          <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
+                        </button>
+                      ` : ""}
+                      ${this.config.show_storage_info !== false ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
+                          <ha-icon icon="mdi:harddisk"></ha-icon>
+                        </button>
+                      ` : ""}
+                      ${this.config.debug?.enabled === true ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "debug" ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._videoAccessoryPanel === "debug" ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._videoAccessoryPanel === "debug" ? "Hide debug dashboard" : "Show debug dashboard"}">
+                          <ha-icon icon="mdi:bug-outline"></ha-icon>
+                        </button>
+                      ` : ""}
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
@@ -4378,12 +4435,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
-                ${this.renderDebugDashboard(camAttrs)}
+                ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
             </div>
 
             ${this.renderControlsPanel({ online, ptz, speed, cameraAlarmBadges })}
-
 
 ${this.config.show_playback_panel !== false ? `
   <div class="hik-panel hik-info-card hik-playback-panel">
@@ -4451,6 +4507,33 @@ ${this.config.show_playback_panel !== false ? `
       btn.addEventListener("click", handler);
       btn.addEventListener("pointerup", handler);
     });
+    const debugOverlayToggle = this.querySelector("#hik-overlay-debug-toggle");
+    if (debugOverlayToggle) {
+      debugOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("debug");
+      });
+    }
+
+    const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
+    if (streamModeOverlayToggle) {
+      streamModeOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("stream_mode");
+      });
+    }
+
+    const storageOverlayToggle = this.querySelector("#hik-overlay-storage-toggle");
+    if (storageOverlayToggle) {
+      storageOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("storage");
+      });
+    }
+
     const streamModeSelect = this.querySelector("#streamMode");
     const streamModeOverlay = this.querySelector("#streamMode-overlay");
     const applyStreamMode = (value) => {
