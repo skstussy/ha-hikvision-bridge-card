@@ -128,6 +128,7 @@ _pushDebugEntry(entry) {
     this._videoCard = null;
     this._videoCardConfig = this._videoCardConfig || null;
     this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
+    this._playbackOverlayVisible = this._playbackOverlayVisible ?? false;
     this._ptzStateMap = this._ptzStateMap || {};
     this._playbackStateMap = this._playbackStateMap || {};
     this._returningHome = false;
@@ -259,7 +260,7 @@ _pushDebugEntry(entry) {
       mode: "webrtc",
       media: "video,audio",
       muted: !this._speakerEnabled,
-      ui: true,
+      ui: false,
       background: true,
       style,
     };
@@ -3722,7 +3723,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; }
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
-          .hik-video-block { position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }
+          .hik-video-block { --hik-ov-btn: clamp(34px, 4.2vw, 56px); --hik-ov-radius: clamp(12px, 1.2vw, 18px); --hik-ov-gap: clamp(6px, 0.8vw, 10px); --hik-ov-icon: clamp(14px, 1.7vw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-ptz-overlay { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transform:scale(0.985); transition:opacity 180ms ease, transform 180ms ease; }
@@ -3735,37 +3736,37 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
           .hik-video-ptz-chip.subtle { opacity:0.9; }
           .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
-          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,56px); gap:10px; pointer-events:auto; }
-          .hik-video-ptz-btn { position:relative; min-height:56px; min-width:56px; border:none; border-radius:18px; cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
+          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
+          .hik-video-ptz-btn { position:relative; min-height:var(--hik-ov-btn); min-width:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
           .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
           .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
           .hik-video-ptz-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
-          .hik-video-ptz-btn ha-icon { --mdc-icon-size:22px; }
+          .hik-video-ptz-btn ha-icon { --mdc-icon-size:var(--hik-ov-icon); }
           .hik-video-ptz-btn.center { overflow:hidden; background:rgba(18,24,32,0.46); }
           .hik-video-ptz-center-core { position:absolute; inset:10px; border-radius:999px; background:radial-gradient(circle at 50% 45%, rgba(255,255,255,0.18), rgba(255,255,255,0.02) 65%); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08); }
           .hik-video-ptz-btn.center ha-icon { position:relative; color:var(--hik-accent); --mdc-icon-size:20px; }
-          .hik-video-zoom-rail { position:absolute; right:16px; top:50%; transform:translateY(-50%); width:58px; padding:10px 8px; border-radius:20px; display:grid; gap:10px; place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
-          .hik-video-zoom-btn { width:42px; height:42px; border:none; border-radius:14px; cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-zoom-rail { position:absolute; right:16px; top:50%; transform:translateY(-50%); width:clamp(44px, 5vw, 58px); padding:clamp(6px, 0.8vw, 10px) clamp(6px, 0.7vw, 8px); border-radius:clamp(14px, 1.4vw, 20px); display:grid; gap:var(--hik-ov-gap); place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-zoom-btn { width:clamp(32px, 3.8vw, 42px); height:clamp(32px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-zoom-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(255,255,255,0.12); box-shadow:0 8px 18px rgba(0,0,0,0.24); }
           .hik-video-zoom-btn:active:not(:disabled) { transform:scale(0.94); }
           .hik-video-zoom-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
-          .hik-video-zoom-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
-          .hik-video-zoom-track { width:6px; height:88px; border-radius:999px; position:relative; background:rgba(255,255,255,0.10); overflow:hidden; }
+          .hik-video-zoom-btn ha-icon { --mdc-icon-size:clamp(14px, 1.5vw, 18px); color:var(--hik-accent); }
+          .hik-video-zoom-track { width:6px; height:clamp(60px, 10vw, 88px); border-radius:999px; position:relative; background:rgba(255,255,255,0.10); overflow:hidden; }
           .hik-video-zoom-track span { position:absolute; left:0; right:0; top:18%; bottom:18%; border-radius:999px; background:linear-gradient(180deg, color-mix(in srgb, var(--hik-accent) 82%, #fff 8%), rgba(255,255,255,0.10)); opacity:0.9; }
-          .hik-video-refocus-btn { position:absolute; left:16px; bottom:220px; min-height:38px; padding:0 14px; border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-refocus-btn { position:absolute; left:16px; bottom:calc((var(--hik-ov-btn) * 3) + (var(--hik-ov-gap) * 3) + 18px); min-height:clamp(32px, 3.4vw, 38px); padding:0 clamp(10px, 1vw, 14px); border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-refocus-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-refocus-btn:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
-          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:8px; pointer-events:auto; }
-          .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:10px; align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
-          .hik-video-media-btn { min-width:42px; height:42px; border:none; border-radius:14px; display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; }
+          .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
+          .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-media-btn:active:not(:disabled) { transform:scale(0.95); }
           .hik-video-media-btn.live { box-shadow:0 0 0 1px rgba(255,80,80,0.45), 0 12px 26px rgba(0,0,0,0.28); background:rgba(80,16,16,0.46); }
           .hik-video-media-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
-          .hik-video-audio-chip { min-height:42px; padding:0 12px 0 10px; border:none; border-radius:14px; display:inline-flex; align-items:center; gap:10px; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
+          .hik-video-audio-chip { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.9vw, 12px) 0 clamp(8px, 0.8vw, 10px); border:none; border-radius:clamp(10px, 1vw, 14px); display:inline-flex; align-items:center; gap:clamp(6px, 0.8vw, 10px); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
           .hik-video-audio-chip:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-audio-chip:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-audio-chip:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
@@ -3786,10 +3787,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             0%, 100% { height:5px; opacity:0.45; }
             50% { height:16px; opacity:1; }
           }
-          .hik-video-mini-select { min-height:42px; padding:6px 10px; border-radius:14px; display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-mini-select { min-height:clamp(34px, 3.8vw, 42px); padding:clamp(4px, 0.6vw, 6px) clamp(8px, 0.8vw, 10px); border-radius:clamp(10px, 1vw, 14px); display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-mini-select.wide { min-width:min(240px, 56vw); }
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
-          .hik-video-mini-select select { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
-          .hik-video-volume-rail { min-height:42px; padding:0 12px; border-radius:14px; display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
+          .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
@@ -3918,22 +3919,18 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-motion-grid, .hik-lens-grid { grid-template-columns:1fr; }
             .hik-audio-console-grid { grid-template-columns:1fr; }
             .hik-pad { max-width:220px; }
-            .hik-video-ptz-pad { grid-template-columns:repeat(3,50px); gap:8px; left:12px; bottom:12px; }
-            .hik-video-ptz-btn { min-height:50px; min-width:50px; border-radius:16px; }
-            .hik-video-zoom-rail { right:12px; width:52px; padding:8px 7px; }
-            .hik-video-zoom-track { height:72px; }
-            .hik-video-refocus-btn { left:12px; bottom:188px; min-height:34px; padding:0 12px; }
+            .hik-video-ptz-pad { left:12px; bottom:12px; }
+            .hik-video-zoom-rail { right:12px; }
+            .hik-video-refocus-btn { left:12px; }
             .hik-video-refocus-btn span { font-size:12px; }
             .hik-video-media-topright { gap:6px; }
-            .hik-video-media-btn { min-width:38px; height:38px; border-radius:12px; }
-            .hik-video-audio-chip { min-height:38px; padding:0 10px 0 9px; gap:8px; }
             .hik-video-audio-state { font-size:11px; }
             .hik-video-audio-waves { width:18px; }
             .hik-video-media-bottom { bottom:10px; gap:8px; width:calc(100% - 24px); }
-            .hik-video-mini-select { min-height:38px; padding:5px 8px; }
-            .hik-video-mini-select select { min-width:88px; font-size:11px; }
-            .hik-video-volume-rail { min-height:38px; padding:0 10px; }
+            .hik-video-mini-select select, .hik-video-mini-input { min-width:88px; font-size:11px; }
             .hik-video-volume-rail input { width:74px; }
+            .hik-video-playback-panel { width:calc(100% - 24px); bottom:10px; padding:10px; }
+            .hik-video-playback-grid { grid-template-columns:1fr; }
           }
         </style>
         <div class="hik-wrap">
@@ -3965,9 +3962,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block">
+                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
                   <div id="hikvision-video-host"></div>
-                  ${(!playbackActive && ptz) ? `
+                  ${(!playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
                       <div class="hik-video-ptz-surface">
                         <div class="hik-video-ptz-top">
@@ -4027,54 +4024,88 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-next" title="Next camera" aria-label="Next camera">
                         <ha-icon icon="mdi:chevron-right"></ha-icon>
                       </button>
-                      <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
-                        <span class="hik-video-audio-icon">
-                          <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
-                        </span>
-                        <span class="hik-video-audio-meta">
-                          <span class="hik-video-audio-label">Speaker</span>
-                          <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
-                        </span>
-                        <span class="hik-video-audio-waves" aria-hidden="true">
-                          <i></i><i></i><i></i>
-                        </span>
-                      </button>
-                      ${(!playbackActive && isWebRtc) ? `
-                        <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
+                      ${(!playbackActive && !this._playbackOverlayVisible) ? `
+                        <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
-                            <ha-icon icon="mdi:microphone"></ha-icon>
+                            <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
                           </span>
                           <span class="hik-video-audio-meta">
-                            <span class="hik-video-audio-label">Mic</span>
-                            <span class="hik-video-audio-state">${this._talkHoldActive || this._talkRequested ? "Live" : "Hold to talk"}</span>
+                            <span class="hik-video-audio-label">Speaker</span>
+                            <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
                           </span>
                           <span class="hik-video-audio-waves" aria-hidden="true">
                             <i></i><i></i><i></i>
                           </span>
                         </button>
+                        ${isWebRtc ? `
+                          <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
+                            <span class="hik-video-audio-icon">
+                              <ha-icon icon="mdi:microphone"></ha-icon>
+                            </span>
+                            <span class="hik-video-audio-meta">
+                              <span class="hik-video-audio-label">Mic</span>
+                              <span class="hik-video-audio-state">${this._talkHoldActive || this._talkRequested ? "Live" : "Hold to talk"}</span>
+                            </span>
+                            <span class="hik-video-audio-waves" aria-hidden="true">
+                              <i></i><i></i><i></i>
+                            </span>
+                          </button>
+                        ` : ""}
                       ` : ""}
-                      <button type="button" class="hik-video-media-btn" id="hik-controls-toggle-middle" title="${this._controlsVisible ? "Hide controls" : "Show controls"}" aria-label="${this._controlsVisible ? "Hide controls" : "Show controls"}">
-                        <ha-icon icon="mdi:tune-variant"></ha-icon>
+                      <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
+                        <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
                     </div>
-                    <div class="hik-video-media-bottom">
-                      <label class="hik-video-mini-select">
-                        <span>Mode</span>
-                        <select id="streamMode-overlay">
-                          ${['snapshot','rtsp_direct','webrtc_direct'].map((mode) => `<option value="${mode}" ${String(streamMode || '').toLowerCase() === mode ? 'selected' : ''}>${mode.replace('_',' ')}</option>`).join("")}
-                        </select>
-                      </label>
-                      <label class="hik-video-mini-select">
-                        <span>Profile</span>
-                        <select id="streamProfile-overlay">
-                          ${["main","sub"].map((profile) => `<option value="${profile}" ${String(camAttrs.stream_profile || "").toLowerCase() === profile ? "selected" : ""}>${profile}</option>`).join("")}
-                        </select>
-                      </label>
-                      <label class="hik-video-volume-rail">
-                        <ha-icon icon="mdi:volume-medium"></ha-icon>
-                        <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
-                      </label>
-                    </div>
+                    ${(!playbackActive && !this._playbackOverlayVisible) ? `
+                      <div class="hik-video-media-bottom">
+                        <label class="hik-video-mini-select">
+                          <span>Mode</span>
+                          <select id="streamMode-overlay">
+                            ${['snapshot','rtsp_direct','webrtc_direct'].map((mode) => `<option value="${mode}" ${String(streamMode || '').toLowerCase() === mode ? 'selected' : ''}>${mode.replace('_',' ')}</option>`).join("")}
+                          </select>
+                        </label>
+                        <label class="hik-video-mini-select">
+                          <span>Profile</span>
+                          <select id="streamProfile-overlay">
+                            ${["main","sub"].map((profile) => `<option value="${profile}" ${String(camAttrs.stream_profile || "").toLowerCase() === profile ? "selected" : ""}>${profile}</option>`).join("")}
+                          </select>
+                        </label>
+                        <label class="hik-video-volume-rail">
+                          <ha-icon icon="mdi:volume-medium"></ha-icon>
+                          <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+                        </label>
+                      </div>
+                    ` : ""}
+                    ${(this._playbackOverlayVisible || playbackActive) ? `
+                      <div class="hik-video-playback-panel ${playbackActive ? "is-recording" : "is-standby"}">
+                        <div class="hik-video-playback-head">
+                          <div class="hik-video-playback-title">
+                            <ha-icon icon="${playbackActive ? "mdi:record-rec" : "mdi:movie-open-play-outline"}"></ha-icon>
+                            <span>${playbackActive ? "Playback mode" : "Playback controls"}</span>
+                          </div>
+                          <div class="hik-video-playback-state">${playbackActive ? (playbackState.paused ? "Paused" : "Playing recording") : "Ready to start recording playback"}</div>
+                        </div>
+                        <div class="hik-video-playback-grid">
+                          <label class="hik-video-mini-select wide">
+                            <span>Start</span>
+                            <input id="hik-playback-time-overlay" class="hik-video-mini-input" type="datetime-local" step="1" value="${this.escapeHtml(playbackState.currentTime || this.formatDateTimeLocal())}">
+                          </label>
+                          <label class="hik-video-mini-select">
+                            <span>Jump</span>
+                            <select id="hik-playback-preset-overlay">
+                              ${playbackPresets.map((value) => `<option value="${value}" ${Number(playbackState.preset) === Number(value) ? "selected" : ""}>${this.escapeHtml(this.formatPlaybackPreset(value))}</option>`).join("")}
+                            </select>
+                          </label>
+                        </div>
+                        <div class="hik-video-playback-actions">
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-back-overlay" title="Back"><ha-icon icon="mdi:rewind"></ha-icon></button>
+                          ${playbackState.paused ? `<button type="button" class="hik-video-media-btn is-active" id="hik-playback-resume-overlay" title="Play"><ha-icon icon="mdi:play"></ha-icon></button>` : `<button type="button" class="hik-video-media-btn is-active" id="hik-playback-pause-overlay" title="Pause"><ha-icon icon="mdi:pause"></ha-icon></button>`}
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-forward-overlay" title="Forward"><ha-icon icon="mdi:fast-forward"></ha-icon></button>
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-start-overlay" title="Start playback"><ha-icon icon="mdi:calendar-play"></ha-icon></button>
+                          <button type="button" class="hik-video-media-btn" id="hik-playback-stop-overlay" title="Return to live"><ha-icon icon="mdi:cctv-off"></ha-icon></button>
+                        </div>
+                      </div>
+                    ` : ""}
                   </div>
                 </div>
                 ${this.config.show_status_pills !== false ? `
@@ -4223,7 +4254,11 @@ ${this.config.show_playback_panel !== false ? `
       this._controlsVisible = !this._controlsVisible;
       this.render();
     };
-    this.querySelector("#hik-controls-toggle-middle")?.addEventListener("click", toggleControls);
+    this.querySelector("#hik-playback-overlay-toggle")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      this._playbackOverlayVisible = !this._playbackOverlayVisible;
+      this.render();
+    });
 
     this.querySelectorAll(".hik-video-ptz-overlay .ptz-btn").forEach((btn) => {
       const pan = Number(btn.dataset.pan);
@@ -4308,6 +4343,20 @@ ${this.config.show_playback_panel !== false ? `
     this.querySelector("#hik-playback-resume")?.addEventListener("click", () => this.resumePlayback());
     this.querySelector("#hik-playback-back")?.addEventListener("click", () => this.seekPlayback(-1));
     this.querySelector("#hik-playback-forward")?.addEventListener("click", () => this.seekPlayback(1));
+    this.querySelector("#hik-playback-start-overlay")?.addEventListener("click", () => this.startPlayback());
+    this.querySelector("#hik-playback-stop-overlay")?.addEventListener("click", () => { this.stopPlayback(); this._playbackOverlayVisible = false; });
+    this.querySelector("#hik-playback-pause-overlay")?.addEventListener("click", () => this.pausePlayback());
+    this.querySelector("#hik-playback-resume-overlay")?.addEventListener("click", () => this.resumePlayback());
+    this.querySelector("#hik-playback-back-overlay")?.addEventListener("click", () => this.seekPlayback(-1));
+    this.querySelector("#hik-playback-forward-overlay")?.addEventListener("click", () => this.seekPlayback(1));
+    this.querySelector("#hik-playback-time-overlay")?.addEventListener("change", (ev) => {
+      const state = this.getPlaybackState();
+      state.currentTime = ev.target.value;
+    });
+    this.querySelector("#hik-playback-preset-overlay")?.addEventListener("change", (ev) => {
+      const state = this.getPlaybackState();
+      state.preset = Number(ev.target.value || 1);
+    });
     this.querySelector("#hik-speed")?.addEventListener("input", (ev) => {
       this.config = { ...this.config, speed: Number(ev.target.value) };
       this.render();
