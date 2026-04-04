@@ -4121,3 +4121,45 @@ if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-h
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
 
+
+
+// ===== DEBUG UX UPGRADE PATCH =====
+
+_pushDebugEntry(entry) {
+  if (!this._debugEntries) this._debugEntries = [];
+
+  const fingerprint = [
+    entry.category,
+    entry.level,
+    entry.event,
+    entry.message,
+    entry.camera,
+    entry.details?.reason || ""
+  ].join("|");
+
+  const existing = this._debugEntries.find(e => e._fp === fingerprint);
+
+  if (existing) {
+    existing.count = (existing.count || 1) + 1;
+    existing.last_seen = entry.time;
+    existing.details = entry.details;
+    return;
+  }
+
+  entry._fp = fingerprint;
+  entry.count = 1;
+  entry.last_seen = entry.time;
+
+  this._debugEntries.unshift(entry);
+
+  if (this._debugEntries.length > 300) {
+    this._debugEntries.pop();
+  }
+}
+
+_toggleDebugExpand(entry) {
+  entry._expanded = !entry._expanded;
+  this.requestUpdate();
+}
+
+// ===== END DEBUG UX PATCH =====
