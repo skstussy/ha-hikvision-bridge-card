@@ -8,35 +8,35 @@ _toggleDebugExpand(entry) {
 
 _renderWebRtcPtzStatus() {
   const s = this._debugSnapshot || {};
-  return html\`
+  return html`
     <div class="debug-card">
       <h3>WebRTC PTZ Status</h3>
-      <div>Bound: \${s.webrtc_ptz_bound ? "✅" : "❌"}</div>
-      <div>Attempts: \${s.webrtc_ptz_attempts || 0}</div>
-      <div>Candidate Roots: \${s.webrtc_ptz_candidate_roots || 0}</div>
-      <div>Buttons Found: \${s.webrtc_ptz_button_count || 0}</div>
-      <div>Last Reason: \${s.webrtc_ptz_last_bind_reason || "-"}</div>
-      <div>Last Update: \${s.webrtc_ptz_last_bind_at || "-"}</div>
+      <div>Bound: ${s.webrtc_ptz_bound ? "✅" : "❌"}</div>
+      <div>Attempts: ${s.webrtc_ptz_attempts || 0}</div>
+      <div>Candidate Roots: ${s.webrtc_ptz_candidate_roots || 0}</div>
+      <div>Buttons Found: ${s.webrtc_ptz_button_count || 0}</div>
+      <div>Last Reason: ${s.webrtc_ptz_last_bind_reason || "-"}</div>
+      <div>Last Update: ${s.webrtc_ptz_last_bind_at || "-"}</div>
     </div>
-  \`;
+  `;
 }
 
 _renderDebugRow(entry) {
-  return html\`
-    <div class="debug-row" @click=\${() => this._toggleDebugExpand(entry)}>
-      <div class="time">\${new Date(entry.time).toLocaleTimeString()}</div>
-      <div class="cat">\${entry.category}</div>
-      <div class="lvl \${entry.level}">\${entry.level}</div>
-      <div class="evt">\${entry.event}</div>
-      <div class="cam">\${entry.camera || "-"}</div>
-      <div class="cnt">\${entry.count > 1 ? "×" + entry.count : ""}</div>
+  return html`
+    <div class="debug-row" @click=${() => this._toggleDebugExpand(entry)}>
+      <div class="time">${new Date(entry.time).toLocaleTimeString()}</div>
+      <div class="cat">${entry.category}</div>
+      <div class="lvl ${entry.level}">${entry.level}</div>
+      <div class="evt">${entry.event}</div>
+      <div class="cam">${entry.camera || "-"}</div>
+      <div class="cnt">${entry.count > 1 ? "×" + entry.count : ""}</div>
     </div>
-    \${entry._expanded ? html\`
+    ${entry._expanded ? html`
       <div class="debug-details">
-        <pre>\${JSON.stringify(entry.details, null, 2)}</pre>
+        <pre>${JSON.stringify(entry.details, null, 2)}</pre>
       </div>
-    \` : ""}
-  \`;
+    ` : ""}
+  `;
 }
 
 
