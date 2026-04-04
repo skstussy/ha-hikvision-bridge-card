@@ -168,6 +168,11 @@ _pushDebugEntry(entry) {
     this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
     this._lastDebugSnapshot = this._lastDebugSnapshot || null;
     this._panelOpenState = this._panelOpenState || {};
+    this._gridMode = this._gridMode ?? false;
+    this._gridFocusChannel = this._gridFocusChannel ?? null;
+    this._gridManualFocusUntil = Number.isFinite(this._gridManualFocusUntil) ? this._gridManualFocusUntil : 0;
+    this._gridMotionFocusUntil = Number.isFinite(this._gridMotionFocusUntil) ? this._gridMotionFocusUntil : 0;
+    this._gridVideoCards = this._gridVideoCards || new Map();
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
   }
@@ -211,6 +216,7 @@ _pushDebugEntry(entry) {
     this._mediaSyncObserver = null;
     this._teardownAudioGraph?.();
     this._teardownTalkAudioGraph?.();
+    this._cleanupGridVideoCards?.();
 
     const card = this._videoCard;
     this._videoCard = null;
@@ -1883,6 +1889,9 @@ _toggleDebugFilter(kind, value) {
   isOnline() {
     const cam = this.selectedCamera;
     if (!cam) return false;
+    if (this._gridMode) {
+      this._gridFocusChannel = this._resolveGridFocusChannel();
+    }
     const refs = this.refsForChannel(cam.channel);
     const onlineEntity = refs.online ? this.getEntity(refs.online) : null;
     if (onlineEntity) return onlineEntity.state === "on";
@@ -3365,6 +3374,122 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     });
   }
 
+  _cleanupGridVideoCards() {
+    if (!(this._gridVideoCards instanceof Map)) {
+      this._gridVideoCards = new Map();
+      return;
+    }
+    this._gridVideoCards.forEach((card) => {
+      try {
+        if (typeof card?.remove === "function") card.remove();
+        else if (card?.parentNode) card.parentNode.removeChild(card);
+      } catch (err) {}
+    });
+    this._gridVideoCards.clear();
+  }
+
+  _getMotionActiveChannels() {
+    const active = [];
+    for (const cam of this.cameras || []) {
+      const refs = this.refsForChannel(cam.channel);
+      const motionEntity = refs.motion ? this.getEntity(refs.motion) : null;
+      if (motionEntity?.state === "on") active.push(String(cam.channel));
+    }
+    return active;
+  }
+
+  _resolveGridFocusChannel() {
+    const now = Date.now();
+    if (this._gridManualFocusUntil > now && this._gridFocusChannel != null) return String(this._gridFocusChannel);
+    const active = this._getMotionActiveChannels();
+    if (active.length) {
+      const next = String(active[0]);
+      this._gridFocusChannel = next;
+      this._gridMotionFocusUntil = now + 10000;
+      return next;
+    }
+    if (this._gridMotionFocusUntil > now && this._gridFocusChannel != null) return String(this._gridFocusChannel);
+    const selected = this.selectedCamera;
+    return selected?.channel != null ? String(selected.channel) : "";
+  }
+
+  _renderGridView() {
+    const cameras = this.cameras || [];
+    const focusedChannel = this._resolveGridFocusChannel();
+    return `
+      <div class="hik-grid-view" id="hik-grid-view">
+        ${cameras.map((gridCam) => {
+          const refs = this.refsForChannel(gridCam.channel);
+          const motionEntity = refs.motion ? this.getEntity(refs.motion) : null;
+          const onlineEntity = refs.online ? this.getEntity(refs.online) : null;
+          const motionActive = motionEntity?.state === "on";
+          const online = onlineEntity ? onlineEntity.state === "on" : true;
+          const focused = String(gridCam.channel) === String(focusedChannel);
+          return `
+            <button type="button" class="hik-grid-tile ${focused ? "focused" : ""} ${motionActive ? "motion" : ""}" data-grid-focus="${this.escapeHtml(String(gridCam.channel))}" title="${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}">
+              <div class="hik-grid-media-host" id="hik-grid-host-${this.escapeHtml(String(gridCam.channel))}"></div>
+              <div class="hik-grid-tile-overlay">
+                <span class="hik-video-badge live-state"><ha-icon icon="mdi:numeric-${this.escapeHtml(String(gridCam.channel))}-circle-outline"></ha-icon>${this.escapeHtml(gridCam.name || `Camera ${gridCam.channel}`)}</span>
+                ${motionActive ? `<span class="hik-video-badge recording"><ha-icon icon="mdi:motion-sensor"></ha-icon>Motion</span>` : ""}
+                ${!online ? `<span class="hik-video-badge paused"><ha-icon icon="mdi:lan-disconnect"></ha-icon>Offline</span>` : ""}
+              </div>
+            </button>`;
+        }).join("")}
+      </div>`;
+  }
+
+  _mountGridStreams() {
+    if (!this._gridMode || !this._hass) {
+      this._cleanupGridVideoCards();
+      return;
+    }
+    window.loadCardHelpers().then(async (helpers) => {
+      const cameras = this.cameras || [];
+      const keep = new Set();
+      for (const gridCam of cameras) {
+        const channel = String(gridCam.channel);
+        keep.add(channel);
+        const host = this.querySelector(`#hik-grid-host-${CSS.escape(channel)}`);
+        if (!host) continue;
+        const existing = this._gridVideoCards.get(channel);
+        if (existing) {
+          existing.hass = this._hass;
+          if (existing.parentNode !== host) {
+            host.innerHTML = "";
+            host.appendChild(existing);
+          }
+          continue;
+        }
+        try {
+          const card = await helpers.createCardElement({
+            type: "picture-entity",
+            entity: gridCam.camera_entity,
+            camera_view: "live",
+            show_name: false,
+            show_state: false,
+          });
+          card.hass = this._hass;
+          host.innerHTML = "";
+          host.appendChild(card);
+          this._gridVideoCards.set(channel, card);
+        } catch (err) {
+          host.innerHTML = `<div class="hik-empty">Unable to load camera</div>`;
+        }
+      }
+      Array.from(this._gridVideoCards.keys()).forEach((key) => {
+        if (!keep.has(String(key))) {
+          const card = this._gridVideoCards.get(key);
+          try {
+            if (typeof card?.remove === "function") card.remove();
+            else if (card?.parentNode) card.parentNode.removeChild(card);
+          } catch (err) {}
+          this._gridVideoCards.delete(key);
+        }
+      });
+    }).catch(() => {});
+  }
+
+
   render() {
     if (!this._hass) return;
     const cameras = this.cameras || [];
@@ -3721,6 +3846,14 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
+          .hik-grid-view { position:absolute; inset:0; display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; padding:10px; background:rgba(0,0,0,0.18); }
+          .hik-grid-tile { position:relative; border:none; padding:0; margin:0; overflow:hidden; border-radius:18px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.08); cursor:pointer; box-shadow:0 12px 26px rgba(0,0,0,0.24); }
+          .hik-grid-tile.focused { box-shadow:0 0 0 2px color-mix(in srgb, var(--hik-accent) 70%, white 10%), 0 12px 26px rgba(0,0,0,0.24); }
+          .hik-grid-tile.motion { box-shadow:0 0 0 2px rgba(255,80,80,0.55), 0 12px 26px rgba(0,0,0,0.24); }
+          .hik-grid-media-host { position:absolute; inset:0; }
+          .hik-grid-media-host > * { width:100%; height:100%; display:block; }
+          .hik-grid-media-host video, .hik-grid-media-host img, .hik-grid-media-host iframe { width:100%; height:100%; object-fit:cover; background:#000; }
+          .hik-grid-tile-overlay { position:absolute; inset:8px 8px auto 8px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:1; }
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
@@ -3899,6 +4032,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-refocus-btn { left:12px; }
             .hik-video-refocus-btn span { font-size:12px; }
             .hik-video-media-topcenter { top:6px; }
+            .hik-grid-view { grid-template-columns:1fr; gap:8px; padding:8px; }
             .hik-video-media-topright { top:46px; gap:6px; max-width:calc(100% - 12px); }
             .hik-video-audio-state { font-size:11px; }
             .hik-video-volume-rail.compact { min-width:132px; }
@@ -3941,8 +4075,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
                 <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
-                  <div id="hikvision-video-host"></div>
-                  ${(!playbackActive && !this._playbackOverlayVisible && ptz) ? `
+                  ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
+                  ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
                       <div class="hik-video-ptz-surface">
                         <div class="hik-video-ptz-top">
@@ -3999,12 +4133,15 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
                       </button>
+                      <button type="button" class="hik-video-media-btn ${this._gridMode ? "is-active" : ""}" id="hik-overlay-grid-toggle" title="${this._gridMode ? "Exit multi-view" : "Multi-view grid"}" aria-label="${this._gridMode ? "Exit multi-view" : "Multi-view grid"}">
+                        <ha-icon icon="mdi:view-grid"></ha-icon>
+                      </button>
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-next" title="Next camera" aria-label="Next camera">
                         <ha-icon icon="mdi:chevron-right"></ha-icon>
                       </button>
                     </div>
                     <div class="hik-video-media-topright">
-                      ${(!playbackActive && !this._playbackOverlayVisible) ? `
+                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
                             <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
@@ -4276,6 +4413,33 @@ ${this.config.show_playback_panel !== false ? `
     };
     bindOverlayCycle("#hik-overlay-cycle-prev", -1);
     bindOverlayCycle("#hik-overlay-cycle-next", 1);
+    this.querySelector("#hik-overlay-grid-toggle")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._gridMode = !this._gridMode;
+      if (!this._gridMode) {
+        this._cleanupGridVideoCards();
+      }
+      this.render();
+    });
+    this.querySelectorAll("[data-grid-focus]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const channel = ev.currentTarget?.getAttribute("data-grid-focus") || "";
+      const cams = this.cameras || [];
+      const idx = cams.findIndex((item) => String(item.channel) === String(channel));
+      if (idx >= 0) {
+        this.selected = idx;
+        this._gridFocusChannel = String(channel);
+        this._gridManualFocusUntil = Date.now() + 30000;
+        this.render();
+      }
+    }));
+    if (this._gridMode) {
+      window.setTimeout(() => this._mountGridStreams(), 0);
+    } else {
+      this._cleanupGridVideoCards();
+    }
 
     const toggleControls = () => {
       this._controlsVisible = !this._controlsVisible;
@@ -4557,3 +4721,5 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 
 
 /* current-ui-overlay-patch: top-center camera nav + top-right audio cluster applied on 1.2.7 */
+
+/* grid-motion-focus phase1 patch applied on 1.2.7 */
