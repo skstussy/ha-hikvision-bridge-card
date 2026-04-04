@@ -3444,6 +3444,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (!playbackPresets.includes(Number(playbackState.preset))) playbackState.preset = playbackPresets[0] || 1;
     const playbackIndicator = this.formatPlaybackIndicatorState(camAttrs, playbackState);
     const playbackActive = playbackIndicator.playbackActive;
+    const isWebRtc = String(streamMode || "").toLowerCase() === "webrtc_direct";
     const cameraAlarmBadges = this.collectCameraAlarmBadges(refs);
     const nvrAlarmBadges = this.collectNvrAlarmBadges(globalRefs, dvr);
     const accent = this.normalizeColor(this.config.accent_color);
