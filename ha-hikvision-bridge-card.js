@@ -87,6 +87,7 @@ class HikvisionPTZCard extends HTMLElement {
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
+    this._panelOpenState = this._panelOpenState || {};
   }
 
   set hass(hass) {
@@ -391,6 +392,128 @@ _toggleDebugFilter(kind, value) {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  _getPanelOpenState(key, defaultOpen = true) {
+    if (!key) return defaultOpen;
+    return Object.prototype.hasOwnProperty.call(this._panelOpenState || {}, key)
+      ? this._panelOpenState[key] === true
+      : defaultOpen;
+  }
+
+  _setPanelOpenState(key, open) {
+    if (!key) return;
+    this._panelOpenState = { ...(this._panelOpenState || {}), [key]: open === true };
+  }
+
+  _slugifyPanelKey(value) {
+    return String(value || "section")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "section";
+  }
+
+  _makePanelsExpandable() {
+    const getDirectChild = (panel, className) => Array.from(panel?.children || []).find((node) => node.classList?.contains(className)) || null;
+    const wrapPanel = (panel, options = {}) => {
+      if (!panel) return;
+      if (panel.querySelector(':scope > details[data-expandable-key]')) return;
+
+      const key = options.key || this._slugifyPanelKey(options.title || options.icon || 'section');
+      const title = String(options.title || 'Section');
+      const icon = String(options.icon || 'mdi:chevron-down');
+      const defaultOpen = options.defaultOpen !== false;
+      const note = String(options.note || '').trim();
+      const headerClass = options.headerClass || '';
+      const headerNode = headerClass ? getDirectChild(panel, headerClass) : null;
+
+      if (headerNode) {
+        try { headerNode.remove(); } catch (err) {}
+      }
+
+      const details = document.createElement('details');
+      details.className = 'hik-expandable-details';
+      details.dataset.expandableKey = key;
+      if (this._getPanelOpenState(key, defaultOpen)) details.open = true;
+
+      const summary = document.createElement('summary');
+      summary.className = 'hik-debug-summary hik-expandable-summary';
+
+      const titleWrap = document.createElement('span');
+      titleWrap.className = 'hik-sub';
+      titleWrap.style.margin = '0';
+
+      const iconEl = document.createElement('ha-icon');
+      iconEl.setAttribute('icon', icon);
+      titleWrap.appendChild(iconEl);
+      const titleText = document.createElement('span');
+      titleText.textContent = title;
+      titleWrap.appendChild(titleText);
+      summary.appendChild(titleWrap);
+
+      if (note) {
+        const noteSpan = document.createElement('span');
+        noteSpan.className = 'hik-mini-note';
+        noteSpan.textContent = note;
+        summary.appendChild(noteSpan);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'hik-expandable-body';
+      while (panel.firstChild) body.appendChild(panel.firstChild);
+      details.appendChild(summary);
+      details.appendChild(body);
+      panel.appendChild(details);
+      panel.classList.add('hik-expandable-panel');
+    };
+
+    wrapPanel(this.querySelector('.hik-controls-block'), {
+      key: 'controls',
+      title: 'Controls',
+      icon: 'mdi:gamepad-round-up',
+      headerClass: 'hik-controls-head',
+      note: this._controlsVisible ? 'PTZ, zoom, focus, presets' : 'Use Show controls to expand'
+    });
+
+    const audioPanel = this.querySelector('.hik-audio-panel');
+    wrapPanel(audioPanel, {
+      key: 'audio-console',
+      title: 'Audio Console',
+      icon: 'mdi:volume-source',
+      headerClass: 'hik-audio-head',
+      note: audioPanel ? Array.from(audioPanel.querySelectorAll('.hik-audio-head .hik-pill')).slice(0, 2).map((node) => node.textContent.trim()).filter(Boolean).join(' · ') : ''
+    });
+
+    const playbackPanel = this.querySelector('.hik-playback-panel');
+    wrapPanel(playbackPanel, {
+      key: 'playback',
+      title: 'Playback',
+      icon: 'mdi:play-box-multiple-outline',
+      headerClass: 'hik-sub',
+      note: playbackPanel?.querySelector('#hik-playback-time')?.value || ''
+    });
+
+    const positionPanel = this.querySelector('.hik-position-card');
+    wrapPanel(positionPanel, {
+      key: 'position-tracker',
+      title: 'Position Tracker',
+      icon: 'mdi:crosshairs-question',
+      headerClass: 'hik-position-head',
+      note: positionPanel?.querySelector('.hik-position-head .hik-pill')?.textContent?.trim() || ''
+    });
+
+    this.querySelectorAll('.hik-info-grid > .hik-panel.hik-info-card:not(.hik-debug-dashboard)').forEach((panel) => {
+      const titleNode = getDirectChild(panel, 'hik-sub');
+      const title = titleNode?.textContent?.trim() || 'Info';
+      const icon = titleNode?.querySelector('ha-icon')?.getAttribute('icon') || 'mdi:information-outline';
+      wrapPanel(panel, {
+        key: `info-${this._slugifyPanelKey(title)}`,
+        title,
+        icon,
+        headerClass: 'hik-sub'
+      });
+    });
+  }
+
 
   renderDebugDashboard(camAttrs = {}) {
     if (!this.isDebugEnabled()) return "";
@@ -2873,6 +2996,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-chip ha-icon { --mdc-icon-size: 16px; color: var(--hik-accent); }
           .hik-grid { display:grid; grid-template-columns: minmax(320px, 1fr); gap:14px; }
           .hik-panel { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:18px; padding:14px; background: color-mix(in srgb, var(--card-background-color) calc(100% - var(--hik-panel-tint)), var(--hik-accent) var(--hik-panel-tint)); }
+          .hik-expandable-panel { padding:0; overflow:hidden; }
+          .hik-expandable-details { display:block; }
+          .hik-expandable-summary { cursor:pointer; list-style:none; padding:14px; }
+          .hik-expandable-summary::-webkit-details-marker { display:none; }
+          .hik-expandable-body { padding:0 14px 14px; }
+          .hik-expandable-details:not([open]) .hik-expandable-body { display:none; }
           .hik-sub { font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
           .hik-sub ha-icon { --mdc-icon-size: 18px; color: var(--hik-accent); }
           .hik-status-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
@@ -3161,6 +3290,7 @@ ${this.config.show_playback_panel !== false ? `
       </ha-card>
     `;
 
+    this._makePanelsExpandable();
     this._restorePreservedVideoHost(preservedVideoHost);
     this.renderVideo(refs.camera, rtspUrl, directRtspUrl, streamMode, camAttrs.playback_active === true ? (camAttrs.playback_uri || "") : "", playbackState.paused);
     this._syncMediaAudio();
@@ -3244,6 +3374,11 @@ ${this.config.show_playback_panel !== false ? `
         this._debugDashboardOpen = debugDashboard.open === true;
       });
     }
+    this.querySelectorAll("details[data-expandable-key]").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        this._setPanelOpenState(details.getAttribute("data-expandable-key"), details.open === true);
+      });
+    });
     this.querySelectorAll("[data-debug-filter]").forEach((btn) => btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
