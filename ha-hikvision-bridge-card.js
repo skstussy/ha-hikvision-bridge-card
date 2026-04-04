@@ -2202,39 +2202,13 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                 <div class="hik-pad-wrap hik-webrtc-pad-wrap">
                   <div class="hik-pad-stage hik-webrtc-stage">
                     <div class="hik-pad-meta-row">
-                      <span class="hik-console-badge"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>${ptz ? 'Pan / Tilt / Zoom on live video overlay' : 'PTZ unavailable'}</span>
+                      <span class="hik-console-badge"><ha-icon icon="mdi:star-four-points-outline"></ha-icon>Primary control surface is now on-video</span>
                     </div>
-                    <div class="hik-webrtc-note">
-                      <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
+                    <div class="hik-webrtc-note hik-overlay-primary-note">
+                      <ha-icon icon="mdi:gesture-tap-hold"></ha-icon>
                       <div>
-                        <div class="hik-webrtc-note-title">On-video PTZ controls</div>
-                        <div class="hik-webrtc-note-copy">Use the live video surface for pan, tilt, and zoom. The controls below remain available as a fallback console.</div>
-                      </div>
-                    </div>
-                    <div class="hik-pad hik-pad-fallback">
-                      <div></div>
-                      ${this.iconButton({ icon: "mdi:chevron-up", label: "Move up", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="1"', disabled: !ptz || this._returningHome })}
-                      <div></div>
-                      ${this.iconButton({ icon: "mdi:chevron-left", label: "Move left", cls: "ptz-btn", attrs: 'data-pan="-1" data-tilt="0"', disabled: !ptz || this._returningHome })}
-                      ${this.iconButton({ icon: "mdi:crosshairs-gps", label: "Return home", cls: "center", attrs: 'id="hik-center"', disabled: !ptz || this._returningHome })}
-                      ${this.iconButton({ icon: "mdi:chevron-right", label: "Move right", cls: "ptz-btn", attrs: 'data-pan="1" data-tilt="0"', disabled: !ptz || this._returningHome })}
-                      <div></div>
-                      ${this.iconButton({ icon: "mdi:chevron-down", label: "Move down", cls: "ptz-btn", attrs: 'data-pan="0" data-tilt="-1"', disabled: !ptz || this._returningHome })}
-                      <div></div>
-                    </div>
-                    <div class="hik-rail zoom fallback">
-                      <div class="hik-rail-head"><ha-icon icon="mdi:magnify"></ha-icon><span>Zoom</span><span class="hik-mini-note">Fallback controls</span></div>
-                      <div class="hik-rail-stack horizontal lens-pair">
-                        <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome || !ptz) ? 'disabled' : ''} title="Zoom in" aria-label="Zoom in">
-                          <ha-icon icon="mdi:magnify-plus"></ha-icon>
-                          <span class="hik-rail-sign">+</span>
-                          <span class="hik-rail-text">In</span>
-                        </button>
-                        <button type="button" class="hik-rail-btn lens-btn" data-service="zoom" data-direction="-1" ${(!online || this._returningHome || !ptz) ? 'disabled' : ''} title="Zoom out" aria-label="Zoom out">
-                          <ha-icon icon="mdi:magnify-minus"></ha-icon>
-                          <span class="hik-rail-sign">−</span>
-                          <span class="hik-rail-text">Out</span>
-                        </button>
+                        <div class="hik-webrtc-note-title">Premium overlay active</div>
+                        <div class="hik-webrtc-note-copy">Pan, tilt, zoom, and refocus now live directly on the video. The lower motion console keeps only speed and status context.</div>
                       </div>
                     </div>
                   </div>
@@ -3732,6 +3706,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-lens-grid .lens-pair { grid-template-columns:repeat(2, minmax(0,1fr)); }
           .hik-pad-wrap { border:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); border-radius:20px; padding:10px; background: color-mix(in srgb, var(--card-background-color) 88%, var(--hik-accent) 12%); display:grid; justify-content:center; }
           .hik-pad { display:grid; grid-template-columns:repeat(3,minmax(54px,1fr)); gap:8px; justify-content:center; align-items:center; max-width:230px; width:min(100%,230px); }
+          .hik-pad-fallback, .hik-rail.zoom.fallback { display:none !important; }
+          .hik-overlay-primary-note { background:rgba(255,255,255,0.025); border-style:dashed; }
           .hik-pad .hik-icon-btn { min-height:54px; min-width:54px; border-radius:16px; background: color-mix(in srgb, var(--secondary-background-color) 92%, transparent); }
           .hik-pad .hik-icon-btn ha-icon { --mdc-icon-size:18px; }
           .hik-pad .hik-icon-btn.center { background: color-mix(in srgb, var(--hik-accent) 22%, var(--secondary-background-color)); }
@@ -4126,10 +4102,10 @@ ${this.config.show_playback_panel !== false ? `
     };
     this.querySelector("#hik-controls-toggle-middle")?.addEventListener("click", toggleControls);
 
-    this.querySelectorAll(".ptz-btn").forEach((btn) => {
+    this.querySelectorAll(".hik-video-ptz-overlay .ptz-btn").forEach((btn) => {
       const pan = Number(btn.dataset.pan);
       const tilt = Number(btn.dataset.tilt);
-      const source = btn.closest(".hik-video-ptz-overlay") ? "overlay" : "panel";
+      const source = "overlay";
       const start = (ev) => { ev.preventDefault(); this.startMove(pan, tilt, { source }); };
       const stop = () => this.stopMove({ source });
       btn.addEventListener("mousedown", start);
@@ -4140,10 +4116,8 @@ ${this.config.show_playback_panel !== false ? `
       btn.addEventListener("touchcancel", stop);
     });
 
-    this.querySelector("#hik-center")?.addEventListener("click", () => this.handleCenter());
     this.querySelector("#hik-center-overlay")?.addEventListener("click", () => this.handleCenter());
     this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: btn.closest(".hik-video-ptz-overlay") ? "overlay" : "panel" })));
-    this.querySelector("#hik-refocus")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-refocus-overlay")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
     this.querySelector("#hik-return-home")?.addEventListener("click", () => this.handleReturnHome());
