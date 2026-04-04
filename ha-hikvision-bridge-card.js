@@ -65,9 +65,14 @@ class HikvisionPTZCard extends HTMLElement {
     this._talkRequested = this._talkRequested ?? false;
     this._talkLatched = this._talkLatched ?? false;
     this._audioMeterLevel = this._audioMeterLevel ?? 0;
+    this._audioMeterPeak = this._audioMeterPeak ?? 0;
+    this._micMeterLevel = this._micMeterLevel ?? 0;
+    this._micMeterPeak = this._micMeterPeak ?? 0;
     this._audioMeterRaf = this._audioMeterRaf || null;
+    this._micMeterRaf = this._micMeterRaf || null;
     this._audioGraph = this._audioGraph || null;
     this._audioGraphElement = this._audioGraphElement || null;
+    this._talkAudioGraph = this._talkAudioGraph || null;
     this._talkPc = this._talkPc || null;
     this._talkWs = this._talkWs || null;
     this._talkStream = this._talkStream || null;
@@ -106,6 +111,7 @@ class HikvisionPTZCard extends HTMLElement {
     this._talkLatched = false;
     this._detachTalkReleaseListeners();
     this._stopTalkbackDirect();
+    this._teardownTalkAudioGraph();
     this._teardownAudioGraph();
     this._cleanupVideoCard();
   }
@@ -469,6 +475,7 @@ _toggleDebugFilter(kind, value) {
       };
       this._pushAudioDebug("mic_request", { constraints: micConstraints });
       this._talkStream = await navigator.mediaDevices.getUserMedia(micConstraints);
+      this._ensureTalkAudioGraph(this._talkStream);
       this._setAudioDebugStatus({ mic: "granted" });
       this._pushAudioDebug("mic_granted", { trackCount: this._talkStream?.getTracks?.().length || 0 });
 
@@ -714,6 +721,7 @@ _toggleDebugFilter(kind, value) {
       });
       this._talkStream = null;
     }
+    this._teardownTalkAudioGraph();
     this._talkActive = false;
   }
 
@@ -1981,6 +1989,32 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     return String(this.config.talk_mode || "hold").toLowerCase() === "toggle" ? "toggle" : "hold";
   }
 
+  _clampMeter(value, multiplier = 1) {
+    return Math.max(0, Math.min(1, Number(value || 0) * multiplier));
+  }
+
+  _setMeterVisual(kind, level, peak) {
+    const safeKind = kind === "mic" ? "mic" : "speaker";
+    const meter = this.querySelector(`.hik-audio-meter-fill[data-meter="${safeKind}"]`);
+    const marker = this.querySelector(`.hik-audio-meter-peak[data-meter="${safeKind}"]`);
+    const percent = `${Math.round(this._clampMeter(level) * 100)}%`;
+    const peakPercent = `${Math.round(this._clampMeter(peak) * 100)}%`;
+    if (meter) meter.style.setProperty("--hik-audio-level", percent);
+    if (marker) marker.style.setProperty("--hik-audio-peak", peakPercent);
+  }
+
+  _sampleAnalyserPeak(analyser) {
+    if (!analyser) return 0;
+    const data = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
+    let peak = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      const value = Math.abs(data[i] - 128) / 128;
+      if (value > peak) peak = value;
+    }
+    return peak;
+  }
+
   _getVideoVolumeFraction() {
     return Math.max(0, Math.min(1, Number(this._volume || 0) / 100));
   }
@@ -2009,6 +2043,28 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this._audioGraph = null;
     this._audioGraphElement = null;
     this._audioMeterLevel = 0;
+    this._audioMeterPeak = 0;
+    this._setMeterVisual("speaker", 0, 0);
+  }
+
+  _teardownTalkAudioGraph() {
+    if (this._micMeterRaf) {
+      cancelAnimationFrame(this._micMeterRaf);
+      this._micMeterRaf = null;
+    }
+    if (this._talkAudioGraph?.source) {
+      try { this._talkAudioGraph.source.disconnect(); } catch (err) {}
+    }
+    if (this._talkAudioGraph?.analyser) {
+      try { this._talkAudioGraph.analyser.disconnect(); } catch (err) {}
+    }
+    if (this._talkAudioGraph?.context) {
+      try { this._talkAudioGraph.context.close(); } catch (err) {}
+    }
+    this._talkAudioGraph = null;
+    this._micMeterLevel = 0;
+    this._micMeterPeak = 0;
+    this._setMeterVisual("mic", 0, 0);
   }
 
   _findNestedMediaElement(root) {
@@ -2033,21 +2089,54 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   _updateAudioMeter() {
     if (!this._audioGraph?.analyser) return;
     try {
-      const analyser = this._audioGraph.analyser;
-      const data = new Uint8Array(analyser.fftSize);
-      analyser.getByteTimeDomainData(data);
-      let peak = 0;
-      for (let i = 0; i < data.length; i += 1) {
-        const value = Math.abs(data[i] - 128) / 128;
-        if (value > peak) peak = value;
-      }
-      this._audioMeterLevel = Math.max(0, Math.min(1, peak * 2.2));
-      const meter = this.querySelector(".hik-audio-meter-fill");
-      if (meter) meter.style.setProperty("--hik-audio-level", `${Math.round(this._audioMeterLevel * 100)}%`);
+      const livePeak = this._sampleAnalyserPeak(this._audioGraph.analyser);
+      this._audioMeterLevel = this._clampMeter(livePeak, 2.2);
+      this._audioMeterPeak = Math.max(this._audioMeterLevel, this._audioMeterPeak * 0.93);
+      this._setMeterVisual("speaker", this._audioMeterLevel, this._audioMeterPeak);
     } catch (err) {
       this._audioMeterLevel = 0;
+      this._audioMeterPeak = 0;
+      this._setMeterVisual("speaker", 0, 0);
     }
     this._audioMeterRaf = requestAnimationFrame(() => this._updateAudioMeter());
+  }
+
+  _updateTalkAudioMeter() {
+    if (!this._talkAudioGraph?.analyser) return;
+    try {
+      const livePeak = this._sampleAnalyserPeak(this._talkAudioGraph.analyser);
+      this._micMeterLevel = this._clampMeter(livePeak, 2.4);
+      this._micMeterPeak = Math.max(this._micMeterLevel, this._micMeterPeak * 0.9);
+      this._setMeterVisual("mic", this._micMeterLevel, this._micMeterPeak);
+    } catch (err) {
+      this._micMeterLevel = 0;
+      this._micMeterPeak = 0;
+      this._setMeterVisual("mic", 0, 0);
+    }
+    this._micMeterRaf = requestAnimationFrame(() => this._updateTalkAudioMeter());
+  }
+
+  _ensureTalkAudioGraph(stream) {
+    if (!stream?.getAudioTracks?.().length) {
+      this._teardownTalkAudioGraph();
+      return;
+    }
+    if (this._talkAudioGraph?.stream === stream) return;
+    this._teardownTalkAudioGraph();
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const context = new AudioCtx();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      this._talkAudioGraph = { context, source, analyser, stream };
+      if (context.state === "suspended") context.resume().catch(() => {});
+      this._updateTalkAudioMeter();
+    } catch (err) {
+      this._teardownTalkAudioGraph();
+    }
   }
 
   async _ensureAudioGraph(mediaElement) {
@@ -2239,9 +2328,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const talkAttrs = talkMode === "toggle"
       ? 'id="hik-talk-toggle"'
       : 'id="hik-talk-hold"';
-    const talkHandlers = talkMode === "toggle"
-      ? ""
-      : `data-hold-talk="true"`;
+    const talkHandlers = talkMode === "toggle" ? "" : `data-hold-talk="true"`;
+    const micState = !isWebRtc ? "Unavailable" : (this._talkRequested ? "Live" : "Ready");
+    const speakerPercent = Math.round((this._audioMeterLevel || 0) * 100);
+    const micPercent = Math.round((this._micMeterLevel || 0) * 100);
     return `
       <div class="hik-audio-panel">
         <div class="hik-audio-head">
@@ -2252,35 +2342,65 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             ${isWebRtc ? `<span class="hik-pill ${this._talkRequested ? "warn" : "neutral"}"><ha-icon icon="mdi:microphone${this._talkRequested ? '' : '-off'}"></ha-icon>${this._talkRequested ? "Mic live" : "Mic standby"}</span>` : ""}
           </div>
         </div>
-        <div class="hik-audio-grid">
-          <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
-            <ha-icon icon="${speakerIcon}"></ha-icon>
-            <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
-          </button>
-          <label class="hik-audio-slider">
-            <span>Volume <b class="hik-volume-value">${Math.round(this._volume)}%</b></span>
-            <input id="hik-volume" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
-          </label>
-          <label class="hik-audio-slider">
-            <span>Boost <b class="hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</b></span>
-            <input id="hik-audio-boost" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
-          </label>
-          ${isWebRtc && !playbackActive ? `
-            <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
-              <ha-icon icon="mdi:microphone"></ha-icon>
-              <span>${talkLabel}</span>
-            </button>
-          ` : `
-            <div class="hik-audio-note">
-              <ha-icon icon="mdi:information-outline"></ha-icon>
-              <span>${playbackActive ? "Talk is disabled during playback." : "Microphone controls appear only in WebRTC mode."}</span>
+
+        <div class="hik-audio-console-grid">
+          <div class="hik-audio-meter-card ${speakerActive ? "active" : ""}">
+            <div class="hik-audio-meter-head">
+              <div class="hik-audio-meter-title"><ha-icon icon="${speakerIcon}"></ha-icon><span>Speaker</span></div>
+              <span class="hik-audio-meter-value">${speakerPercent}%</span>
             </div>
-          `}
+            <div class="hik-audio-meter-shell" title="Speaker level meter">
+              <div class="hik-audio-meter-fill" data-meter="speaker" style="--hik-audio-level:${speakerPercent}%;"></div>
+              <div class="hik-audio-meter-peak" data-meter="speaker" style="--hik-audio-peak:${Math.round((this._audioMeterPeak || 0) * 100)}%;"></div>
+            </div>
+            <div class="hik-audio-meter-caption">Output monitor · volume ${Math.round(this._volume)}% · boost ${(this._audioBoost / 100).toFixed(1)}×</div>
+          </div>
+
+          <div class="hik-audio-meter-card ${this._talkRequested ? "live" : ""} ${!isWebRtc || playbackActive ? "disabled" : ""}">
+            <div class="hik-audio-meter-head">
+              <div class="hik-audio-meter-title"><ha-icon icon="mdi:microphone${this._talkRequested ? '' : '-outline'}"></ha-icon><span>Mic</span></div>
+              <span class="hik-audio-meter-value">${micPercent}%</span>
+            </div>
+            <div class="hik-audio-meter-shell" title="Microphone level meter">
+              <div class="hik-audio-meter-fill mic" data-meter="mic" style="--hik-audio-level:${micPercent}%;"></div>
+              <div class="hik-audio-meter-peak" data-meter="mic" style="--hik-audio-peak:${Math.round((this._micMeterPeak || 0) * 100)}%;"></div>
+            </div>
+            <div class="hik-audio-meter-caption">${playbackActive ? "Talk disabled during playback" : (isWebRtc ? `Push-to-talk · ${micState.toLowerCase()}` : "Talk available only in WebRTC mode")}</div>
+          </div>
+
+          <div class="hik-audio-controls-card">
+            <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
+              <ha-icon icon="${speakerIcon}"></ha-icon>
+              <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
+            </button>
+            <label class="hik-audio-slider">
+              <span>Volume <b class="hik-volume-value">${Math.round(this._volume)}%</b></span>
+              <input id="hik-volume" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+            </label>
+            <label class="hik-audio-slider">
+              <span>Boost <b class="hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</b></span>
+              <input id="hik-audio-boost" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
+            </label>
+          </div>
+
+          <div class="hik-audio-controls-card">
+            ${isWebRtc && !playbackActive ? `
+              <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
+                <ha-icon icon="mdi:microphone"></ha-icon>
+                <span>${talkLabel}</span>
+              </button>
+              <div class="hik-audio-note compact">
+                <ha-icon icon="mdi:information-outline"></ha-icon>
+                <span>${muteDuringTalk ? "Speaker auto-mutes during talk to help prevent feedback." : "Speaker stays active while talking."} Talk mode: ${talkMode}.</span>
+              </div>
+            ` : `
+              <div class="hik-audio-note fill">
+                <ha-icon icon="mdi:information-outline"></ha-icon>
+                <span>${playbackActive ? "Talk is disabled during playback." : "Microphone controls appear only in WebRTC mode."}</span>
+              </div>
+            `}
+          </div>
         </div>
-        <div class="hik-audio-meter" title="Output level meter">
-          <div class="hik-audio-meter-fill" style="--hik-audio-level:${Math.round(this._audioMeterLevel * 100)}%;"></div>
-        </div>
-        <div class="hik-mini-note">${muteDuringTalk ? "Speaker auto-mutes while you talk to prevent feedback." : "Speaker remains active while talking."}${isWebRtc ? ` Talk mode: ${talkMode}.` : ""}</div>
       </div>
     `;
   }
@@ -2723,17 +2843,30 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-badge.recording { color:#fff; background: linear-gradient(90deg, rgba(120,0,0,0.92), rgba(220,0,0,0.96), rgba(120,0,0,0.92)); background-size: 200% 100%; animation: hikPulseRecording 1.4s ease-in-out infinite; }
           .hik-video-badge.live-state { color: var(--primary-text-color); background: rgba(0,0,0,0.48); }
           .hik-video-badge.paused { color: var(--primary-text-color); background: rgba(0,0,0,0.58); }
-          .hik-audio-panel { display:grid; gap:12px; margin-top:14px; padding:14px; border-radius:18px; border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); background: color-mix(in srgb, var(--card-background-color) 92%, var(--hik-accent) 8%); }
+          .hik-audio-panel { display:grid; gap:12px; margin-top:14px; padding:16px; border-radius:20px; border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 93%, var(--hik-accent) 7%), color-mix(in srgb, var(--card-background-color) 97%, #000 3%)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
           .hik-audio-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
           .hik-audio-pills { display:flex; gap:8px; flex-wrap:wrap; }
-          .hik-audio-grid { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; align-items:end; }
+          .hik-audio-console-grid { display:grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(220px, 0.9fr) minmax(220px, 0.9fr); gap:12px; align-items:stretch; }
+          .hik-audio-meter-card, .hik-audio-controls-card { display:grid; gap:10px; padding:14px; border-radius:16px; border:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); background: color-mix(in srgb, var(--secondary-background-color) 92%, transparent); min-width:0; }
+          .hik-audio-meter-card.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success-color) 16%, transparent); }
+          .hik-audio-meter-card.live { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error-color) 16%, transparent); }
+          .hik-audio-meter-card.disabled { opacity:0.74; }
+          .hik-audio-meter-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+          .hik-audio-meter-title { display:flex; align-items:center; gap:8px; font-weight:700; }
+          .hik-audio-meter-title ha-icon { --mdc-icon-size:18px; }
+          .hik-audio-meter-value { font-size:12px; font-weight:800; color: var(--hik-accent); letter-spacing:0.02em; }
+          .hik-audio-meter-shell { position:relative; min-height:14px; border-radius:999px; overflow:hidden; background: color-mix(in srgb, var(--secondary-background-color) 82%, #000 18%); box-shadow: inset 0 1px 2px rgba(0,0,0,0.24); }
+          .hik-audio-meter-fill { position:absolute; inset:0 auto 0 0; width: var(--hik-audio-level, 0%); max-width:100%; background: linear-gradient(90deg, color-mix(in srgb, var(--success-color) 70%, #22c55e), color-mix(in srgb, var(--warning-color) 80%, #f59e0b), color-mix(in srgb, var(--error-color) 80%, #ef4444)); transition: width 90ms linear; }
+          .hik-audio-meter-fill.mic { background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color) 78%, #38bdf8), color-mix(in srgb, var(--warning-color) 74%, #f59e0b), color-mix(in srgb, var(--error-color) 82%, #ef4444)); }
+          .hik-audio-meter-peak { position:absolute; inset:1px auto 1px 0; left: var(--hik-audio-peak, 0%); width:2px; border-radius:999px; background: rgba(255,255,255,0.92); box-shadow: 0 0 0 1px rgba(0,0,0,0.18); transform: translateX(-1px); transition: left 120ms linear; }
+          .hik-audio-meter-caption { font-size:12px; opacity:0.74; }
           .hik-audio-btn { width:100%; justify-content:center; }
-          .hik-talk-btn.live { background: color-mix(in srgb, var(--error-color) 20%, var(--card-background-color)); border-color: color-mix(in srgb, var(--error-color) 30%, transparent); }
+          .hik-talk-btn.live { background: color-mix(in srgb, var(--error-color) 20%, var(--card-background-color)); border-color: color-mix(in srgb, var(--error-color) 30%, transparent); animation: hikTalkPulse 1.4s ease-in-out infinite; }
           .hik-audio-slider { display:grid; gap:6px; min-width:0; }
           .hik-audio-slider span { display:flex; justify-content:space-between; gap:8px; font-size:12px; }
           .hik-audio-note { min-height:44px; display:flex; gap:8px; align-items:center; padding:0 12px; border-radius:12px; border:1px dashed color-mix(in srgb, var(--hik-accent) 16%, var(--divider-color)); }
-          .hik-audio-meter { position:relative; min-height:10px; border-radius:999px; overflow:hidden; background: color-mix(in srgb, var(--secondary-background-color) 88%, transparent); }
-          .hik-audio-meter-fill { position:absolute; inset:0 auto 0 0; width: var(--hik-audio-level, 0%); max-width:100%; background: linear-gradient(90deg, color-mix(in srgb, var(--success-color) 70%, #22c55e), color-mix(in srgb, var(--warning-color) 80%, #f59e0b), color-mix(in srgb, var(--error-color) 80%, #ef4444)); transition: width 90ms linear; }
+          .hik-audio-note.compact { min-height:auto; padding:10px 12px; }
+          .hik-audio-note.fill { height:100%; }
           .hik-debug-block { margin-top:12px; padding:12px; border-radius:14px; background: color-mix(in srgb, var(--card-background-color) 70%, rgba(255,255,255,0.03)); border:1px solid rgba(255,255,255,0.06); }
           .hik-debug-block details { margin-top:8px; }
           .hik-debug-block summary { cursor:pointer; font-size:12px; opacity:0.9; }
@@ -2768,6 +2901,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-zoom-side::after { content:""; position:absolute; inset:0; width: calc((var(--fill) / var(--max)) * 100%); background: color-mix(in srgb, var(--hik-accent) 40%, transparent); }
           .hik-zoom-side.out::after { right:0; left:auto; }
           .hik-zoom-center { width:18px; height:18px; border-radius:999px; background: color-mix(in srgb, var(--hik-accent) 24%, var(--secondary-background-color)); justify-self:center; }
+          @media (max-width: 1180px) {
+            .hik-audio-console-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          }
           @media (max-width: 1080px) {
             .hik-grid, .hik-info-grid, .hik-stream-grid { grid-template-columns:1fr; }
           }
@@ -2776,7 +2912,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-meta { grid-template-columns:1fr; }
             .hik-console-badges { width:100%; }
             .hik-motion-grid, .hik-lens-grid { grid-template-columns:1fr; }
-            .hik-audio-grid { grid-template-columns:1fr; }
+            .hik-audio-console-grid { grid-template-columns:1fr; }
             .hik-pad { max-width:220px; }
           }
         </style>
@@ -3169,29 +3305,3 @@ if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-h
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
 
-
-static get styles() {
-  return css`
-    .audio-controls {
-      display:flex;
-      gap:16px;
-      align-items:center;
-      margin-top:8px;
-    }
-    .wave {
-      display:flex;
-      gap:2px;
-      align-items:flex-end;
-      height:20px;
-    }
-    .bar {
-      width:3px;
-      background:#4cafef;
-      transition:height 0.1s ease;
-    }
-    .mic-btn,.spk-btn {
-      font-size:18px;
-      padding:6px;
-    }
-  `;
-}
