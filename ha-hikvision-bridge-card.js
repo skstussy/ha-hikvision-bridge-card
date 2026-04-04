@@ -45,7 +45,7 @@ class HikvisionPTZCard extends HTMLElement {
         enabled: false,
         default_open: false,
         max_entries: 150,
-        categories: ["audio", "playback", "video", "backend"],
+        categories: ["audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"],
         levels: ["error", "warn", "info", "debug"],
       },
       ...config,
@@ -87,6 +87,8 @@ class HikvisionPTZCard extends HTMLElement {
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
+    this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
+    this._lastDebugSnapshot = this._lastDebugSnapshot || null;
     this._panelOpenState = this._panelOpenState || {};
     this._webRtcPtzObserver = this._webRtcPtzObserver || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
@@ -212,109 +214,92 @@ class HikvisionPTZCard extends HTMLElement {
     const bits = [];
     const push = (value) => {
       if (value == null) return;
-      if (typeof value === "object" && "baseVal" in value) value = value.baseVal;
-      if (Array.isArray(value)) {
-        value.forEach(push);
-        return;
-      }
       const normalized = String(value).trim().toLowerCase();
       if (normalized) bits.push(normalized);
     };
 
-    const pushClassNames = (value) => {
-      if (value == null) return;
-      if (typeof value === "string") {
-        push(value);
-        return;
-      }
-      if (typeof value === "object" && "baseVal" in value) {
-        push(value.baseVal);
-        return;
-      }
-      if (typeof value === "object" && value.length != null) {
-        Array.from(value).forEach((item) => push(item));
-      }
-    };
-
-    [
-      node.title,
-      node.ariaLabel,
-      node.getAttribute?.("aria-label"),
-      node.getAttribute?.("label"),
-      node.getAttribute?.("icon"),
-      node.getAttribute?.("name"),
-      node.dataset?.action,
-      node.dataset?.direction,
-      node.dataset?.dir,
-      node.dataset?.path,
-      node.textContent,
-    ].forEach(push);
-    pushClassNames(node.className);
-    push(node.tagName);
-    node.querySelectorAll?.("[icon], [class], ha-icon, mwc-icon-button, ha-icon-button, button, div, span, svg, path").forEach((el) => {
+    [node.title, node.ariaLabel, node.className, node.getAttribute?.("class"), node.getAttribute?.("aria-label"), node.getAttribute?.("label"), node.dataset?.action, node.dataset?.direction, node.dataset?.dir, node.textContent].forEach(push);
+    node.querySelectorAll?.("[icon], ha-icon, mwc-icon-button, ha-icon-button, button").forEach((el) => {
+      push(el.className);
+      push(el.getAttribute?.("class"));
       push(el.getAttribute?.("icon"));
       push(el.getAttribute?.("aria-label"));
       push(el.getAttribute?.("label"));
-      push(el.getAttribute?.("name"));
       push(el.title);
       push(el.textContent);
-      push(el.tagName);
-      pushClassNames(el.className);
     });
 
     return bits.join(" ");
   }
 
-  _detectWebRtcPtzAction(node) {
+  _detectWebRtcPtzAction(node, traceId = "") {
     const signature = this._getWebRtcPtzActionSignature(node);
     if (!signature) return "";
 
     const has = (...terms) => terms.some((term) => signature.includes(term));
     const hasZoomWord = has("zoom", "magnify", "loupe", "search");
+    let action = "";
 
-    if (has("zoom out", "magnify-minus", "zoom_out") || (hasZoomWord && has("minus", "remove", "subtract", "mdi:minus", "mdi:magnify-minus", "-"))) return "zoom_out";
-    if (has("zoom in", "magnify-plus", "zoom_in") || (hasZoomWord && has("plus", "add", "expand", "mdi:plus", "mdi:magnify-plus", "+"))) return "zoom_in";
-    if (has("move left", " pan left", "arrow-left", "chevron-left", "keyboardarrowleft") || signature.startsWith("left")) return "left";
-    if (has("move right", " pan right", "arrow-right", "chevron-right", "keyboardarrowright") || signature.startsWith("right")) return "right";
-    if (has("move up", " pan up", "arrow-up", "chevron-up", "keyboardarrowup") || signature.startsWith("up")) return "up";
-    if (has("move down", " pan down", "arrow-down", "chevron-down", "keyboardarrowdown") || signature.startsWith("down")) return "down";
-    return "";
+    if (has("zoom out", "magnify-minus", "zoom_out") || (hasZoomWord && has("minus", "remove", "subtract", "mdi:minus", "mdi:magnify-minus", "-"))) action = "zoom_out";
+    else if (has("zoom in", "magnify-plus", "zoom_in") || (hasZoomWord && has("plus", "add", "expand", "mdi:plus", "mdi:magnify-plus", "+"))) action = "zoom_in";
+    else if (has("move left", " pan left", "arrow-left", "chevron-left", "keyboardarrowleft") || signature.startsWith("left")) action = "left";
+    else if (has("move right", " pan right", "arrow-right", "chevron-right", "keyboardarrowright") || signature.startsWith("right")) action = "right";
+    else if (has("move up", " pan up", "arrow-up", "chevron-up", "keyboardarrowup") || signature.startsWith("up")) action = "up";
+    else if (has("move down", " pan down", "arrow-down", "chevron-down", "keyboardarrowdown") || signature.startsWith("down")) action = "down";
+
+    if (this.isDebugEnabled()) {
+      this._pushTraceDebug("webrtc", action ? "debug" : "warn", action ? "webrtc_ptz_action_detected" : "webrtc_ptz_action_unmatched", action ? `Detected WebRTC PTZ action ${action}` : "Could not classify WebRTC PTZ control", {
+        trace_id: traceId || "",
+        signature,
+        node_name: node?.nodeName || "",
+        class_name: node?.className || node?.getAttribute?.("class") || "",
+      }, traceId || "", "frontend");
+    }
+    return action;
   }
 
-  _triggerLegacyZoom(direction = 0) {
+  _triggerLegacyZoom(direction = 0, traceId = "") {
     const dir = Number(direction || 0);
     const legacyButton = this.querySelector(`.lens-btn[data-service="zoom"][data-direction="${dir}"]`);
+    this._pushTraceDebug("ptz", "info", "legacy_zoom_attempt", dir > 0 ? "Routing zoom to legacy zoom in control" : "Routing zoom to legacy zoom out control", {
+      direction: dir,
+      legacy_button_found: !!legacyButton,
+    }, traceId, "frontend");
     if (legacyButton && typeof legacyButton.click === "function") {
       legacyButton.click();
       return true;
     }
-    this.callLens("zoom", dir);
+    this.callLens("zoom", dir, { trace_id: traceId, source: "webrtc" });
     return true;
   }
 
-  _handleWebRtcPtzAction(action, phase = "click") {
-    if (!action || !this.canPtz() || this._returningHome) return;
+  _handleWebRtcPtzAction(action, phase = "click", traceId = "") {
+    if (!action || !this.canPtz() || this._returningHome) {
+      this._pushTraceDebug("webrtc", "warn", "webrtc_ptz_action_skipped", "Skipped WebRTC PTZ action", { action, phase, can_ptz: this.canPtz(), returning_home: !!this._returningHome }, traceId, "frontend");
+      return;
+    }
 
     const speed = Math.max(1, Math.min(100, Number(this.config.speed || 50)));
+    this._pushTraceDebug("webrtc", phase === "end" ? "debug" : "info", "webrtc_ptz_action_routed", `Routing WebRTC PTZ action ${action}`, { action, phase, speed }, traceId, "frontend");
     if (phase === "end") {
-      if (["left", "right", "up", "down"].includes(action)) this.stopMove();
+      if (["left", "right", "up", "down"].includes(action)) this.stopMove({ trace_id: traceId, source: "webrtc", action });
       return;
     }
 
     if (action === "zoom_in") {
-      this._triggerLegacyZoom(1);
+      this._triggerLegacyZoom(1, traceId);
       return;
     }
     if (action === "zoom_out") {
-      this._triggerLegacyZoom(-1);
+      this._triggerLegacyZoom(-1, traceId);
       return;
     }
 
     const pan = action === "left" ? -speed : action === "right" ? speed : 0;
     const tilt = action === "up" ? speed : action === "down" ? -speed : 0;
 
-    this.stopMove();
-    this.startMove(pan, tilt);
+    this.stopMove({ trace_id: traceId, source: "webrtc", action: `${action}_preflight` });
+    this.startMove(pan, tilt, { trace_id: traceId, source: "webrtc", action });
   }
 
   _bindWebRtcPtzButtons(root) {
@@ -335,20 +320,22 @@ class HikvisionPTZCard extends HTMLElement {
       ev.stopPropagation();
       ev.stopImmediatePropagation?.();
     };
-    const getActionFromEvent = (ev) => {
+    const getActionFromEvent = (ev, traceId = "") => {
       const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
       for (const node of path) {
         if (!node || node === window || node === document || node === ptzRoot) continue;
-        const action = this._detectWebRtcPtzAction(node);
+        const action = this._detectWebRtcPtzAction(node, traceId);
         if (action) return action;
       }
-      return this._detectWebRtcPtzAction(ev.target);
+      return this._detectWebRtcPtzAction(ev.target, traceId);
     };
     const delegatedZoom = (ev) => {
-      const action = getActionFromEvent(ev);
+      const traceId = this._nextDebugTraceId("ptz");
+      const action = getActionFromEvent(ev, traceId);
       if (action !== "zoom_in" && action !== "zoom_out") return;
       halt(ev);
-      this._handleWebRtcPtzAction(action, "click");
+      this._pushTraceDebug("controls", "info", "webrtc_ptz_input", "Intercepted delegated WebRTC PTZ zoom input", { action, event_type: ev.type }, traceId, "frontend");
+      this._handleWebRtcPtzAction(action, "click", traceId);
     };
 
     bind(ptzRoot, "pointerdown", delegatedZoom, true);
@@ -361,16 +348,22 @@ class HikvisionPTZCard extends HTMLElement {
       if (!action) return;
 
       const start = (ev) => {
+        const traceId = this._nextDebugTraceId("ptz");
         halt(ev);
-        this._handleWebRtcPtzAction(action, "start");
+        this._pushTraceDebug("controls", "info", "webrtc_ptz_input", "WebRTC PTZ button press", { action, event_type: ev.type }, traceId, "frontend");
+        this._handleWebRtcPtzAction(action, "start", traceId);
       };
       const stop = (ev) => {
+        const traceId = this._nextDebugTraceId("ptz");
         halt(ev);
-        this._handleWebRtcPtzAction(action, "end");
+        this._pushTraceDebug("controls", "debug", "webrtc_ptz_release", "WebRTC PTZ button release", { action, event_type: ev.type }, traceId, "frontend");
+        this._handleWebRtcPtzAction(action, "end", traceId);
       };
       const click = (ev) => {
+        const traceId = this._nextDebugTraceId("ptz");
         halt(ev);
-        if (action === "zoom_in" || action === "zoom_out") this._handleWebRtcPtzAction(action, "click");
+        this._pushTraceDebug("controls", "info", "webrtc_ptz_click", "WebRTC PTZ zoom button click", { action, event_type: ev.type }, traceId, "frontend");
+        if (action === "zoom_in" || action === "zoom_out") this._handleWebRtcPtzAction(action, "click", traceId);
       };
 
       if (action === "zoom_in" || action === "zoom_out") {
@@ -404,8 +397,13 @@ class HikvisionPTZCard extends HTMLElement {
 
     const tryBind = () => {
       const root = card.shadowRoot || card.renderRoot || null;
-      if (!root) return false;
-      return this._bindWebRtcPtzButtons(root);
+      if (!root) {
+        this._pushDebug("webrtc", "warn", "webrtc_ptz_root_missing", "WebRTC card root not ready for PTZ binding", {}, "frontend");
+        return false;
+      }
+      const bound = this._bindWebRtcPtzButtons(root);
+      this._pushDebug("webrtc", bound ? "info" : "warn", bound ? "webrtc_ptz_bound" : "webrtc_ptz_buttons_missing", bound ? "Bound WebRTC PTZ overlay handlers" : "WebRTC PTZ overlay buttons not found yet", { playback_mode: playbackMode }, "frontend");
+      return bound;
     };
 
     if (tryBind()) return;
@@ -440,6 +438,7 @@ class HikvisionPTZCard extends HTMLElement {
     if (!card || !current || current.type !== "custom:webrtc-camera") return;
     const next = this._buildWebRtcCardConfig(current.url, playbackMode);
     if (JSON.stringify(current) === JSON.stringify(next)) return;
+    this._pushDebug("render", "info", "webrtc_card_config_sync", "Syncing WebRTC card config", { playback_mode: playbackMode, has_ptz: !!next.ptz }, "frontend");
     this._videoCardConfig = next;
     try {
       if (typeof card.setConfig === "function") card.setConfig(next);
@@ -458,7 +457,7 @@ class HikvisionPTZCard extends HTMLElement {
   _normalizeDebugConfig(config = {}) {
     const incoming = config?.debug && typeof config.debug === "object" ? config.debug : {};
     const legacyEnabled = config?.show_audio_debug === true || config?.show_playback_debug === true;
-    const categories = Array.isArray(incoming.categories) && incoming.categories.length ? incoming.categories.map((value) => String(value || "").toLowerCase()) : ["audio", "playback", "video", "backend"];
+    const categories = Array.isArray(incoming.categories) && incoming.categories.length ? incoming.categories.map((value) => String(value || "").toLowerCase()) : ["audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
     const levels = Array.isArray(incoming.levels) && incoming.levels.length ? incoming.levels.map((value) => String(value || "").toLowerCase()) : ["error", "warn", "info", "debug"];
     return {
       enabled: incoming.enabled === true || legacyEnabled,
@@ -471,6 +470,62 @@ class HikvisionPTZCard extends HTMLElement {
 
   isDebugEnabled() {
     return this.config?.debug?.enabled === true;
+  }
+
+  _nextDebugTraceId(prefix = "trace") {
+    this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq + 1 : 1;
+    return `${String(prefix || "trace").toLowerCase()}-${String(this._debugTraceSeq).padStart(4, "0")}`;
+  }
+
+  _getDebugCameraSnapshot() {
+    const cam = this.selectedCamera || {};
+    const refs = cam?.channel != null ? this.refsForChannel?.(cam.channel) || {} : {};
+    const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
+    const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
+    return {
+      card_version: "1.0.22",
+      selected_camera: cam?.name || "",
+      channel: cam?.channel != null ? String(cam.channel) : "",
+      online: !!this.isOnline?.(),
+      ptz_supported: !!this.canPtz?.(),
+      returning_home: !!this._returningHome,
+      speaker_enabled: !!this._speakerEnabled,
+      talk_active: !!this._talkActive,
+      stream_mode: String(this._requestedStreamMode || this.config?.stream_mode || "auto"),
+      playback_active: cameraEntity?.attributes?.playback_active === true,
+      playback_requested_time: playbackState?.currentTime || cameraEntity?.attributes?.playback_requested_time || "",
+      webrtc_configured: !!this._videoCardConfig && this._videoCardConfig?.type === "custom:webrtc-camera",
+      webrtc_ptz_bound: !!this._webRtcPtzBound,
+      speed: Math.max(1, Math.min(100, Number(this.config?.speed || 50))),
+      ptz_duration: this.getPTZDuration?.(),
+      lens_duration: this.getLensDuration?.(),
+    };
+  }
+
+  _buildDebugSnapshot(camAttrs = null) {
+    const snapshot = this._getDebugCameraSnapshot();
+    if (camAttrs && typeof camAttrs === "object") {
+      snapshot.backend_flags = this._sanitizeDebugObject({
+        stream_mode: camAttrs.stream_mode,
+        playback_uri: camAttrs.playback_uri ? "present" : "",
+        playback_active: camAttrs.playback_active === true,
+        online: camAttrs.online,
+      });
+    }
+    this._lastDebugSnapshot = snapshot;
+    return snapshot;
+  }
+
+  _pushTraceDebug(category = "general", level = "info", event = "event", message = "", details = {}, traceId = "", source = "frontend") {
+    const payload = { ...(details || {}) };
+    if (traceId) payload.trace_id = traceId;
+    return this._pushDebug(category, level, event, message, payload, source);
+  }
+
+  _findDebugTraceEntries(traceId = "") {
+    const key = String(traceId || "").trim();
+    if (!key) return [];
+    return (this._debugEntries || []).filter((entry) => String(entry?.details?.trace_id || "") === key);
   }
 
   _sanitizeDebugValue(value) {
@@ -517,7 +572,10 @@ class HikvisionPTZCard extends HTMLElement {
       event: String(event || "event"),
       message: String(message || event || "Event"),
       camera: this.selectedCamera?.channel != null ? String(this.selectedCamera.channel) : "",
-      details: this._sanitizeDebugObject(details || {}),
+      details: this._sanitizeDebugObject({
+        ...(details || {}),
+        snapshot: (details && details.snapshot) ? details.snapshot : this._buildDebugSnapshot(this._lastCameraAttrs || null),
+      }),
     };
     const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
     this._debugEntries = [...(this._debugEntries || []), entry].slice(-maxEntries);
@@ -627,6 +685,7 @@ _toggleDebugFilter(kind, value) {
       `Level: ${entry.level || ""}`,
       `Event: ${entry.event || ""}`,
       `Message: ${entry.message || ""}`,
+      `Trace: ${entry?.details?.trace_id || ""}`,
       `Camera: ${entry.camera || ""}`,
       "",
       "--- Details ---",
@@ -779,21 +838,51 @@ _toggleDebugFilter(kind, value) {
   }
 
 
+  _buildDebugCategorySummary() {
+    const categories = ["audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
+    const entries = this._debugEntries || [];
+    return categories.reduce((acc, category) => {
+      acc[category] = entries.filter((entry) => entry.category === category).length;
+      return acc;
+    }, {});
+  }
+
+  _renderDebugSnapshot(camAttrs = {}) {
+    const snapshot = this._buildDebugSnapshot(camAttrs);
+    return `
+      <div class="hik-debug-snapshot-grid">
+        <span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(snapshot.channel || "-")}</span>
+        <span class="hik-pill ${snapshot.online ? "good" : "warn"}"><ha-icon icon="mdi:lan-connect"></ha-icon>${snapshot.online ? "Online" : "Offline"}</span>
+        <span class="hik-pill ${snapshot.ptz_supported ? "good" : "neutral"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_supported))}</span>
+        <span class="hik-pill ${snapshot.webrtc_ptz_bound ? "good" : "neutral"}"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC PTZ ${this.escapeHtml(String(snapshot.webrtc_ptz_bound))}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:speedometer"></ha-icon>Speed ${this.escapeHtml(String(snapshot.speed || "-"))}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.escapeHtml(String(snapshot.ptz_duration || "-"))}ms</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.escapeHtml(String(snapshot.lens_duration || "-"))}ms</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:play-network-outline"></ha-icon>${this.escapeHtml(snapshot.stream_mode || "auto")}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:volume-high"></ha-icon>Speaker ${this.escapeHtml(String(snapshot.speaker_enabled))}</span>
+        <span class="hik-pill neutral"><ha-icon icon="mdi:microphone"></ha-icon>Talk ${this.escapeHtml(String(snapshot.talk_active))}</span>
+      </div>`;
+  }
+
+  _getLatestTraceIdForCategory(category = "") {
+    const key = String(category || "").toLowerCase();
+    const entry = (this._debugEntries || []).slice().reverse().find((item) => (!key || item.category === key) && item?.details?.trace_id);
+    return entry?.details?.trace_id || "";
+  }
+
   renderDebugDashboard(camAttrs = {}) {
     if (!this.isDebugEnabled()) return "";
     this._lastCameraAttrs = camAttrs || {};
     this._syncBackendDebugEntries(camAttrs?.playback_debug || []);
     const entries = this._getFilteredDebugEntries();
+    const categorySummary = this._buildDebugCategorySummary();
     const summary = {
       total: (this._debugEntries || []).length,
       error: (this._debugEntries || []).filter((entry) => entry.level === "error").length,
       warn: (this._debugEntries || []).filter((entry) => entry.level === "warn").length,
-      audio: (this._debugEntries || []).filter((entry) => entry.category === "audio").length,
-      playback: (this._debugEntries || []).filter((entry) => entry.category === "playback").length,
-      video: (this._debugEntries || []).filter((entry) => entry.category === "video").length,
-      backend: (this._debugEntries || []).filter((entry) => entry.category === "backend").length,
+      ...categorySummary,
     };
-    const categories = ["all", "audio", "playback", "video", "backend"];
+    const categories = ["all", "audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
     const levels = ["all", "error", "warn", "info", "debug"];
     const openAttr = this._debugDashboardOpen ? "open" : "";
     return `
@@ -803,6 +892,8 @@ _toggleDebugFilter(kind, value) {
             <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
             <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
           </summary>
+          <div class="hik-mini-note">Current snapshot</div>
+          ${this._renderDebugSnapshot(camAttrs)}
           <div class="hik-status-row">
             <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
             <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
@@ -811,6 +902,11 @@ _toggleDebugFilter(kind, value) {
             <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
             <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
             <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Controls ${this.escapeHtml(String(summary.controls))}</span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(summary.ptz))}</span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC ${this.escapeHtml(String(summary.webrtc))}</span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:api"></ha-icon>Service ${this.escapeHtml(String(summary.service))}</span>
+            <span class="hik-pill neutral"><ha-icon icon="mdi:state-machine"></ha-icon>State ${this.escapeHtml(String(summary.state))}</span>
           </div>
           <div class="hik-debug-toolbar">
             <div class="hik-debug-filter-group">
@@ -822,6 +918,7 @@ _toggleDebugFilter(kind, value) {
             <div class="hik-debug-actions">
               <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
               <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
+              <button class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
               <button class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
             </div>
           </div>
@@ -835,6 +932,7 @@ _toggleDebugFilter(kind, value) {
                   <span class="hik-pill neutral"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(entry.level || "info")}</span>
                   <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(entry.source || "frontend")}</span>
                   ${entry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(entry.camera))}</span>` : ""}
+                  ${entry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(entry.details.trace_id))}</span>` : ""}
                 </div>
                 <div class="hik-mini-note"><b>${this.escapeHtml(entry.event || "event")}</b> · ${this.escapeHtml(entry.message || "")}</div>
                 <div class="hik-mini-note">${this.escapeHtml(entry.time || "")}</div>
@@ -1528,10 +1626,13 @@ _toggleDebugFilter(kind, value) {
     `;
   }
 
-  stopMove() {
+  stopMove(context = {}) {
     if (this._repeatHandle) {
       clearInterval(this._repeatHandle);
       this._repeatHandle = null;
+      this._pushTraceDebug("ptz", "debug", "ptz_stop", "Stopped PTZ repeat loop", { ...context }, context?.trace_id || "", "frontend");
+    } else if (context?.trace_id) {
+      this._pushTraceDebug("ptz", "debug", "ptz_stop_noop", "PTZ stop requested with no active repeat loop", { ...context }, context?.trace_id || "", "frontend");
     }
   }
 
@@ -1549,13 +1650,18 @@ _toggleDebugFilter(kind, value) {
 
   executeLensPulse(service, direction = 0, options = {}) {
     const cam = this.selectedCamera;
-    if (!cam || !this._hass || !this.isOnline() || this._returningHome) return Promise.resolve(false);
+    const traceId = options?.trace_id || this._nextDebugTraceId("lens");
+    if (!cam || !this._hass || !this.isOnline() || this._returningHome) {
+      this._pushTraceDebug("service", "warn", "lens_pulse_skipped", "Skipped lens pulse", { service, direction: Number(direction || 0), online: this.isOnline(), returning_home: !!this._returningHome }, traceId, "frontend");
+      return Promise.resolve(false);
+    }
 
     const duration = Math.max(0, Number(options.duration ?? this.getLensDuration()));
     const speed = Number(options.speed ?? (service === "zoom"
       ? Number(this.config.speed || 50)
       : Number(this.config.lens_step || 60)));
 
+    this._pushTraceDebug("service", "info", "lens_pulse_requested", `Calling lens service ${service}`, { service, direction: Number(direction || 0), speed, duration, source: options?.source || "panel" }, traceId, "frontend");
     this._hass.callService("ha_hikvision_bridge", service, {
       channel: String(cam.channel),
       direction: Number(direction || 0),
@@ -1572,7 +1678,8 @@ _toggleDebugFilter(kind, value) {
       window.setTimeout(() => {
         const activeCam = this.selectedCamera;
         if (!activeCam || String(activeCam.channel) !== String(cam.channel)) return;
-        this._hass.callService("ha_hikvision_bridge", service, {
+        this._pushTraceDebug("service", "info", "lens_pulse_requested", `Calling lens service ${service}`, { service, direction: Number(direction || 0), speed, duration, source: options?.source || "panel" }, traceId, "frontend");
+    this._hass.callService("ha_hikvision_bridge", service, {
           channel: String(cam.channel),
           direction: 0,
           speed,
@@ -1581,27 +1688,39 @@ _toggleDebugFilter(kind, value) {
       }, duration + 20);
     }
 
+    this._pushTraceDebug("service", "debug", "lens_pulse_dispatched", `Lens service ${service} dispatched`, { service, direction: Number(direction || 0), speed, duration }, traceId, "frontend");
     return Promise.resolve(true);
   }
 
   async handleRefocus() {
     const cam = this.selectedCamera;
-    if (!cam || !this._hass || !this.isOnline() || this._returningHome) return;
+    const traceId = this._nextDebugTraceId("lens");
+    if (!cam || !this._hass || !this.isOnline() || this._returningHome) {
+      this._pushTraceDebug("controls", "warn", "refocus_skipped", "Skipped refocus", { online: this.isOnline(), returning_home: !!this._returningHome }, traceId, "frontend");
+      return;
+    }
+    this._pushTraceDebug("controls", "info", "refocus_requested", "Refocus requested", {}, traceId, "frontend");
 
     const pulse = this.getLensDuration();
     const settle = Math.max(80, Math.min(250, Math.round(pulse * 0.75)));
     const step = Math.max(1, Number(this.config.refocus_step ?? 40));
 
-    await this.executeLensPulse("zoom", 1, { duration: pulse, speed: step });
+    await this.executeLensPulse("zoom", 1, { duration: pulse, speed: step, trace_id: traceId, source: "refocus" });
     await new Promise((resolve) => window.setTimeout(resolve, pulse + settle));
-    await this.executeLensPulse("zoom", -1, { duration: pulse, speed: step });
+    await this.executeLensPulse("zoom", -1, { duration: pulse, speed: step, trace_id: traceId, source: "refocus" });
   }
 
-  startMove(pan, tilt) {
-    this.stopMove();
+  startMove(pan, tilt, context = {}) {
+    const traceId = context?.trace_id || this._nextDebugTraceId("ptz");
+    this.stopMove({ ...context, trace_id: traceId, action: context?.action || "pre_start" });
+    this._pushTraceDebug("ptz", "info", "ptz_move_requested", "Starting PTZ move", { pan, tilt, duration: this.getPTZDuration(), repeat_ms: this.config.repeat_ms, source: context?.source || "panel" }, traceId, "frontend");
     const run = () => {
       const cam = this.selectedCamera;
-      if (!cam || !this._hass || !this.canPtz() || this._returningHome) return;
+      if (!cam || !this._hass || !this.canPtz() || this._returningHome) {
+        this._pushTraceDebug("ptz", "warn", "ptz_move_tick_skipped", "Skipped PTZ move tick", { pan, tilt, can_ptz: this.canPtz(), returning_home: !!this._returningHome }, traceId, "frontend");
+        return;
+      }
+      this._pushTraceDebug("service", "debug", "ptz_service_requested", "Calling PTZ service", { pan, tilt, duration: this.getPTZDuration(), source: context?.source || "panel" }, traceId, "frontend");
       this._hass.callService("ha_hikvision_bridge", "ptz", {
         channel: String(cam.channel),
         pan,
@@ -1616,10 +1735,13 @@ _toggleDebugFilter(kind, value) {
     };
     run();
     this._repeatHandle = setInterval(run, this.config.repeat_ms);
+    this._pushTraceDebug("ptz", "debug", "ptz_repeat_armed", "Armed PTZ repeat loop", { repeat_ms: this.config.repeat_ms }, traceId, "frontend");
   }
 
-  callLens(service, direction = 0) {
-    this.executeLensPulse(service, direction);
+  callLens(service, direction = 0, context = {}) {
+    const traceId = context?.trace_id || this._nextDebugTraceId("lens");
+    this._pushTraceDebug("controls", "info", "lens_control_clicked", `Lens control ${service}`, { service, direction: Number(direction || 0), source: context?.source || "panel" }, traceId, "frontend");
+    this.executeLensPulse(service, direction, { ...context, trace_id: traceId });
   }
 
   handleCenter() {
@@ -1631,7 +1753,12 @@ _toggleDebugFilter(kind, value) {
 
   gotoPreset(preset) {
     const cam = this.selectedCamera;
-    if (!cam || !this._hass || !this.canPtz()) return;
+    const traceId = this._nextDebugTraceId("ptz");
+    if (!cam || !this._hass || !this.canPtz()) {
+      this._pushTraceDebug("controls", "warn", "preset_skipped", "Skipped goto preset", { preset, can_ptz: this.canPtz() }, traceId, "frontend");
+      return;
+    }
+    this._pushTraceDebug("controls", "info", "preset_requested", "Goto preset requested", { preset }, traceId, "frontend");
     this._hass.callService("ha_hikvision_bridge", "goto_preset", {
       channel: String(cam.channel),
       preset,
@@ -3633,7 +3760,7 @@ ${this.config.show_playback_panel !== false ? `
     });
 
     this.querySelector("#hik-center")?.addEventListener("click", () => this.handleCenter());
-    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0))));
+    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: "panel" })));
     this.querySelector("#hik-refocus")?.addEventListener("click", () => this.handleRefocus());
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
     this.querySelector("#hik-return-home")?.addEventListener("click", () => this.handleReturnHome());
