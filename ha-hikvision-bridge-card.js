@@ -743,7 +743,29 @@ _toggleDebugFilter(kind, value) {
   copyDebugText(text) {
     const value = String(text || "");
     if (!value) return;
-    navigator.clipboard.writeText(value).catch((err) => console.error("Failed to copy debug text", err));
+    const fallbackCopy = () => {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "readonly");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        document.execCommand("copy");
+        textarea.remove();
+      } catch (err) {
+        console.error("Failed to copy debug text", err);
+      }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).catch(() => fallbackCopy());
+      return;
+    }
+    fallbackCopy();
   }
 
   downloadDebugText(text, prefix = "hikvision-debug") {
@@ -993,10 +1015,10 @@ _toggleDebugFilter(kind, value) {
                   <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
                 </label>
                 <div class="hik-debug-actions">
-                  <button class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
-                  <button class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
-                  <button class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
-                  <button class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
+                  <button type="button" class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
+                  <button type="button" class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
+                  <button type="button" class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
+                  <button type="button" class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
                 </div>
               </div>
               <div class="hik-debug-filter-group">
@@ -1027,7 +1049,7 @@ _toggleDebugFilter(kind, value) {
                       <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
                       <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
                       <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
-                    </div>`;
+                    </button>`;
                 }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
               </div>
             </div>
@@ -1039,8 +1061,8 @@ _toggleDebugFilter(kind, value) {
                     <div class="hik-debug-detail-name">${this.escapeHtml(selectedEntry.event || "event")}</div>
                   </div>
                   <div class="hik-debug-actions">
-                    <button class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
-                    <button class="hik-debug-btn" data-debug-entry-action="download">Download</button>
+                    <button type="button" class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
+                    <button type="button" class="hik-debug-btn" data-debug-entry-action="download">Download</button>
                   </div>
                 </div>
                 <div class="hik-status-row">
@@ -4623,6 +4645,11 @@ ${this.config.show_playback_panel !== false ? `
       const combined = this._getFilteredDebugEntries().map((entry) => this.formatDebugEntryText(entry)).join("\n\n");
       if (action === "copy-all") this.copyDebugText(combined);
       if (action === "download-all") this.downloadDebugText(combined, "hikvision-debug-dashboard");
+      if (action === "copy-last-ptz-trace") {
+        const trace = this._getLastTraceForCategory("ptz") || this._getLastTraceForCategory("webrtc");
+        const traceText = trace.length ? trace.map((entry) => this.formatDebugEntryText(entry)).join("\n\n") : "No PTZ trace entries available.";
+        this.copyDebugText(traceText);
+      }
       if (action === "clear") {
         this._debugEntries = (this._debugEntries || []).filter((entry) => entry.source === "backend");
         this.render();
