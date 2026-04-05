@@ -131,6 +131,7 @@ _pushDebugEntry(entry) {
     this._videoCardConfig = this._videoCardConfig || null;
     this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
     this._playbackOverlayVisible = this._playbackOverlayVisible ?? false;
+    this._alarmOverlayVisible = this._alarmOverlayVisible ?? false;
     this._playbackRate = this._playbackRate ?? 2;
     this._playbackSeekInFlight = this._playbackSeekInFlight ?? false;
     this._lastPlaybackSeekAt = Number.isFinite(this._lastPlaybackSeekAt) ? this._lastPlaybackSeekAt : 0;
@@ -161,7 +162,6 @@ _pushDebugEntry(entry) {
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
     this._videoAccessoryPanel = this._videoAccessoryPanel || "";
     this._debugOverlayOpen = this._debugOverlayOpen || false;
-    this._alarmOverlayOpen = this._alarmOverlayOpen || false;
     this._debugOverlayRectLoaded = this._debugOverlayRectLoaded === true;
     const debugOverlayRectSeed = this._debugOverlayRectLoaded
       ? this._debugOverlayRect
@@ -624,28 +624,10 @@ _pushDebugEntry(entry) {
     if (next === "debug") {
       const willOpen = this._debugOverlayOpen !== true;
       this._debugOverlayOpen = willOpen;
-      if (willOpen) {
-        this._alarmOverlayOpen = false;
-        this._videoAccessoryPanel = "";
-      }
+      if (willOpen) this._videoAccessoryPanel = "";
     } else {
       this._debugOverlayOpen = false;
       this._videoAccessoryPanel = this._videoAccessoryPanel === next ? "" : next;
-    }
-    this._syncDebugRuntime();
-    this.render();
-  }
-
-  _toggleAlarmOverlay() {
-    if (this.config.show_alarm_dashboard === false) {
-      this._alarmOverlayOpen = false;
-      return;
-    }
-    const willOpen = this._alarmOverlayOpen !== true;
-    this._alarmOverlayOpen = willOpen;
-    if (willOpen) {
-      this._debugOverlayOpen = false;
-      this._videoAccessoryPanel = "";
     }
     this._syncDebugRuntime();
     this.render();
@@ -659,6 +641,11 @@ _pushDebugEntry(entry) {
         ${content}
       </div>
     `;
+  }
+
+  _toggleAlarmOverlay() {
+    this._alarmOverlayVisible = !this._alarmOverlayVisible;
+    this.render();
   }
 
 
@@ -2910,7 +2897,8 @@ renderAlarmTable(rows = [], emptyText = "No alarm data") {
   `;
 }
 
-renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
+renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}, options = {}) {
+  const mode = String(options?.mode || "card").toLowerCase();
   const activeCount = Number(this.pickValue([dvr], ["active_alarm_count"], 0)) || 0;
   const diskIssues = [globalRefs.diskFull, globalRefs.diskError].filter((entityId) => this.alarmOn(entityId)).length;
   const inputCount = (globalRefs.alarmInputs || []).filter((entityId) => this.alarmOn(entityId)).length;
@@ -2929,6 +2917,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     icon,
   }));
   const nvrAlarmRows = [
+    {
+      name: "Alarm stream",
+      value: this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected",
+      level: this.alarmOn(globalRefs.alarmStream) ? "good" : "warn",
+      icon: "mdi:access-point-network",
+    },
     {
       name: "Disk full",
       value: this.alarmOn(globalRefs.diskFull) ? "Active" : "Clear",
@@ -2998,6 +2992,47 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       icon: "mdi:heart-pulse",
     },
   ];
+
+  if (mode === "overlay") {
+    const statusTone = activeCount > 0 || diskIssues > 0 || inputCount > 0 ? "warn" : "good";
+    const statusLabel = activeCount > 0
+      ? `${activeCount} active alarm${activeCount === 1 ? "" : "s"}`
+      : inputCount > 0
+        ? `${inputCount} armed input${inputCount === 1 ? "" : "s"}`
+        : diskIssues > 0
+          ? `${diskIssues} storage warning${diskIssues === 1 ? "" : "s"}`
+          : "System clear";
+    return `
+      <div class="hik-alarm-overlay-shell">
+        <div class="hik-alarm-overlay-header">
+          <div class="hik-alarm-overlay-title">
+            <span class="hik-alarm-overlay-dot"></span>
+            <span>ALARM DASHBOARD</span>
+          </div>
+          <div class="hik-alarm-overlay-status ${statusTone}">${this.escapeHtml(statusLabel)}</div>
+        </div>
+        <div class="hik-alarm-overlay-grid">
+          <div class="hik-alarm-overlay-panel">
+            <div class="hik-alarm-overlay-panel-title">SUMMARY</div>
+            ${this.renderAlarmTable(alarmSummaryRows, "No alarm summary available")}
+          </div>
+          <div class="hik-alarm-overlay-panel">
+            <div class="hik-alarm-overlay-panel-title">EVENT DETAILS</div>
+            ${this.renderAlarmTable(alarmMetaRows, "No event details available")}
+          </div>
+          <div class="hik-alarm-overlay-panel">
+            <div class="hik-alarm-overlay-panel-title">SELECTED CAMERA</div>
+            ${this.renderAlarmTable(cameraAlarmRows, activeCameraEvents.length ? "" : "No camera alarm data")}
+          </div>
+          <div class="hik-alarm-overlay-panel">
+            <div class="hik-alarm-overlay-panel-title">NVR ALARMS</div>
+            ${this.renderAlarmTable(nvrAlarmRows, "No active NVR alarms")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="hik-panel hik-info-card hik-alarm-dashboard">
       <div class="hik-sub"><ha-icon icon="mdi:shield-home-outline"></ha-icon>Alarm Dashboard</div>
@@ -4249,7 +4284,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
-    if (this.config.show_alarm_dashboard === false) this._alarmOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
       <div class="hik-panel hik-info-card hik-video-accessory-panel">
@@ -4364,6 +4398,29 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-alarm-value.warn { background: color-mix(in srgb, var(--warning-color, #ed6c02) 18%, var(--secondary-background-color)); }
           .hik-alarm-value.primary { background: color-mix(in srgb, var(--hik-accent) 18%, var(--secondary-background-color)); }
           .hik-alarm-value.neutral { background: var(--secondary-background-color); }
+          .hik-video-alarm-terminal-overlay { position:absolute; inset:14px 14px 64px 14px; z-index:5; display:grid; pointer-events:none; }
+          .hik-alarm-overlay-shell { min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr); gap:12px; padding:14px; border-radius:18px; color:#9affb2; background:linear-gradient(180deg, rgba(4,10,8,0.94), rgba(1,6,4,0.90)); border:1px solid rgba(110,255,170,0.18); box-shadow:0 18px 44px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04); backdrop-filter:blur(10px); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; overflow:hidden; }
+          .hik-alarm-overlay-shell::before { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(180deg, rgba(154,255,178,0.05), transparent 26%); }
+          .hik-alarm-overlay-header { position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid rgba(110,255,170,0.12); }
+          .hik-alarm-overlay-title { display:inline-flex; align-items:center; gap:10px; font-size:13px; font-weight:800; letter-spacing:0.16em; text-transform:uppercase; color:#d8ffe2; text-shadow:0 0 12px rgba(110,255,170,0.14); }
+          .hik-alarm-overlay-dot { width:10px; height:10px; border-radius:999px; background:#7cff9f; box-shadow:0 0 0 4px rgba(124,255,159,0.12), 0 0 16px rgba(124,255,159,0.42); animation:hikAlarmBlink 1.4s steps(2, start) infinite; }
+          .hik-alarm-overlay-status { min-height:30px; padding:0 12px; display:inline-flex; align-items:center; border-radius:999px; font-size:12px; font-weight:700; letter-spacing:0.04em; border:1px solid rgba(110,255,170,0.16); background:rgba(12,22,16,0.86); }
+          .hik-alarm-overlay-status.good { color:#9affb2; border-color:rgba(110,255,170,0.18); }
+          .hik-alarm-overlay-status.warn { color:#ffcf7d; border-color:rgba(255,180,90,0.22); box-shadow:0 0 18px rgba(255,180,90,0.08); }
+          .hik-alarm-overlay-grid { position:relative; min-height:0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; overflow:auto; padding-right:2px; }
+          .hik-alarm-overlay-panel { min-height:0; padding:10px 12px 12px; border-radius:14px; border:1px solid rgba(110,255,170,0.12); background:rgba(6,14,10,0.76); box-shadow:inset 0 1px 0 rgba(255,255,255,0.03); }
+          .hik-alarm-overlay-panel-title { margin-bottom:6px; font-size:11px; font-weight:800; letter-spacing:0.14em; color:#d8ffe2; opacity:0.9; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-table-wrap { margin-top:0; overflow:auto; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-table { font-size:12px; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-table th,
+          .hik-video-alarm-terminal-overlay .hik-alarm-table td { padding:8px 10px; border-bottom:1px solid rgba(110,255,170,0.08); color:#9affb2; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-table th { color:#d8ffe2; opacity:0.88; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-name { color:#d8ffe2; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-name ha-icon { color:#7cff9f; }
+          .hik-video-alarm-terminal-overlay .hik-alarm-value.good { color:#9affb2; background:rgba(32,120,72,0.22); }
+          .hik-video-alarm-terminal-overlay .hik-alarm-value.warn { color:#ffd48f; background:rgba(165,92,14,0.26); }
+          .hik-video-alarm-terminal-overlay .hik-alarm-value.primary { color:#d8ffe2; background:rgba(70,150,90,0.18); }
+          .hik-video-alarm-terminal-overlay .hik-alarm-value.neutral { color:#d8ffe2; background:rgba(255,255,255,0.06); }
           .hik-storage-item.green { border-color: color-mix(in srgb, var(--success-color, #2e7d32) 35%, var(--divider-color)); }
           .hik-storage-item.yellow { border-color: color-mix(in srgb, var(--warning-color, #ed6c02) 35%, var(--divider-color)); }
           .hik-storage-item.red { border-color: color-mix(in srgb, var(--error-color, #d32f2f) 35%, var(--divider-color)); }
@@ -4548,35 +4605,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-terminal-dot.green { background:#28c840; }
           .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; }
           .hik-debug-terminal-body { min-height:0; overflow:auto; padding:12px; display:grid; gap:12px; background:rgba(5,8,12,0.22); }
-          .hik-alarm-terminal-overlay { position:absolute; inset:12px; z-index:11; pointer-events:none; }
-          .hik-alarm-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.26)); pointer-events:none; }
-          .hik-alarm-terminal-window { position:absolute; inset:0; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(1,10,1,0.98), rgba(2,14,3,0.965)); border:1px solid rgba(85,255,120,0.24); box-shadow:0 24px 64px rgba(0,0,0,0.56), 0 0 0 1px rgba(85,255,120,0.05); backdrop-filter:blur(10px) saturate(1.04); }
-          .hik-alarm-terminal-head { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:10px 12px; background:linear-gradient(180deg, rgba(6,18,8,0.98), rgba(4,12,5,0.96)); border-bottom:1px solid rgba(85,255,120,0.16); color:#8cff9e; }
-          .hik-alarm-terminal-title { display:inline-flex; align-items:center; gap:10px; font-weight:700; letter-spacing:0.03em; text-transform:uppercase; }
-          .hik-alarm-terminal-title ha-icon { --mdc-icon-size:16px; color:#8cff9e; }
-          .hik-alarm-terminal-status { display:inline-flex; align-items:center; justify-content:center; min-height:30px; padding:0 10px; border-radius:999px; border:1px solid rgba(85,255,120,0.18); font-size:12px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#a8ffb5; background:rgba(13,32,13,0.9); }
-          .hik-alarm-terminal-status.warn { color:#ffe38a; border-color:rgba(255,219,92,0.22); background:rgba(48,38,9,0.9); }
-          .hik-alarm-terminal-status.good { color:#a8ffb5; }
-          .hik-alarm-terminal-body { min-height:0; overflow:auto; padding:14px; display:grid; gap:14px; background:rgba(0,0,0,0.28); color:#91ff9f; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-          .hik-alarm-terminal-banner { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; border:1px solid rgba(85,255,120,0.16); background:rgba(3,12,3,0.92); box-shadow:inset 0 1px 0 rgba(255,255,255,0.02); }
-          .hik-alarm-terminal-banner.warn { border-color:rgba(255,219,92,0.2); color:#ffe38a; background:rgba(24,18,2,0.94); }
-          .hik-alarm-terminal-banner.good { color:#91ff9f; }
-          .hik-alarm-terminal-prompt { color:#50fa7b; font-weight:700; }
-          .hik-alarm-terminal-path { color:#b8ffbf; }
-          .hik-alarm-terminal-command { color:inherit; opacity:0.96; }
-          .hik-alarm-terminal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
-          .hik-alarm-terminal-section { display:grid; gap:8px; min-height:0; padding:12px; border-radius:14px; border:1px solid rgba(85,255,120,0.14); background:rgba(2,10,2,0.88); box-shadow:inset 0 1px 0 rgba(255,255,255,0.02); }
-          .hik-alarm-terminal-section-title { font-size:12px; line-height:1.2; letter-spacing:0.08em; text-transform:uppercase; color:#5dff73; }
-          .hik-alarm-terminal-table { display:grid; gap:6px; }
-          .hik-alarm-terminal-row { display:grid; grid-template-columns:minmax(0, 1fr) auto minmax(92px, auto); align-items:center; gap:10px; min-height:32px; padding:6px 8px; border-radius:10px; border:1px solid rgba(85,255,120,0.08); background:rgba(0,0,0,0.16); }
-          .hik-alarm-terminal-row.good { color:#91ff9f; }
-          .hik-alarm-terminal-row.warn { color:#ffe38a; border-color:rgba(255,219,92,0.12); background:rgba(33,25,6,0.24); }
-          .hik-alarm-terminal-row.primary { color:#7fd7ff; }
-          .hik-alarm-terminal-row.neutral { color:#b6ffbd; opacity:0.9; }
-          .hik-alarm-terminal-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-          .hik-alarm-terminal-sep { opacity:0.42; }
-          .hik-alarm-terminal-value { justify-self:end; font-weight:700; text-align:right; }
-          .hik-alarm-terminal-empty { min-height:48px; display:flex; align-items:center; padding:8px 10px; border-radius:10px; border:1px dashed rgba(85,255,120,0.14); color:#88f798; opacity:0.82; }
           .hik-debug-resize-handle { position:absolute; right:0; bottom:0; width:24px; height:24px; border:none; background:transparent; cursor:nwse-resize; pointer-events:auto; }
           .hik-debug-resize-handle::before { content:""; position:absolute; right:6px; bottom:6px; width:12px; height:12px; border-right:2px solid rgba(135,247,185,0.68); border-bottom:2px solid rgba(135,247,185,0.68); opacity:0.9; }
           .hik-debug-warning-banner.is-terminal { background:rgba(80,180,120,0.06); border-color:rgba(120,255,178,0.12); }
@@ -4725,6 +4753,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-zoom-side::after { content:""; position:absolute; inset:0; width: calc((var(--fill) / var(--max)) * 100%); background: color-mix(in srgb, var(--hik-accent) 40%, transparent); }
           .hik-zoom-side.out::after { right:0; left:auto; }
           .hik-zoom-center { width:18px; height:18px; border-radius:999px; background: color-mix(in srgb, var(--hik-accent) 24%, var(--secondary-background-color)); justify-self:center; }
+          @keyframes hikAlarmBlink { 0%, 49% { opacity:1; } 50%, 100% { opacity:0.35; } }
           @media (max-width: 1180px) {
             .hik-audio-console-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           }
@@ -4732,6 +4761,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-grid, .hik-info-grid, .hik-stream-grid { grid-template-columns:1fr; }
           }
           @media (max-width: 700px) {
+            .hik-video-alarm-terminal-overlay { inset:12px 12px 58px 12px; }
+            .hik-alarm-overlay-grid { grid-template-columns:1fr; }
+            .hik-alarm-overlay-header { align-items:flex-start; }
             .hik-titlebar, .hik-controls-head, .hik-console-topbar { flex-direction:column; align-items:stretch; }
             .hik-meta { grid-template-columns:1fr; }
             .hik-console-badges { width:100%; }
@@ -4756,11 +4788,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-volume-rail input { width:74px; }
             .hik-video-playback-panel { width:calc(100% - 24px); bottom:10px; padding:10px; }
             .hik-video-playback-grid { grid-template-columns:1fr; } .hik-video-playback-ticker { flex-direction:column; align-items:flex-start; }
-            .hik-alarm-terminal-head { grid-template-columns:1fr auto; }
-            .hik-alarm-terminal-status { grid-column:1 / -1; justify-self:start; }
-            .hik-alarm-terminal-grid { grid-template-columns:1fr; }
-            .hik-alarm-terminal-row { grid-template-columns:1fr; gap:4px; }
-            .hik-alarm-terminal-value { justify-self:start; text-align:left; }
           }
         </style>
         <div class="hik-wrap">
@@ -4794,7 +4821,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
               <div class="hik-merged-shell">
                 <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
-                  ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
+                  ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && !this._alarmOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
                       <div class="hik-video-ptz-surface">
                         <div class="hik-video-ptz-top">
@@ -4915,8 +4942,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         </button>
                       ` : ""}
                       ${this.config.show_alarm_dashboard !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._alarmOverlayOpen ? "is-active" : ""}" id="hik-overlay-alarm-toggle" title="${this._alarmOverlayOpen ? "Hide alarm dashboard" : "Show alarm dashboard"}" aria-label="${this._alarmOverlayOpen ? "Hide alarm dashboard" : "Show alarm dashboard"}">
-                          <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
+                        <button type="button" class="hik-video-media-btn ${this._alarmOverlayVisible ? "is-active" : ""}" id="hik-overlay-alarm-toggle" title="${this._alarmOverlayVisible ? "Hide alarm dashboard" : "Show alarm dashboard"}" aria-label="${this._alarmOverlayVisible ? "Hide alarm dashboard" : "Show alarm dashboard"}">
+                          <ha-icon icon="mdi:shield-home-outline"></ha-icon>
                         </button>
                       ` : ""}
                       ${this.config.debug?.enabled === true ? `
@@ -4946,6 +4973,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </select>
                         </label>
 
+                      </div>
+                    ` : ""}
+                    ${this.config.show_alarm_dashboard !== false && this._alarmOverlayVisible && !this._gridMode ? `
+                      <div class="hik-video-alarm-terminal-overlay">
+                        ${this.renderAlarmDashboard(globalRefs, dvr, refs, storageSummary, { mode: "overlay" })}
                       </div>
                     ` : ""}
                     ${playbackPanelSupported && (this._playbackOverlayVisible || playbackActive) ? `
@@ -5010,7 +5042,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
-                ${this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary)}
                 ${this.renderDebugOverlay(camAttrs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
@@ -5052,19 +5083,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       };
       btn.addEventListener("click", handler);
       btn.addEventListener("pointerup", handler);
-    });
-    const alarmOverlayToggle = this.querySelector("#hik-overlay-alarm-toggle");
-    if (alarmOverlayToggle) {
-      alarmOverlayToggle.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this._toggleAlarmOverlay();
-      });
-    }
-    this.querySelector("#hik-alarm-overlay-close")?.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (this._alarmOverlayOpen) this._toggleAlarmOverlay();
     });
     const debugOverlayToggle = this.querySelector("#hik-overlay-debug-toggle");
     if (debugOverlayToggle) {
@@ -5118,6 +5136,15 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         e.preventDefault();
         e.stopPropagation();
         this._toggleVideoAccessoryPanel("storage");
+      });
+    }
+
+    const alarmOverlayToggle = this.querySelector("#hik-overlay-alarm-toggle");
+    if (alarmOverlayToggle) {
+      alarmOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleAlarmOverlay();
       });
     }
 
