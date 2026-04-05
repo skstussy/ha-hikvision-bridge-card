@@ -1,7 +1,5 @@
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
-
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
   entry._expanded = !entry._expanded;
@@ -735,26 +733,6 @@ _pushDebugEntry(entry) {
     return { width, height, x: Math.min(Math.max(0, next.x), maxX), y: Math.min(Math.max(0, next.y), maxY) };
   }
 
-  _cleanupDebugOverlayPointerState(pointerId = null) {
-    const overlay = this.querySelector('.hik-debug-terminal-window');
-    const handle = this.querySelector('.hik-debug-terminal-head');
-    const resizeHandle = this.querySelector('.hik-debug-resize-handle');
-    const matchesPointer = (state) => state && (pointerId == null || state.pointerId === pointerId);
-
-    if (matchesPointer(this._debugOverlayDrag)) {
-      try { if (handle && this._debugOverlayDrag?.pointerId != null) handle.releasePointerCapture(this._debugOverlayDrag.pointerId); } catch (err) {}
-      this._debugOverlayDrag = null;
-    }
-    if (matchesPointer(this._debugOverlayResize)) {
-      try { if (resizeHandle && this._debugOverlayResize?.pointerId != null) resizeHandle.releasePointerCapture(this._debugOverlayResize.pointerId); } catch (err) {}
-      this._debugOverlayResize = null;
-    }
-    if (overlay) {
-      overlay.classList.remove('is-moving');
-      overlay.classList.remove('is-resizing');
-    }
-  }
-
   _bindDebugOverlayInteractions() {
     const overlay = this.querySelector('.hik-debug-terminal-window');
     const handle = this.querySelector('.hik-debug-terminal-head');
@@ -766,109 +744,77 @@ _pushDebugEntry(entry) {
     }
     overlay.__hikDebugOverlayBound = true;
 
-    const dragThreshold = 6;
-    const updateOverlaySizeVars = (rect) => {
-      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(rect.width)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(rect.height)}px`);
-    };
-
-    const onWindowPointerMove = (event) => {
-      if (this._debugOverlayDrag && this._debugOverlayDrag.pointerId === event.pointerId) {
-        const start = this._debugOverlayDrag;
-        const deltaX = event.clientX - start.startX;
-        const deltaY = event.clientY - start.startY;
-        if (start.active !== true) {
-          if (Math.hypot(deltaX, deltaY) < dragThreshold) return;
-          start.active = true;
-          overlay.classList.add('is-moving');
-        }
-        const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + deltaX, y: start.rect.y + deltaY });
-        this._debugOverlayRect = next;
-        this._applyDebugOverlayRectToElement(overlay, next);
-        return;
-      }
-
-      if (this._debugOverlayResize && this._debugOverlayResize.pointerId === event.pointerId) {
-        const start = this._debugOverlayResize;
-        const next = this._clampDebugOverlayRect({
-          ...start.rect,
-          width: start.rect.width + (event.clientX - start.startX),
-          height: start.rect.height + (event.clientY - start.startY),
-        });
-        this._debugOverlayRect = next;
-        updateOverlaySizeVars(next);
-        this._applyDebugOverlayRectToElement(overlay, next);
-      }
-    };
-
-    const finishDrag = () => {
-      const start = this._debugOverlayDrag;
-      if (!start) return;
-      const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
-      this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._setDebugOverlayRect(next, { persist: true, rerender: false });
-      this._applyDebugOverlayRectToElement(overlay, next);
-      updateOverlaySizeVars(next);
-    };
-
-    const finishResize = () => {
-      const start = this._debugOverlayResize;
-      if (!start) return;
-      const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
-      this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._setDebugOverlayRect(next, { persist: true, rerender: false });
-      this._applyDebugOverlayRectToElement(overlay, next);
-      updateOverlaySizeVars(next);
-    };
-
-    const onWindowPointerEnd = (event) => {
-      if (this._debugOverlayDrag && this._debugOverlayDrag.pointerId === event.pointerId) {
-        finishDrag();
-        return;
-      }
-      if (this._debugOverlayResize && this._debugOverlayResize.pointerId === event.pointerId) {
-        finishResize();
-      }
-    };
-
-    if (!this._boundDebugOverlayWindowHandlers) {
-      this._boundDebugOverlayWindowHandlers = {
-        pointermove: (event) => onWindowPointerMove(event),
-        pointerup: (event) => onWindowPointerEnd(event),
-        pointercancel: (event) => onWindowPointerEnd(event),
-      };
-      window.addEventListener('pointermove', this._boundDebugOverlayWindowHandlers.pointermove, true);
-      window.addEventListener('pointerup', this._boundDebugOverlayWindowHandlers.pointerup, true);
-      window.addEventListener('pointercancel', this._boundDebugOverlayWindowHandlers.pointercancel, true);
-    }
-
     handle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
       const target = event.target;
-      if (target?.closest?.('button, input, select, textarea, a, [data-debug-global-action], [data-debug-entry-action], [data-debug-filter], [data-debug-select]')) return;
+      if (target?.closest?.('button, input, select, textarea, a, [data-debug-global-action], [data-debug-entry-action], [data-debug-filter]')) return;
       event.preventDefault();
-      event.stopPropagation();
-      this._cleanupDebugOverlayPointerState();
       const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
-      this._debugOverlayDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect, active: false };
+      this._debugOverlayDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect };
+      overlay.classList.add('is-moving');
       try { handle.setPointerCapture(event.pointerId); } catch (err) {}
     });
+
+    handle.addEventListener('pointermove', (event) => {
+      if (!this._debugOverlayDrag || this._debugOverlayDrag.pointerId !== event.pointerId) return;
+      const start = this._debugOverlayDrag;
+      const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + (event.clientX - start.startX), y: start.rect.y + (event.clientY - start.startY) });
+      this._debugOverlayRect = next;
+      this._applyDebugOverlayRectToElement(overlay, next);
+    });
+
+    const endDrag = (event) => {
+      if (!this._debugOverlayDrag || this._debugOverlayDrag.pointerId !== event.pointerId) return;
+      try { handle.releasePointerCapture(event.pointerId); } catch (err) {}
+      overlay.classList.remove('is-moving');
+      this._debugOverlayDrag = null;
+      const next = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      this._applyDebugOverlayRectToElement(overlay, next);
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+    };
+
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
 
     resizeHandle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
       event.preventDefault();
-      event.stopPropagation();
-      this._cleanupDebugOverlayPointerState();
       const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
       this._debugOverlayResize = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect };
       overlay.classList.add('is-resizing');
       try { resizeHandle.setPointerCapture(event.pointerId); } catch (err) {}
     });
 
-    resizeHandle.addEventListener('dblclick', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+    resizeHandle.addEventListener('pointermove', (event) => {
+      if (!this._debugOverlayResize || this._debugOverlayResize.pointerId !== event.pointerId) return;
+      const start = this._debugOverlayResize;
+      const next = this._clampDebugOverlayRect({
+        ...start.rect,
+        width: start.rect.width + (event.clientX - start.startX),
+        height: start.rect.height + (event.clientY - start.startY),
+      });
+      this._debugOverlayRect = next;
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+      this._applyDebugOverlayRectToElement(overlay, next);
     });
+
+    const endResize = (event) => {
+      if (!this._debugOverlayResize || this._debugOverlayResize.pointerId !== event.pointerId) return;
+      try { resizeHandle.releasePointerCapture(event.pointerId); } catch (err) {}
+      overlay.classList.remove('is-resizing');
+      this._debugOverlayResize = null;
+      const next = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      this._applyDebugOverlayRectToElement(overlay, next);
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+    };
+
+    resizeHandle.addEventListener('pointerup', endResize);
+    resizeHandle.addEventListener('pointercancel', endResize);
   }
 
   _pushDebug(category = "general", level = "info", event = "event", message = "", details = {}, source = "frontend") {
@@ -4057,36 +4003,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
 
-  _resolveVersionInfo(info = {}, camAttrs = {}, dvr = {}, storage = {}) {
-    const frontend = HIKVISION_BRIDGE_CARD_FRONTEND_VERSION;
-    const backend = this.pickValue(
-      [dvr, storage, camAttrs, info],
-      [
-        "backend_version",
-        "integration_version",
-        "bridge_version",
-        "version",
-        "component_version",
-        "sw_version",
-        "software_version"
-      ],
-      ""
-    );
-    return {
-      frontend: String(frontend || "-").trim() || "-",
-      backend: String(backend || "").trim() || "-",
-    };
-  }
-
-  _renderVersionOverlay(versionInfo = {}) {
-    return `
-      <div class="hik-version-overlay" aria-label="Frontend and backend versions">
-        <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
-        <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
-      </div>
-    `;
-  }
-
   render() {
     this._captureDebugViewState?.();
     if (!this._hass) return;
@@ -4134,7 +4050,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const playbackPresets = this.getPlaybackPresets();
     if (!playbackPresets.includes(Number(playbackState.preset))) playbackState.preset = playbackPresets[0] || 1;
     const playbackIndicator = this.formatPlaybackIndicatorState(camAttrs, playbackState);
-    const versionInfo = this._resolveVersionInfo(info, camAttrs, dvr, storage);
     const playbackActive = playbackIndicator.playbackActive;
     const isWebRtc = String(streamMode || "").toLowerCase() === "webrtc_direct";
     const cameraAlarmBadges = this.collectCameraAlarmBadges(refs);
@@ -4486,8 +4401,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
-          .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
-          .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -4797,7 +4710,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
-                    ${this._renderVersionOverlay(versionInfo)}
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -5213,69 +5125,49 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._setPanelOpenState(details.getAttribute("data-expandable-key"), details.open === true);
       });
     });
-    this.querySelectorAll("[data-debug-filter]").forEach((btn) => {
-      btn.addEventListener("pointerdown", (ev) => {
-        ev.stopPropagation();
-      });
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const target = ev.currentTarget;
-        this._toggleDebugFilter(target?.getAttribute("data-debug-filter"), target?.getAttribute("data-debug-value"));
-      });
-    });
+    this.querySelectorAll("[data-debug-filter]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const target = ev.currentTarget;
+      this._toggleDebugFilter(target?.getAttribute("data-debug-filter"), target?.getAttribute("data-debug-value"));
+    }));
     this.querySelector("[data-debug-search]")?.addEventListener("input", (ev) => {
       this._debugSearchQuery = ev.currentTarget?.value || "";
       this.render();
     });
-    this.querySelectorAll("[data-debug-select]").forEach((btn) => {
-      btn.addEventListener("pointerdown", (ev) => {
-        ev.stopPropagation();
-      });
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        this._debugSelectedKey = ev.currentTarget?.getAttribute("data-debug-select") || "";
+    this.querySelectorAll("[data-debug-select]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._debugSelectedKey = ev.currentTarget?.getAttribute("data-debug-select") || "";
+      this.render();
+    }));
+    this.querySelectorAll("[data-debug-entry-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const container = ev.currentTarget.closest(".hik-debug-detail-pane");
+      const textarea = container?.querySelector(".hik-debug-textarea");
+      const text = textarea?.value || textarea?.textContent || "";
+      const action = ev.currentTarget.getAttribute("data-debug-entry-action");
+      if (action === "copy") this.copyDebugText(text);
+      if (action === "download") this.downloadDebugText(text, "hikvision-debug-entry");
+    }));
+    this.querySelectorAll("[data-debug-global-action]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const action = ev.currentTarget.getAttribute("data-debug-global-action");
+      const combined = this._getFilteredDebugEntries().map((entry) => this.formatDebugEntryText(entry)).join("\n\n");
+      if (action === "copy-all") this.copyDebugText(combined);
+      if (action === "download-all") this.downloadDebugText(combined, "hikvision-debug-dashboard");
+      if (action === "copy-last-ptz-trace") {
+        const trace = this._getLastTraceForCategory("ptz") || this._getLastTraceForCategory("webrtc");
+        const traceText = trace.length ? trace.map((entry) => this.formatDebugEntryText(entry)).join("\n\n") : "No PTZ trace entries available.";
+        this.copyDebugText(traceText);
+      }
+      if (action === "clear") {
+        this._debugEntries = (this._debugEntries || []).filter((entry) => entry.source === "backend");
         this.render();
-      });
-    });
-    this.querySelectorAll("[data-debug-entry-action]").forEach((btn) => {
-      btn.addEventListener("pointerdown", (ev) => {
-        ev.stopPropagation();
-      });
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const container = ev.currentTarget.closest(".hik-debug-detail-pane");
-        const textarea = container?.querySelector(".hik-debug-textarea");
-        const text = textarea?.value || textarea?.textContent || "";
-        const action = ev.currentTarget.getAttribute("data-debug-entry-action");
-        if (action === "copy") this.copyDebugText(text);
-        if (action === "download") this.downloadDebugText(text, "hikvision-debug-entry");
-      });
-    });
-    this.querySelectorAll("[data-debug-global-action]").forEach((btn) => {
-      btn.addEventListener("pointerdown", (ev) => {
-        ev.stopPropagation();
-      });
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const action = ev.currentTarget.getAttribute("data-debug-global-action");
-        const combined = this._getFilteredDebugEntries().map((entry) => this.formatDebugEntryText(entry)).join("\n\n");
-        if (action === "copy-all") this.copyDebugText(combined);
-        if (action === "download-all") this.downloadDebugText(combined, "hikvision-debug-dashboard");
-        if (action === "copy-last-ptz-trace") {
-          const trace = this._getLastTraceForCategory("ptz") || this._getLastTraceForCategory("webrtc");
-          const traceText = trace.length ? trace.map((entry) => this.formatDebugEntryText(entry)).join("\n\n") : "No PTZ trace entries available.";
-          this.copyDebugText(traceText);
-        }
-        if (action === "clear") {
-          this._debugEntries = (this._debugEntries || []).filter((entry) => entry.source === "backend");
-          this.render();
-        }
-      });
-    });
+      }
+    }));
     this.querySelector("#hik-playback-start")?.addEventListener("click", () => this.startPlayback());
     this.querySelector("#hik-playback-stop")?.addEventListener("click", () => this.stopPlayback());
     this.querySelector("#hik-playback-pause")?.addEventListener("click", () => this.pausePlayback());
