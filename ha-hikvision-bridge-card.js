@@ -3913,6 +3913,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
     const entityName = refs.camera || "-";
     const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_proxy_supported ? "proxy" : (camAttrs.ptz_direct_supported ? "direct" : "none"));
+    const ptzCapabilityMode = camAttrs.ptz_capability_mode || info.ptz_capability_mode || "-";
+    const ptzImplementation = camAttrs.ptz_implementation || info.ptz_implementation || "-";
+    const ptzUnsupportedReason = camAttrs.ptz_unsupported_reason || info.ptz_unsupported_reason || "";
     const streamMode = String(camAttrs.stream_mode || "rtsp_direct").toLowerCase();
     const videoMethod = camAttrs.video_method || (streamMode === "snapshot" ? "Snapshot" : streamMode === "webrtc_direct" ? "WebRTC Direct" : streamMode === "webrtc" ? "WebRTC" : streamMode === "rtsp_direct" ? "RTSP Direct" : "RTSP");
     const playbackState = this.syncPlaybackState(camAttrs);
@@ -3941,6 +3944,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
             ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
             ["Control method", ptzMode || "-"],
+            ["PTZ capability", ptzCapabilityMode || "-"],
+            ["PTZ implementation", ptzImplementation || "-"],
+            ["PTZ unsupported reason", ptzUnsupportedReason || "-"],
             ["Firmware", this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-")],
             ["Serial", this.pickValue([info, camAttrs], ["serial_number", "serial"], "-")],
           ])}
