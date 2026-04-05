@@ -109,6 +109,17 @@ _pushDebugEntry(entry) {
       cameras: [],
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
+      ui: {
+        show_overlay_controls: true,
+        show_navigation_controls: true,
+        show_speaker_controls: true,
+        show_talk_button: true,
+        show_fullscreen_button: true,
+        show_stream_mode_button: true,
+        show_storage_button: true,
+        show_debug_button: true,
+        show_playback_button: true,
+      },
       speaker_default: false,
       volume_default: 100,
       audio_boost: 100,
@@ -125,6 +136,7 @@ _pushDebugEntry(entry) {
       ...config,
     };
     this.config.debug = this._normalizeDebugConfig(this.config);
+    this.config.ui = this._normalizeUiConfig(this.config);
     this.selected = 0;
     this._repeatHandle = null;
     this._videoCard = null;
@@ -501,6 +513,22 @@ _pushDebugEntry(entry) {
       max_entries: Math.max(25, Math.min(500, Number(incoming.max_entries ?? 150) || 150)),
       categories: Array.from(new Set(categories)),
       levels: Array.from(new Set(levels)),
+    };
+  }
+
+  _normalizeUiConfig(config = {}) {
+    const incoming = config?.ui && typeof config.ui === "object" ? config.ui : {};
+    const bool = (value, fallback = true) => value === true ? true : value === false ? false : fallback;
+    return {
+      show_overlay_controls: bool(incoming.show_overlay_controls, true),
+      show_navigation_controls: bool(incoming.show_navigation_controls, true),
+      show_speaker_controls: bool(incoming.show_speaker_controls, config.show_audio_controls !== false),
+      show_talk_button: bool(incoming.show_talk_button, true),
+      show_fullscreen_button: bool(incoming.show_fullscreen_button, true),
+      show_stream_mode_button: bool(incoming.show_stream_mode_button, config.show_stream_mode_info !== false),
+      show_storage_button: bool(incoming.show_storage_button, config.show_storage_info !== false),
+      show_debug_button: bool(incoming.show_debug_button, config.debug?.enabled === true || config.show_audio_debug === true || config.show_playback_debug === true),
+      show_playback_button: bool(incoming.show_playback_button, config.show_playback_panel !== false),
     };
   }
 
@@ -1879,6 +1907,17 @@ _toggleDebugFilter(kind, value) {
       show_controls: true,
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
+      ui: {
+        show_overlay_controls: true,
+        show_navigation_controls: true,
+        show_speaker_controls: true,
+        show_talk_button: true,
+        show_fullscreen_button: true,
+        show_stream_mode_button: true,
+        show_storage_button: true,
+        show_debug_button: true,
+        show_playback_button: true,
+      },
     };
   }
 
@@ -4203,6 +4242,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const accent = this.normalizeColor(this.config.accent_color);
     const panelTint = Math.max(0, Math.min(24, Number(this.config.panel_tint || 8)));
     const controlsMode = this.config.controls_mode || "always";
+    const ui = this.config.ui || this._normalizeUiConfig(this.config);
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
@@ -4291,10 +4331,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       `);
     }
 
-    if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
-    if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if ((this.config.show_stream_mode_info === false || ui.show_stream_mode_button !== true) && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
+    if ((!storagePanelSupported || ui.show_storage_button !== true) && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
-    if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
+    if (this.config.debug?.enabled !== true || ui.show_debug_button !== true) this._debugOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
       <div class="hik-panel hik-info-card hik-video-accessory-panel">
@@ -4866,6 +4906,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
                     ${this._renderVersionOverlay(versionInfo)}
+                    ${ui.show_overlay_controls !== false && ui.show_navigation_controls === true ? `
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -4877,8 +4918,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         <ha-icon icon="mdi:chevron-right"></ha-icon>
                       </button>
                     </div>
-                    <div class="hik-video-media-topright">
-                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
+                    ` : ``}
+                    ${ui.show_overlay_controls !== false ? `<div class="hik-video-media-topright">` : ``}
+                      ${(ui.show_overlay_controls !== false && !this._gridMode && !playbackActive && !this._playbackOverlayVisible && ui.show_speaker_controls === true) ? `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
                             <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
@@ -4889,7 +4931,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </span>
                           <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
                         </button>
-                        ${isWebRtc ? `
+                        ${ui.show_talk_button === true && isWebRtc ? `
                           <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
                             <span class="hik-video-audio-icon">
                               <ha-icon icon="mdi:microphone"></ha-icon>
@@ -4911,38 +4953,40 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <input id="hik-audio-boost-overlay" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
                           <span class="hik-overlay-slider-value hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</span>
                         </label>
-                        ${isWebRtc ? `
+                        ${ui.show_talk_button === true && isWebRtc ? `
                           <label class="hik-video-volume-rail compact">
                             <ha-icon icon="mdi:microphone-plus"></ha-icon>
                             <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
                             <span class="hik-overlay-slider-value hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</span>
                           </label>
                         ` : ""}
+                        ${ui.show_fullscreen_button === true ? `
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
+                        ` : ""}
                       ` : ""}
-                      ${this.config.show_stream_mode_info !== false ? `
+                      ${ui.show_overlay_controls !== false && ui.show_stream_mode_button === true && this.config.show_stream_mode_info !== false ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}" id="hik-overlay-stream-mode-toggle" title="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}" aria-label="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}">
                           <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
                         </button>
                       ` : ""}
-                      ${storagePanelSupported ? `
+                      ${ui.show_overlay_controls !== false && ui.show_storage_button === true && storagePanelSupported ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
                           <ha-icon icon="mdi:harddisk"></ha-icon>
                         </button>
                       ` : ""}
-                      ${this.config.debug?.enabled === true ? `
+                      ${ui.show_overlay_controls !== false && ui.show_debug_button === true && this.config.debug?.enabled === true ? `
                         <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
-                      ${playbackPanelSupported ? `
+                      ${ui.show_overlay_controls !== false && ui.show_playback_button === true && playbackPanelSupported ? `
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
                       ` : ""}
-                    </div>
+                    ${ui.show_overlay_controls !== false ? `</div>` : ``}
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -5420,6 +5464,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
+    const ui = this.config.ui && typeof this.config.ui === "object" ? this.config.ui : {};
     this.innerHTML = `
       <div style="padding:16px;display:grid;gap:16px;">
         <div style="font-size:18px;font-weight:700;">HA Hikvision Bridge Card Editor</div>
@@ -5496,6 +5541,21 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
 
         <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
+          <div style="font-weight:600;">Video overlay controls</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            ${this.rowCheckbox("ui_show_overlay_controls", "Show overlay controls", ui.show_overlay_controls !== false)}
+            ${this.rowCheckbox("ui_show_navigation_controls", "Show previous / grid / next controls", ui.show_navigation_controls !== false)}
+            ${this.rowCheckbox("ui_show_speaker_controls", "Show speaker / volume controls", ui.show_speaker_controls !== false)}
+            ${this.rowCheckbox("ui_show_talk_button", "Show push-to-talk overlay", ui.show_talk_button !== false)}
+            ${this.rowCheckbox("ui_show_fullscreen_button", "Show fullscreen button", ui.show_fullscreen_button !== false)}
+            ${this.rowCheckbox("ui_show_stream_mode_button", "Show stream mode button", ui.show_stream_mode_button !== false)}
+            ${this.rowCheckbox("ui_show_storage_button", "Show storage button", ui.show_storage_button !== false)}
+            ${this.rowCheckbox("ui_show_debug_button", "Show debug button", ui.show_debug_button !== false)}
+            ${this.rowCheckbox("ui_show_playback_button", "Show playback button", ui.show_playback_button !== false)}
+          </div>
+        </div>
+
+        <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
           <div style="font-weight:600;">Virtual PTZ tracking</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
             <div><label>Max pan steps</label><br><input id="max_pan_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5}" style="width:100%;"></div>
@@ -5506,7 +5566,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "ui_show_overlay_controls", "ui_show_navigation_controls", "ui_show_speaker_controls", "ui_show_talk_button", "ui_show_fullscreen_button", "ui_show_stream_mode_button", "ui_show_storage_button", "ui_show_debug_button", "ui_show_playback_button", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
@@ -5542,8 +5602,20 @@ class HikvisionPTZCardEditor extends HTMLElement {
       show_storage_info: this.querySelector("#show_storage_info").checked,
       show_position_info: this.querySelector("#show_position_info").checked,
       lens_stop_safeguard: this.querySelector("#lens_stop_safeguard").checked,
-      show_playback_panel: this.querySelector("#show_playback_panel").checked,
+      show_playback_panel: this.querySelector("#show_playback_panel")?.checked ?? true,
       show_audio_controls: this.querySelector("#show_audio_controls").checked,
+      ui: {
+        ...(this.config.ui || {}),
+        show_overlay_controls: this.querySelector("#ui_show_overlay_controls").checked,
+        show_navigation_controls: this.querySelector("#ui_show_navigation_controls").checked,
+        show_speaker_controls: this.querySelector("#ui_show_speaker_controls").checked,
+        show_talk_button: this.querySelector("#ui_show_talk_button").checked,
+        show_fullscreen_button: this.querySelector("#ui_show_fullscreen_button").checked,
+        show_stream_mode_button: this.querySelector("#ui_show_stream_mode_button").checked,
+        show_storage_button: this.querySelector("#ui_show_storage_button").checked,
+        show_debug_button: this.querySelector("#ui_show_debug_button").checked,
+        show_playback_button: this.querySelector("#ui_show_playback_button").checked,
+      },
       debug: {
         ...(this.config.debug || {}),
         enabled: this.querySelector("#debug_enabled").checked,
