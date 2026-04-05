@@ -1,8 +1,6 @@
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.15";
-
-const HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER = "HP-1.3.15";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -519,7 +517,7 @@ _pushDebugEntry(entry) {
     const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
     const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
     return {
-      card_version: `frontend-${HIKVISION_BRIDGE_CARD_FRONTEND_VERSION}`,
+      card_version: "1.0.22",
       selected_camera: cam?.name || "",
       channel: cam?.channel != null ? String(cam.channel) : "",
       online: !!this.isOnline?.(),
@@ -4082,18 +4080,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
   _renderVersionOverlay(versionInfo = {}) {
     return `
-      <div class="hik-version-overlay hik-version-overlay--video" aria-label="Frontend and backend versions">
-        <span class="hik-version-chip hik-version-chip--proof" title="Hard-proof frontend build marker">LIVE FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
+      <div class="hik-version-overlay" aria-label="Frontend and backend versions">
+        <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
         <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
-        <span class="hik-version-chip hik-version-chip--proof" title="Hard-proof marker">${this.escapeHtml(HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER)}</span>
-      </div>
-    `;
-  }
-
-  _renderHeaderVersionMarker(versionInfo = {}) {
-    return html`
-      <div class="hik-header-version-marker" aria-label="Loaded frontend build marker">
-        LIVE FE ${this.escapeHtml(versionInfo.frontend || "-")} · ${this.escapeHtml(HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER)}
       </div>
     `;
   }
@@ -4311,7 +4300,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     this.innerHTML = `
       <ha-card data-entity="${this.escapeHtml(entityName)}" style="--hik-accent:${accent};--hik-panel-tint:${panelTint}%;">
-        ${this._renderHeaderVersionMarker(versionInfo)}
         <style>
           .hik-wrap { padding: 14px; }
           .hik-titlebar { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom: 14px; }
@@ -4500,9 +4488,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
           .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
-          .hik-version-overlay--video { top:8px; left:8px; }
-          .hik-version-chip--proof { color:#fff; background:rgba(0,0,0,0.72); border-color:rgba(255,255,255,0.28); }
-          .hik-header-version-marker { margin:0 0 8px 0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:rgba(255,255,255,0.82); opacity:0.96; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -5501,7 +5486,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
   }
 }
 
-console.info(`[ha-hikvision-bridge-card] frontend ${HIKVISION_BRIDGE_CARD_FRONTEND_VERSION} loaded (${HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER})`);
 if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
@@ -5518,5 +5502,3 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
 
 /* phase3 premium grid intelligence applied on 1.2.7 */
-
-
