@@ -4257,6 +4257,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-top-right { position:absolute; top:0; right:0; display:grid; gap:8px; justify-items:end; max-width:min(58vw, 620px); }
           .hik-video-ptz-top-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; pointer-events:auto; }
           .hik-video-ptz-quickbar { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; pointer-events:auto; }
+          .hik-video-ptz-visible-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; pointer-events:auto; max-width:min(64vw, 760px); }
+          .hik-video-ptz-visible-presets { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; pointer-events:auto; max-width:min(64vw, 760px); }
           .hik-video-ptz-mini-btn { min-height:34px; padding:0 11px; border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.1); box-shadow:0 10px 22px rgba(0,0,0,0.18); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; font-size:11px; font-weight:700; }
           .hik-video-ptz-mini-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-ptz-mini-btn:active:not(:disabled) { transform:scale(0.98); }
@@ -4615,11 +4617,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         </div>
                         <div class="hik-video-ptz-top-right">
                         <div class="hik-video-ptz-top-actions">
-                          <button type="button" class="hik-video-refocus-btn compact" id="hik-set-home-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} title="Set current PTZ position as home">
+                          <button type="button" class="hik-video-refocus-btn compact hik-set-home-action" ${(!online || this._returningHome) ? 'disabled' : ''} title="Set current PTZ position as home">
                             <ha-icon icon="mdi:home-edit-outline"></ha-icon>
                             <span>Set Home</span>
                           </button>
-                          <button type="button" class="hik-video-refocus-btn compact" id="hik-return-home-overlay" ${(this._returningHome || (!this.getPTZState().pan && !this.getPTZState().tilt && !this.getPTZState().zoom) || !this.canPtz() || !online) ? 'disabled' : ''} title="Return PTZ to home">
+                          <button type="button" class="hik-video-refocus-btn compact hik-return-home-action" ${(this._returningHome || (!this.getPTZState().pan && !this.getPTZState().tilt && !this.getPTZState().zoom) || !this.canPtz() || !online) ? 'disabled' : ''} title="Return PTZ to home">
                             <ha-icon icon="mdi:home-arrow-left"></ha-icon>
                             <span>${this._returningHome ? 'Returning…' : 'Return Home'}</span>
                           </button>
@@ -4753,6 +4755,40 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         <button type="button" class="hik-video-media-btn ${this._ptzOverlayPinned ? "is-active" : ""}" id="hik-overlay-ptz-pin" title="${this._ptzOverlayPinned ? "Hide PTZ quick overlay" : "Pin PTZ quick overlay"}" aria-label="${this._ptzOverlayPinned ? "Hide PTZ quick overlay" : "Pin PTZ quick overlay"}" aria-pressed="${this._ptzOverlayPinned ? "true" : "false"}">
                           <ha-icon icon="${this._ptzOverlayPinned ? "mdi:axis-arrow-lock" : "mdi:axis-arrow-info"}"></ha-icon>
                         </button>
+                      ` : ""}
+                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
+                        <div class="hik-video-ptz-visible-actions" aria-label="PTZ overlay actions">
+                          <button type="button" class="hik-video-media-btn hik-set-home-action" ${(!online || this._returningHome) ? 'disabled' : ''} title="Set current PTZ position as home" aria-label="Set current PTZ position as home">
+                            <ha-icon icon="mdi:home-edit-outline"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn hik-return-home-action" ${(this._returningHome || (!this.getPTZState().pan && !this.getPTZState().tilt && !this.getPTZState().zoom) || !this.canPtz() || !online) ? 'disabled' : ''} title="Return PTZ to home" aria-label="Return PTZ to home">
+                            <ha-icon icon="mdi:home-arrow-left"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn lens-btn" data-service="focus" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus near" aria-label="Focus near">
+                            <ha-icon icon="mdi:plus"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn lens-btn" data-service="focus" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus far" aria-label="Focus far">
+                            <ha-icon icon="mdi:minus"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn lens-btn" data-service="iris" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Iris open" aria-label="Iris open">
+                            <ha-icon icon="mdi:plus-circle-outline"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn lens-btn" data-service="iris" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Iris close" aria-label="Iris close">
+                            <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-media-btn refocus-overlay-btn" ${(!online || this._returningHome) ? 'disabled' : ''} title="Refocus" aria-label="Refocus">
+                            <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                          </button>
+                        </div>
+                        ${presets.length ? `
+                          <div class="hik-video-ptz-visible-presets" aria-label="PTZ presets">
+                            ${presets.map((p) => {
+                              const pid = typeof p === "object" ? p.id : p;
+                              const pname = typeof p === "object" ? (p.name || `Preset ${p.id}`) : `Preset ${p}`;
+                              return `<button type="button" class="hik-video-preset-chip preset-btn" data-preset="${pid}" ${(!ptz || !online || this._returningHome) ? "disabled" : ""} title="${this.escapeHtml(pname)}" aria-label="${this.escapeHtml(pname)}">${this.escapeHtml(pname)}</button>`;
+                            }).join("")}
+                          </div>
+                        ` : ""}
                       ` : ""}
                       ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
@@ -5146,10 +5182,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     });
 
     this.querySelector("#hik-center-overlay")?.addEventListener("click", () => this.handleCenter());
-    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: btn.closest(".hik-video-ptz-overlay") ? "overlay" : "panel" })));
+    this.querySelectorAll(".lens-btn[data-service]").forEach((btn) => btn.addEventListener("click", () => this.callLens(btn.dataset.service, Number(btn.dataset.direction || 0), { source: btn.closest(".hik-video-ptz-overlay, .hik-video-media-overlay") ? "overlay" : "panel" })));
     this.querySelectorAll(".refocus-overlay-btn").forEach((btn) => btn.addEventListener("click", () => this.handleRefocus()));
-    this.querySelector("#hik-set-home-overlay")?.addEventListener("click", () => this.handleSetHome());
-    this.querySelector("#hik-return-home-overlay")?.addEventListener("click", () => this.handleReturnHome());
+        this.querySelectorAll(".hik-set-home-action").forEach((btn) => btn.addEventListener("click", () => this.handleSetHome()));
+        this.querySelectorAll(".hik-return-home-action").forEach((btn) => btn.addEventListener("click", () => this.handleReturnHome()));
     this.querySelector("#hik-set-home")?.addEventListener("click", () => this.handleSetHome());
     this.querySelector("#hik-return-home")?.addEventListener("click", () => this.handleReturnHome());
     this.querySelectorAll(".preset-btn").forEach((btn) => btn.addEventListener("click", () => this.gotoPreset(Number(btn.dataset.preset))));
