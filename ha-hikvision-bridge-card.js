@@ -174,8 +174,10 @@ _pushDebugEntry(entry) {
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
+    this._debugFollowLatest = this._debugFollowLatest !== false;
     this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
     this._lastDebugSnapshot = this._lastDebugSnapshot || null;
+    this._debugViewState = this._debugViewState || { feedScrollTop: 0, terminalBodyScrollTop: 0, feedAtBottom: true };
     this._panelOpenState = this._panelOpenState || {};
     this._gridMode = this._gridMode ?? false;
     this._gridFocusChannel = this._gridFocusChannel ?? null;
@@ -866,6 +868,13 @@ _buildBackendDebugEntries(debugEntries = []) {
     const responseStatus = Number(entry?.response?.status || 0);
     const legacyLevel = responseStatus >= 400 || entry?.ok === false || entry?.reason || entry?.error ? "error" : "info";
     const cameraId = entry?.camera_id || entry?.camera || this.selectedCamera?.channel || "";
+    const classification = String(
+      entry?.classification
+      || entry?.response?.classification
+      || entry?.context?.classification
+      || entry?.details?.classification
+      || ""
+    ).trim().toLowerCase();
     return {
       idx: entry?.id || `backend-${index}-${entry?.requested_time || entry?.search_start || entry?.ts || index}`,
       time: entry?.ts || entry?.time || entry?.requested_time || entry?.search_start || new Date().toISOString(),
@@ -875,8 +884,10 @@ _buildBackendDebugEntries(debugEntries = []) {
       event: entry?.event || "backend_event",
       message: entry?.message || entry?.reason || entry?.error || `Backend event${responseStatus ? ` HTTP ${responseStatus}` : ""}`,
       camera: cameraId ? String(cameraId) : "",
+      classification,
       details: this._sanitizeDebugObject({
         entry_id: entry?.entry_id,
+        classification,
         context: entry?.context,
         track_id: entry?.track_id,
         requested_time: entry?.requested_time,
@@ -1163,6 +1174,61 @@ _toggleDebugFilter(kind, value) {
     return entry?.details?.trace_id || "";
   }
 
+  _captureDebugViewState() {
+    const feed = this.querySelector(".hik-debug-feed");
+    const terminalBody = this.querySelector(".hik-debug-terminal-body");
+    const viewState = this._debugViewState || {};
+    if (feed) {
+      const maxScroll = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      const scrollTop = Math.max(0, Math.min(feed.scrollTop || 0, maxScroll));
+      viewState.feedScrollTop = scrollTop;
+      viewState.feedAtBottom = maxScroll - scrollTop <= 24;
+    }
+    if (terminalBody) {
+      const maxScroll = Math.max(0, terminalBody.scrollHeight - terminalBody.clientHeight);
+      viewState.terminalBodyScrollTop = Math.max(0, Math.min(terminalBody.scrollTop || 0, maxScroll));
+    }
+    this._debugViewState = viewState;
+  }
+
+  _restoreDebugViewState() {
+    const viewState = this._debugViewState || {};
+    window.requestAnimationFrame(() => {
+      const terminalBody = this.querySelector(".hik-debug-terminal-body");
+      if (terminalBody && Number.isFinite(viewState.terminalBodyScrollTop)) {
+        const maxScroll = Math.max(0, terminalBody.scrollHeight - terminalBody.clientHeight);
+        terminalBody.scrollTop = Math.max(0, Math.min(viewState.terminalBodyScrollTop, maxScroll));
+      }
+      const feed = this.querySelector(".hik-debug-feed");
+      if (!feed) return;
+      const maxScroll = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      if (this._debugFollowLatest && viewState.feedAtBottom) {
+        feed.scrollTop = maxScroll;
+      } else if (Number.isFinite(viewState.feedScrollTop)) {
+        feed.scrollTop = Math.max(0, Math.min(viewState.feedScrollTop, maxScroll));
+      }
+    });
+  }
+
+  _updateDebugFollowStateFromScroll(feed) {
+    if (!feed) return;
+    const maxScroll = Math.max(0, feed.scrollHeight - feed.clientHeight);
+    const scrollTop = Math.max(0, Math.min(feed.scrollTop || 0, maxScroll));
+    const atBottom = maxScroll - scrollTop <= 24;
+    this._debugViewState = {
+      ...(this._debugViewState || {}),
+      feedScrollTop: scrollTop,
+      feedAtBottom: atBottom,
+    };
+    if (!atBottom && this._debugFollowLatest) {
+      this._debugFollowLatest = false;
+      this.render();
+    } else if (atBottom && !this._debugFollowLatest) {
+      this._debugFollowLatest = true;
+      this.render();
+    }
+  }
+
   _renderDebugDashboardBody(camAttrs = {}, options = {}) {
     if (!this.isDebugEnabled()) return "";
     const terminalMode = options?.terminal === true;
@@ -1235,6 +1301,7 @@ _toggleDebugFilter(kind, value) {
               <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
             </label>
             <div class="hik-debug-actions">
+              <button type="button" class="hik-debug-btn ${this._debugFollowLatest ? "is-active" : ""}" data-debug-follow-toggle="${this._debugFollowLatest ? "on" : "off"}">Follow ${this._debugFollowLatest ? "ON" : "OFF"}</button>
               <button type="button" class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
               <button type="button" class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
               <button type="button" class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
@@ -1257,7 +1324,7 @@ _toggleDebugFilter(kind, value) {
             <span>Message</span>
             <span>Cam</span>
           </div>
-          <div class="hik-debug-feed" role="log" aria-live="polite">
+          <div class="hik-debug-feed" role="log" aria-live="polite" data-debug-feed="true">
             ${visibleEntries.length ? visibleEntries.map((entry) => {
               const key = entryKey(entry);
               const selected = key === selectedKey;
@@ -1291,8 +1358,10 @@ _toggleDebugFilter(kind, value) {
               <span class="hik-pill neutral"><ha-icon icon="mdi:shape-outline"></ha-icon>${this.escapeHtml(selectedEntry.category || "general")}</span>
               <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(selectedEntry.source || "frontend")}</span>
               ${selectedEntry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(selectedEntry.camera))}</span>` : ""}
+              ${selectedEntry.classification ? `<span class="hik-pill neutral"><ha-icon icon="mdi:shape-plus-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.classification))}</span>` : ""}
               ${selectedEntry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.details.trace_id))}</span>` : ""}
             </div>
+            ${selectedEntry.classification ? `<div class="hik-debug-classification-note">Endpoint classification: <b>${this.escapeHtml(String(selectedEntry.classification))}</b></div>` : ""}
             <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
             <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
             ${selectedEntry?.details ? `
@@ -3935,6 +4004,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
 
   render() {
+    this._captureDebugViewState?.();
     if (!this._hass) return;
     const cameras = this.cameras || [];
     const cam = this.selectedCamera;
@@ -4478,6 +4548,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-detail-title { display:grid; gap:4px; }
           .hik-debug-detail-kicker { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.62; }
           .hik-debug-detail-name { font-size:15px; font-weight:700; }
+          .hik-debug-classification-note { margin:8px 0 0; padding:10px 12px; border-radius:14px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.03); font-size:12px; line-height:1.45; color:rgba(255,255,255,0.88); }
           .hik-debug-detail-message { font-size:13px; line-height:1.45; opacity:0.9; padding:10px 12px; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); }
           .hik-debug-nested-details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
           .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.38; padding:12px; border-radius:14px; background:rgba(10,14,20,0.40); border:1px solid rgba(255,255,255,0.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
@@ -4491,6 +4562,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-chip { border:1px solid rgba(255,255,255,0.12); background:rgba(10,14,20,0.28); color:inherit; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; text-transform:capitalize; backdrop-filter:blur(8px); transition:background 150ms ease, border-color 150ms ease, transform 120ms ease; }
           .hik-debug-chip:hover { transform:translateY(-1px); background:rgba(14,20,28,0.38); }
           .hik-debug-chip.active { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.20); }
+          .hik-debug-btn.is-active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.22); }
           @media (max-width: 980px) {
             .hik-debug-list-head, .hik-debug-row { grid-template-columns: 92px 92px 96px 1.15fr 1.6fr 72px; gap:8px; }
           }
@@ -5123,6 +5195,30 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       this.config = { ...this.config, speed: Number(ev.target.value) };
       this.render();
     });
+    this.querySelector('[data-debug-follow-toggle]')?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._debugFollowLatest = !this._debugFollowLatest;
+      const feed = this.querySelector(".hik-debug-feed");
+      if (this._debugFollowLatest && feed) {
+        this._debugViewState = {
+          ...(this._debugViewState || {}),
+          feedAtBottom: true,
+          feedScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
+        };
+      }
+      this.render();
+    });
+    this.querySelector(".hik-debug-feed")?.addEventListener("scroll", (ev) => {
+      this._updateDebugFollowStateFromScroll(ev.currentTarget);
+    }, { passive: true });
+    this.querySelector(".hik-debug-terminal-body")?.addEventListener("scroll", (ev) => {
+      this._debugViewState = {
+        ...(this._debugViewState || {}),
+        terminalBodyScrollTop: ev.currentTarget?.scrollTop || 0,
+      };
+    }, { passive: true });
+    this._restoreDebugViewState?.();
   }
 }
 
