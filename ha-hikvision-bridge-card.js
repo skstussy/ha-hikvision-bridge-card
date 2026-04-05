@@ -4441,37 +4441,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
             ${this.renderControlsPanel({ online, ptz, speed, cameraAlarmBadges })}
 
-${this.config.show_playback_panel !== false ? `
-  <div class="hik-panel hik-info-card hik-playback-panel">
-    <div class="hik-sub"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback</div>
-    <div class="hik-playback-grid">
-      <label class="hik-playback-input-wrap">
-        <span>Start time</span>
-        <input id="hik-playback-time" class="hik-select" type="datetime-local" step="1" value="${this.escapeHtml(playbackState.currentTime || this.formatDateTimeLocal())}">
-      </label>
-      <label class="hik-playback-input-wrap">
-        <span>Jump preset</span>
-        <select id="hik-playback-preset" class="hik-select">
-          ${playbackPresets.map((value) => `<option value="${value}" ${Number(playbackState.preset) === Number(value) ? "selected" : ""}>${this.escapeHtml(this.formatPlaybackPreset(value))}</option>`).join("")}
-        </select>
-      </label>
-    </div>
-    <div class="hik-status-row">
-      <span class="hik-pill ${playbackIndicator.playbackActive ? "primary" : "good"}"><ha-icon icon="${playbackIndicator.playbackActive ? "mdi:record-rec" : "mdi:camera-outline"}"></ha-icon>${playbackIndicator.playbackActive ? "Playback mode" : "Live mode"}</span>
-      <span class="hik-pill ${playbackIndicator.playbackActive ? (playbackIndicator.paused ? "warn" : "primary") : "good"}"><ha-icon icon="${playbackIndicator.playbackActive ? (playbackIndicator.paused ? "mdi:pause-circle-outline" : "mdi:play-circle-outline") : "mdi:waveform"}"></ha-icon>${playbackIndicator.statusLabel}</span>
-      <span class="hik-pill neutral"><ha-icon icon="mdi:skip-next"></ha-icon>${this.escapeHtml(this.formatPlaybackPreset(playbackState.preset || 1))}</span>
-    </div>
-    ${camAttrs.playback_clip_start_time && playbackIndicator.playbackActive ? `<div class="hik-mini-note">Clip start ${this.escapeHtml(this.formatDateTimeLocal(camAttrs.playback_clip_start_time))}${camAttrs.playback_requested_time ? ` · Requested ${this.escapeHtml(this.formatDateTimeLocal(camAttrs.playback_requested_time))}` : ""}</div>` : ""}
-    ${camAttrs.playback_error ? `<div class="hik-mini-note" style="color:var(--error-color);">${this.escapeHtml(camAttrs.playback_error)}</div>` : ""}
-    <div class="hik-row hik-playback-actions">
-      <button type="button" class="hik-btn" id="hik-playback-back"><ha-icon icon="mdi:rewind"></ha-icon><span>Back</span></button>
-      ${playbackState.paused ? `<button type="button" class="hik-btn" id="hik-playback-resume"><ha-icon icon="mdi:play"></ha-icon><span>Play</span></button>` : `<button type="button" class="hik-btn" id="hik-playback-pause"><ha-icon icon="mdi:pause"></ha-icon><span>Pause</span></button>`}
-      <button type="button" class="hik-btn" id="hik-playback-forward"><ha-icon icon="mdi:fast-forward"></ha-icon><span>Forward</span></button>
-      <button type="button" class="hik-btn" id="hik-playback-start"><ha-icon icon="mdi:calendar-play"></ha-icon><span>Start</span></button>
-      <button type="button" class="hik-btn" id="hik-playback-stop"><ha-icon icon="mdi:cctv-off"></ha-icon><span>Live</span></button>
-    </div>
-  </div>
-` : ""}
 
                 ${this.config.show_position_info !== false ? this.renderPTZIndicator() : ""}
 
@@ -4853,7 +4822,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
             ${this.rowCheckbox("show_storage_info", "Show NVR Storage Info", this.config.show_storage_info !== false)}
             ${this.rowCheckbox("show_position_info", "Show PTZ position tracker", this.config.show_position_info !== false)}
             ${this.rowCheckbox("lens_stop_safeguard", "Enable lens stop safeguard", this.config.lens_stop_safeguard === true)}
-            ${this.rowCheckbox("show_playback_panel", "Show playback controls", this.config.show_playback_panel !== false)}
             ${this.rowCheckbox("debug_enabled", "Show unified debug dashboard", this.config.debug?.enabled === true)}
             ${this.rowCheckbox("show_audio_controls", "Show audio console", this.config.show_audio_controls !== false)}
             ${this.rowCheckbox("mute_during_talk", "Mute speaker while talking", this.config.mute_during_talk !== false)}
