@@ -1,9 +1,6 @@
-
-// UI STATE PATCH
-_initUIState(){this._uiState=this._uiState||{position:{x:0,y:0},size:{w:480,h:320},toggles:{}}}
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.4.1";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -112,17 +109,6 @@ _pushDebugEntry(entry) {
       cameras: [],
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
-      ui: {
-        show_overlay_controls: true,
-        show_navigation_controls: true,
-        show_speaker_controls: true,
-        show_talk_button: true,
-        show_fullscreen_button: true,
-        show_stream_mode_button: true,
-        show_storage_button: true,
-        show_debug_button: true,
-        show_playback_button: true,
-      },
       speaker_default: false,
       volume_default: 100,
       audio_boost: 100,
@@ -139,7 +125,6 @@ _pushDebugEntry(entry) {
       ...config,
     };
     this.config.debug = this._normalizeDebugConfig(this.config);
-    this.config.ui = this._normalizeUiConfig(this.config);
     this.selected = 0;
     this._repeatHandle = null;
     this._videoCard = null;
@@ -184,14 +169,12 @@ _pushDebugEntry(entry) {
     this._debugOverlayRectLoaded = true;
     this._debugOverlayDrag = this._debugOverlayDrag || null;
     this._debugOverlayResize = this._debugOverlayResize || null;
-    this._debugOverlayInteraction = this._debugOverlayInteraction || { moved: false, suppressClickUntil: 0, pointerId: null };
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
     this._debugEntries = Array.isArray(this._debugEntries) ? this._debugEntries : [];
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
-    this._debugExpandedKeys = this._debugExpandedKeys || {};
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
     this._debugFollowLatest = this._debugFollowLatest !== false;
     this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
@@ -207,8 +190,6 @@ _pushDebugEntry(entry) {
     this._gridFocusTransitionTimer = this._gridFocusTransitionTimer || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
-    this._overlaySizeMode = this._overlaySizeMode || "large";
-    this._overlayResizeObserver = this._overlayResizeObserver || null;
   }
 
   set hass(hass) {
@@ -216,43 +197,6 @@ _pushDebugEntry(entry) {
     if (this._videoCard) this._videoCard.hass = hass;
     this._syncDebugRuntime();
     this.render();
-  }
-
-  _getOverlaySizeMode(width = 0, height = 0) {
-    const w = Number(width) || 0;
-    const h = Number(height) || 0;
-    if (w <= 0 || h <= 0) return this._overlaySizeMode || "large";
-    if (w < 430 || h < 250) return "compact";
-    if (w < 760 || h < 420) return "medium";
-    return "large";
-  }
-
-  _applyOverlaySizeMode(mode = null) {
-    const block = this.querySelector(".hik-video-block");
-    if (!block) return;
-    const nextMode = mode || this._getOverlaySizeMode(block.clientWidth, block.clientHeight);
-    this._overlaySizeMode = nextMode;
-    block.classList.remove("hik-overlay-size-compact", "hik-overlay-size-medium", "hik-overlay-size-large");
-    block.classList.add(`hik-overlay-size-${nextMode}`);
-    block.dataset.overlaySize = nextMode;
-  }
-
-  _setupOverlayResizeObserver() {
-    const block = this.querySelector(".hik-video-block");
-    if (!block) return;
-    this._applyOverlaySizeMode();
-    if (typeof ResizeObserver !== "function") return;
-    if (this._overlayResizeObserver) {
-      try { this._overlayResizeObserver.disconnect(); } catch (err) {}
-    }
-    this._overlayResizeObserver = new ResizeObserver((entries) => {
-      const entry = entries && entries[0];
-      if (!entry) return;
-      const box = entry.contentRect || {};
-      const nextMode = this._getOverlaySizeMode(box.width, box.height);
-      this._applyOverlaySizeMode(nextMode);
-    });
-    this._overlayResizeObserver.observe(block);
   }
 
 
@@ -271,10 +215,6 @@ _pushDebugEntry(entry) {
     this._teardownTalkAudioGraph();
     this._teardownAudioGraph();
     this._cleanupVideoCard();
-    if (this._overlayResizeObserver) {
-      try { this._overlayResizeObserver.disconnect(); } catch (err) {}
-    }
-    this._overlayResizeObserver = null;
   }
 
   stopRepeater() {
@@ -562,22 +502,6 @@ _pushDebugEntry(entry) {
     };
   }
 
-  _normalizeUiConfig(config = {}) {
-    const incoming = config?.ui && typeof config.ui === "object" ? config.ui : {};
-    const bool = (value, fallback = true) => value === true ? true : value === false ? false : fallback;
-    return {
-      show_overlay_controls: bool(incoming.show_overlay_controls, true),
-      show_navigation_controls: bool(incoming.show_navigation_controls, true),
-      show_speaker_controls: bool(incoming.show_speaker_controls, config.show_audio_controls !== false),
-      show_talk_button: bool(incoming.show_talk_button, true),
-      show_fullscreen_button: bool(incoming.show_fullscreen_button, true),
-      show_stream_mode_button: bool(incoming.show_stream_mode_button, config.show_stream_mode_info !== false),
-      show_storage_button: bool(incoming.show_storage_button, config.show_storage_info !== false),
-      show_debug_button: bool(incoming.show_debug_button, config.debug?.enabled === true || config.show_audio_debug === true || config.show_playback_debug === true),
-      show_playback_button: bool(incoming.show_playback_button, config.show_playback_panel !== false),
-    };
-  }
-
   isDebugEnabled() {
     return this.config?.debug?.enabled === true;
   }
@@ -720,19 +644,8 @@ _pushDebugEntry(entry) {
 
 
   _debugOverlayStorageKey() {
-    const cameras = Array.isArray(this.config?.cameras) ? this.config.cameras : [];
-    const seed = [
-      this.config?.title || "ha-hikvision-bridge-card",
-      ...cameras.map((camera) => camera?.entity || camera?.name || camera?.channel || ""),
-    ]
-      .filter(Boolean)
-      .join("|") || "default";
-    const normalized = String(seed)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 96) || "default";
-    return `ha_hikvision_bridge_card.debug_overlay_rect.${normalized}`;
+    const cameraKey = this.selectedCamera?.entity || this.selectedCamera?.channel || this.selected || 'default';
+    return `ha_hikvision_bridge_card.debug_overlay_rect.${cameraKey}`;
   }
 
   _debugOverlayMemoryStore() {
@@ -867,12 +780,6 @@ _pushDebugEntry(entry) {
         if (start.active !== true) {
           if (Math.hypot(deltaX, deltaY) < dragThreshold) return;
           start.active = true;
-          this._debugOverlayInteraction = {
-            ...(this._debugOverlayInteraction || {}),
-            moved: true,
-            suppressClickUntil: Date.now() + 250,
-            pointerId: event.pointerId,
-          };
           overlay.classList.add('is-moving');
         }
         const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + deltaX, y: start.rect.y + deltaY });
@@ -899,11 +806,6 @@ _pushDebugEntry(entry) {
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
       this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._debugOverlayInteraction = {
-        ...(this._debugOverlayInteraction || {}),
-        suppressClickUntil: Date.now() + ((start.active === true) ? 250 : 0),
-        pointerId: null,
-      };
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
@@ -914,11 +816,6 @@ _pushDebugEntry(entry) {
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
       this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._debugOverlayInteraction = {
-        ...(this._debugOverlayInteraction || {}),
-        suppressClickUntil: Date.now() + 250,
-        pointerId: null,
-      };
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
@@ -952,24 +849,10 @@ _pushDebugEntry(entry) {
       event.preventDefault();
       event.stopPropagation();
       this._cleanupDebugOverlayPointerState();
-      this._debugOverlayInteraction = {
-        ...(this._debugOverlayInteraction || {}),
-        moved: false,
-        suppressClickUntil: 0,
-        pointerId: event.pointerId,
-      };
       const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
       this._debugOverlayDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect, active: false };
       try { handle.setPointerCapture(event.pointerId); } catch (err) {}
     });
-
-    handle.addEventListener('click', (event) => {
-      const suppressUntil = Number(this._debugOverlayInteraction?.suppressClickUntil || 0);
-      if (suppressUntil && Date.now() < suppressUntil) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    }, true);
 
     resizeHandle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
@@ -1425,9 +1308,6 @@ _toggleDebugFilter(kind, value) {
       entry?.camera != null ? String(entry.camera) : "",
       entry?.source || "",
     ].join("|");
-    const visibleKeys = new Set(visibleEntries.map((entry) => entryKey(entry)));
-    const expandedKeys = Object.fromEntries(Object.entries(this._debugExpandedKeys || {}).filter(([key, value]) => visibleKeys.has(key) && value === true));
-    this._debugExpandedKeys = expandedKeys;
     const validSelectedKey = visibleEntries.some((entry) => entryKey(entry) === this._debugSelectedKey) ? this._debugSelectedKey : "";
     const selectedKey = validSelectedKey || (visibleEntries[0] ? entryKey(visibleEntries[0]) : "");
     this._debugSelectedKey = selectedKey || "";
@@ -1502,30 +1382,15 @@ _toggleDebugFilter(kind, value) {
             ${visibleEntries.length ? visibleEntries.map((entry) => {
               const key = entryKey(entry);
               const selected = key === selectedKey;
-              const expanded = this._debugExpandedKeys?.[key] === true;
-              const detailsText = entry?.details ? this.escapeHtml(JSON.stringify(entry.details, null, 2)) : "";
               return `
-                <div class="hik-debug-feed-entry ${expanded ? "expanded" : ""}">
-                  <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" title="${this.escapeHtml(entry.message || entry.event || "")}">
-                    <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
-                    <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
-                    <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
-                    <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
-                    <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
-                    <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
-                  </button>
-                  ${expanded ? `
-                    <div class="hik-debug-row-inline-details ${terminalMode ? "is-terminal" : ""}">
-                      <div class="hik-debug-row-inline-meta">
-                        <span><b>Source:</b> ${this.escapeHtml(entry.source || "frontend")}</span>
-                        <span><b>Trace:</b> ${this.escapeHtml(String(entry?.details?.trace_id || "-"))}</span>
-                        <span><b>Seen:</b> ${this.escapeHtml(String(entry.count || 1))}</span>
-                      </div>
-                      <div class="hik-debug-row-inline-message">${this.escapeHtml(entry.message || "")}</div>
-                      ${detailsText ? `<pre class="hik-debug-row-inline-pre">${detailsText}</pre>` : ""}
-                    </div>
-                  ` : ""}
-                </div>`;
+                <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" title="${this.escapeHtml(entry.message || entry.event || "")}">
+                  <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
+                  <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
+                  <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
+                  <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
+                  <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
+                  <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
+                </button>`;
             }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
           </div>
         </div>
@@ -1934,6 +1799,298 @@ _toggleDebugFilter(kind, value) {
     };
   }
 
+
+  _layoutV4StorageKey() {
+    const cam = this.selectedCamera?.channel || "default";
+    return `ha_hikvision_bridge_card.layout_v4.${cam}`;
+  }
+
+  _loadLayoutV4() {
+    try {
+      const raw = window?.localStorage?.getItem?.(this._layoutV4StorageKey());
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  _saveLayoutV4() {
+    try {
+      if (!this._layoutV4?.panels) return;
+      window?.localStorage?.setItem?.(this._layoutV4StorageKey(), JSON.stringify({ panels: this._layoutV4.panels }));
+    } catch (err) {}
+  }
+
+  _initLayoutV4() {
+    if (this._layoutV4) return;
+    const saved = this._loadLayoutV4() || {};
+    this._layoutV4 = {
+      activePanel: null,
+      dragMode: null,
+      startX: 0,
+      startY: 0,
+      snapPreview: "",
+      panels: saved.panels || {
+        video: { x: 0, y: 0, w: 720, h: 520 },
+        controls: { x: 0, y: 540, w: 720, h: 360 },
+        info: { x: 740, y: 0, w: 420, h: 900 },
+      },
+    };
+  }
+
+  _ensureLayoutV4Styles() {
+    if (this.querySelector("#hik-layout-v4-style")) return;
+    const style = document.createElement("style");
+    style.id = "hik-layout-v4-style";
+    style.textContent = `
+      .hik-wrap.hik-layout-v4-root { position: relative; min-height: 940px; }
+      .hik-layout-v4-panel { position: absolute !important; box-sizing: border-box; transition: left 140ms ease, top 140ms ease, width 140ms ease, height 140ms ease, box-shadow 140ms ease, border-color 140ms ease; z-index: 2; }
+      .hik-layout-v4-panel.hik-layout-v4-dragging,
+      .hik-layout-v4-panel.hik-layout-v4-resizing { transition: none !important; z-index: 12; }
+      .hik-layout-v4-panel > .hik-layout-v4-head {
+        display:flex; align-items:center; justify-content:space-between; gap:8px;
+        min-height:36px; padding:8px 10px; cursor:grab; user-select:none;
+        border-bottom:1px solid rgba(255,255,255,0.08);
+        background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+        border-top-left-radius: inherit; border-top-right-radius: inherit;
+      }
+      .hik-layout-v4-panel > .hik-layout-v4-head:active { cursor:grabbing; }
+      .hik-layout-v4-head-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; letter-spacing:0.02em; min-width:0; }
+      .hik-layout-v4-head-title ha-icon { --mdc-icon-size: 18px; opacity:0.92; }
+      .hik-layout-v4-head-actions { display:inline-flex; align-items:center; gap:6px; }
+      .hik-layout-v4-head-btn { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:0; border-radius:9px; background:rgba(255,255,255,0.08); color:inherit; cursor:pointer; }
+      .hik-layout-v4-head-btn:hover { background:rgba(255,255,255,0.14); }
+      .hik-layout-v4-head-btn ha-icon { --mdc-icon-size: 16px; }
+      .hik-layout-v4-panel[data-layout-panel="video"] .hik-layout-v4-content { padding:0; height:calc(100% - 36px); overflow:hidden; }
+      .hik-layout-v4-panel:not([data-layout-panel="video"]) .hik-layout-v4-content { height:calc(100% - 36px); overflow:auto; }
+      .hik-layout-v4-resize {
+        position:absolute; right:8px; bottom:8px; width:18px; height:18px; border:0; border-radius:6px;
+        cursor:nwse-resize; background:
+        linear-gradient(135deg, transparent 0 35%, rgba(255,255,255,0.18) 35% 50%, transparent 50% 65%, rgba(255,255,255,0.34) 65% 80%, transparent 80% 100%),
+        rgba(255,255,255,0.07);
+        z-index:4;
+      }
+      .hik-layout-v4-snap {
+        position:absolute; pointer-events:none; z-index:11; border-radius:18px;
+        border:2px dashed rgba(90,170,255,0.85);
+        background:linear-gradient(180deg, rgba(90,170,255,0.16), rgba(90,170,255,0.08));
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px rgba(90,170,255,0.24);
+        display:none;
+      }
+      .hik-layout-v4-snap.is-visible { display:block; }
+    `;
+    this.querySelector("ha-card")?.prepend(style);
+  }
+
+  _getLayoutV4Root() {
+    return this.querySelector(".hik-wrap");
+  }
+
+  _getLayoutV4PanelMap() {
+    const gridPanels = Array.from(this.querySelectorAll(".hik-grid > .hik-panel"));
+    const video = gridPanels[0] || null;
+    const controls = gridPanels[1] || null;
+    const info = this.querySelector(".hik-info-grid") || null;
+    return { video, controls, info };
+  }
+
+  _layoutV4Meta(panelId = "") {
+    const id = String(panelId || "");
+    return {
+      title: { video: "Live View", controls: "Controls", info: "Info" }[id] || "Panel",
+      icon: { video: "mdi:cctv", controls: "mdi:gamepad-round-up", info: "mdi:information-outline" }[id] || "mdi:view-dashboard-outline",
+    };
+  }
+
+  _ensureLayoutV4SnapOverlay() {
+    const root = this._getLayoutV4Root();
+    if (!root) return null;
+    let overlay = root.querySelector(".hik-layout-v4-snap");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "hik-layout-v4-snap";
+      root.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  _updateLayoutV4SnapOverlay(zone = "") {
+    const overlay = this._ensureLayoutV4SnapOverlay();
+    const root = this._getLayoutV4Root();
+    if (!overlay || !root) return;
+    const rect = root.getBoundingClientRect();
+    overlay.className = "hik-layout-v4-snap";
+    if (!zone) return;
+    overlay.classList.add("is-visible");
+    if (zone === "left") {
+      overlay.style.left = "0px"; overlay.style.top = "0px"; overlay.style.width = `${Math.max(120, Math.round(rect.width / 2) - 5)}px`; overlay.style.height = `${Math.round(rect.height)}px`;
+    } else if (zone === "right") {
+      overlay.style.left = `${Math.max(0, Math.round(rect.width / 2) + 5)}px`; overlay.style.top = "0px"; overlay.style.width = `${Math.max(120, Math.round(rect.width / 2) - 5)}px`; overlay.style.height = `${Math.round(rect.height)}px`;
+    } else if (zone === "top") {
+      overlay.style.left = "0px"; overlay.style.top = "0px"; overlay.style.width = `${Math.round(rect.width)}px`; overlay.style.height = `${Math.max(120, Math.round(rect.height * 0.55) - 5)}px`;
+    }
+  }
+
+  _getLayoutV4SnapZone(clientX, clientY) {
+    const root = this._getLayoutV4Root();
+    if (!root) return "";
+    const rect = root.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const edge = 88;
+    if (x < edge) return "left";
+    if (x > rect.width - edge) return "right";
+    if (y < edge) return "top";
+    return "";
+  }
+
+  _applyLayoutV4Snap(panelId, zone) {
+    const root = this._getLayoutV4Root();
+    const panel = this._layoutV4?.panels?.[panelId];
+    if (!root || !panel || !zone) return;
+    const rect = root.getBoundingClientRect();
+    if (zone === "left") Object.assign(panel, { x: 0, y: 0, w: Math.round(rect.width / 2) - 8, h: Math.round(rect.height) - 8 });
+    else if (zone === "right") Object.assign(panel, { x: Math.round(rect.width / 2) + 8, y: 0, w: Math.round(rect.width / 2) - 8, h: Math.round(rect.height) - 8 });
+    else if (zone === "top") Object.assign(panel, { x: 0, y: 0, w: Math.round(rect.width) - 8, h: Math.max(360, Math.round(rect.height * 0.55)) });
+    this._layoutV4.snapPreview = "";
+    this._updateLayoutV4SnapOverlay("");
+    this._saveLayoutV4();
+  }
+
+  _attachLayoutV4Chrome() {
+    const map = this._getLayoutV4PanelMap();
+    Object.entries(map).forEach(([id, el]) => {
+      if (!el) return;
+      el.dataset.layoutPanel = id;
+      el.classList.add("hik-layout-v4-panel");
+      let head = el.querySelector(":scope > .hik-layout-v4-head");
+      let content = el.querySelector(":scope > .hik-layout-v4-content");
+      if (!head) {
+        const meta = this._layoutV4Meta(id);
+        head = document.createElement("div");
+        head.className = "hik-layout-v4-head";
+        head.dataset.layoutDrag = id;
+        head.innerHTML = `
+          <div class="hik-layout-v4-head-title"><ha-icon icon="${meta.icon}"></ha-icon><span>${meta.title}</span></div>
+          <div class="hik-layout-v4-head-actions">
+            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:left" title="Dock left" aria-label="Dock left"><ha-icon icon="mdi:dock-left"></ha-icon></button>
+            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:right" title="Dock right" aria-label="Dock right"><ha-icon icon="mdi:dock-right"></ha-icon></button>
+            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:top" title="Maximize" aria-label="Maximize"><ha-icon icon="mdi:window-maximize"></ha-icon></button>
+          </div>`;
+        el.prepend(head);
+      }
+      if (!content) {
+        content = document.createElement("div");
+        content.className = "hik-layout-v4-content";
+        const children = Array.from(el.childNodes).filter((node) => !(node.classList && (node.classList.contains("hik-layout-v4-head") || node.classList.contains("hik-layout-v4-resize"))));
+        children.forEach((node) => content.appendChild(node));
+        const resize = el.querySelector(":scope > .hik-layout-v4-resize");
+        if (resize) el.insertBefore(content, resize); else el.appendChild(content);
+      }
+      if (!el.querySelector(":scope > .hik-layout-v4-resize")) {
+        const resize = document.createElement("button");
+        resize.type = "button";
+        resize.className = "hik-layout-v4-resize";
+        resize.dataset.layoutResize = id;
+        resize.title = "Resize panel";
+        resize.setAttribute("aria-label", "Resize panel");
+        el.appendChild(resize);
+      }
+    });
+  }
+
+  _applyLayoutV4() {
+    this._initLayoutV4();
+    const root = this._getLayoutV4Root();
+    if (!root) return;
+    root.classList.add("hik-layout-v4-root");
+    const map = this._getLayoutV4PanelMap();
+    let maxBottom = 0;
+    Object.entries(map).forEach(([id, el]) => {
+      if (!el) return;
+      const p = this._layoutV4.panels[id];
+      if (!p) return;
+      el.style.left = `${Math.round(p.x)}px`;
+      el.style.top = `${Math.round(p.y)}px`;
+      el.style.width = `${Math.max(260, Math.round(p.w))}px`;
+      el.style.height = `${Math.max(id === "video" ? 260 : 220, Math.round(p.h))}px`;
+      maxBottom = Math.max(maxBottom, Math.round(p.y + p.h));
+    });
+    root.style.minHeight = `${Math.max(940, maxBottom + 40)}px`;
+    this._updateLayoutV4SnapOverlay(this._layoutV4.snapPreview || "");
+  }
+
+  _bindLayoutV4() {
+    if (this._layoutV4Bound) return;
+    this._layoutV4Bound = true;
+
+    this.addEventListener("pointerdown", (ev) => {
+      const snapBtn = ev.target.closest("[data-layout-snap]");
+      if (snapBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const [panelId, zone] = String(snapBtn.dataset.layoutSnap || "").split(":");
+        this._applyLayoutV4Snap(panelId, zone);
+        this._applyLayoutV4();
+        return;
+      }
+
+      const resize = ev.target.closest("[data-layout-resize]");
+      const drag = ev.target.closest("[data-layout-drag]");
+      if (!resize && !drag) return;
+
+      const panelId = resize?.dataset.layoutResize || drag?.dataset.layoutDrag || "";
+      if (!panelId || !this._layoutV4?.panels?.[panelId]) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._layoutV4.activePanel = panelId;
+      this._layoutV4.dragMode = resize ? "resize" : "drag";
+      this._layoutV4.startX = ev.clientX;
+      this._layoutV4.startY = ev.clientY;
+      const map = this._getLayoutV4PanelMap();
+      map[panelId]?.classList.add(this._layoutV4.dragMode === "resize" ? "hik-layout-v4-resizing" : "hik-layout-v4-dragging");
+      try { ev.target.setPointerCapture(ev.pointerId); } catch (err) {}
+    }, true);
+
+    window.addEventListener("pointermove", (ev) => {
+      const state = this._layoutV4;
+      if (!state?.activePanel) return;
+      const panel = state.panels[state.activePanel];
+      if (!panel) return;
+
+      const dx = ev.clientX - state.startX;
+      const dy = ev.clientY - state.startY;
+
+      if (state.dragMode === "drag") {
+        panel.x += dx;
+        panel.y += dy;
+        state.snapPreview = this._getLayoutV4SnapZone(ev.clientX, ev.clientY);
+      } else if (state.dragMode === "resize") {
+        panel.w = Math.max(260, panel.w + dx);
+        panel.h = Math.max(state.activePanel === "video" ? 260 : 220, panel.h + dy);
+      }
+
+      state.startX = ev.clientX;
+      state.startY = ev.clientY;
+      this._applyLayoutV4();
+    }, true);
+
+    window.addEventListener("pointerup", () => {
+      const state = this._layoutV4;
+      if (!state?.activePanel) return;
+      const panelId = state.activePanel;
+      if (state.snapPreview) this._applyLayoutV4Snap(panelId, state.snapPreview);
+      const map = this._getLayoutV4PanelMap();
+      Object.values(map).forEach((el) => el?.classList.remove("hik-layout-v4-dragging", "hik-layout-v4-resizing"));
+      state.activePanel = null;
+      state.dragMode = null;
+      state.snapPreview = "";
+      this._saveLayoutV4();
+      this._applyLayoutV4();
+    }, true);
+  }
+
   getCardSize() {
     return this._controlsVisible ? 11 : 9;
   }
@@ -1953,17 +2110,6 @@ _toggleDebugFilter(kind, value) {
       show_controls: true,
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
-      ui: {
-        show_overlay_controls: true,
-        show_navigation_controls: true,
-        show_speaker_controls: true,
-        show_talk_button: true,
-        show_fullscreen_button: true,
-        show_stream_mode_button: true,
-        show_storage_button: true,
-        show_debug_button: true,
-        show_playback_button: true,
-      },
     };
   }
 
@@ -4288,7 +4434,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const accent = this.normalizeColor(this.config.accent_color);
     const panelTint = Math.max(0, Math.min(24, Number(this.config.panel_tint || 8)));
     const controlsMode = this.config.controls_mode || "always";
-    const ui = this.config.ui || this._normalizeUiConfig(this.config);
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
@@ -4377,10 +4522,10 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       `);
     }
 
-    if ((this.config.show_stream_mode_info === false || ui.show_stream_mode_button !== true) && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
-    if ((!storagePanelSupported || ui.show_storage_button !== true) && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
+    if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
-    if (this.config.debug?.enabled !== true || ui.show_debug_button !== true) this._debugOverlayOpen = false;
+    if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
       <div class="hik-panel hik-info-card hik-video-accessory-panel">
@@ -4571,7 +4716,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; } .hik-video-accessory-wrap { margin-top:14px; } .hik-video-accessory-wrap > .hik-panel { margin:0; } .hik-video-accessory-panel { width:100%; }
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
-          .hik-video-block { --hik-ov-btn:42px; --hik-ov-radius:14px; --hik-ov-gap:8px; --hik-ov-icon:18px; --hik-ov-chip-height:42px; --hik-ov-chip-px:12px; --hik-ov-chip-gap:10px; --hik-ov-audio-icon:24px; --hik-ov-font:12px; --hik-ov-meta-size:11px; --hik-ov-top-offset:14px; --hik-ov-side-offset:14px; --hik-ov-bottom-offset:14px; --hik-ov-slider-width:86px; --hik-ov-rail-min-width:160px; --hik-ov-max-right:min(72%, 900px); --hik-ov-zoom-width:58px; --hik-ov-refocus-height:38px; position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); } .hik-video-block.hik-overlay-size-medium { --hik-ov-btn:36px; --hik-ov-radius:12px; --hik-ov-gap:6px; --hik-ov-icon:16px; --hik-ov-chip-height:36px; --hik-ov-chip-px:10px; --hik-ov-chip-gap:8px; --hik-ov-audio-icon:20px; --hik-ov-font:11px; --hik-ov-meta-size:10px; --hik-ov-top-offset:10px; --hik-ov-side-offset:10px; --hik-ov-bottom-offset:10px; --hik-ov-slider-width:68px; --hik-ov-rail-min-width:136px; --hik-ov-max-right:min(78%, 640px); --hik-ov-zoom-width:50px; --hik-ov-refocus-height:34px; } .hik-video-block.hik-overlay-size-compact { --hik-ov-btn:30px; --hik-ov-radius:10px; --hik-ov-gap:5px; --hik-ov-icon:14px; --hik-ov-chip-height:30px; --hik-ov-chip-px:8px; --hik-ov-chip-gap:6px; --hik-ov-audio-icon:16px; --hik-ov-font:10px; --hik-ov-meta-size:10px; --hik-ov-top-offset:8px; --hik-ov-side-offset:8px; --hik-ov-bottom-offset:8px; --hik-ov-slider-width:48px; --hik-ov-rail-min-width:112px; --hik-ov-max-right:min(82%, 460px); --hik-ov-zoom-width:42px; --hik-ov-refocus-height:30px; }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
+          .hik-video-block { --hik-ov-btn: clamp(34px, 4.2vw, 56px); --hik-ov-radius: clamp(12px, 1.2vw, 18px); --hik-ov-gap: clamp(6px, 0.8vw, 10px); --hik-ov-icon: clamp(14px, 1.7vw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-ptz-overlay { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transform:scale(0.985); transition:opacity 180ms ease, transform 180ms ease; }
@@ -4584,7 +4729,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
           .hik-video-ptz-chip.subtle { opacity:0.9; }
           .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
-          .hik-video-ptz-pad { position:absolute; left:var(--hik-ov-side-offset); bottom:var(--hik-ov-bottom-offset); display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
+          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
           .hik-video-ptz-btn { position:relative; min-height:var(--hik-ov-btn); min-width:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
           .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
           .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
@@ -4593,7 +4738,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-btn.center { overflow:hidden; background:rgba(18,24,32,0.46); }
           .hik-video-ptz-center-core { position:absolute; inset:10px; border-radius:999px; background:radial-gradient(circle at 50% 45%, rgba(255,255,255,0.18), rgba(255,255,255,0.02) 65%); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08); }
           .hik-video-ptz-btn.center ha-icon { position:relative; color:var(--hik-accent); --mdc-icon-size:20px; }
-          .hik-video-zoom-rail { position:absolute; right:var(--hik-ov-side-offset); top:50%; transform:translateY(-50%); width:var(--hik-ov-zoom-width); padding:6px; border-radius:calc(var(--hik-ov-radius) + 4px); display:grid; gap:var(--hik-ov-gap); place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-zoom-rail { position:absolute; right:16px; top:50%; transform:translateY(-50%); width:clamp(44px, 5vw, 58px); padding:clamp(6px, 0.8vw, 10px) clamp(6px, 0.7vw, 8px); border-radius:clamp(14px, 1.4vw, 20px); display:grid; gap:var(--hik-ov-gap); place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-zoom-btn { width:clamp(32px, 3.8vw, 42px); height:clamp(32px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-zoom-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(255,255,255,0.12); box-shadow:0 8px 18px rgba(0,0,0,0.24); }
           .hik-video-zoom-btn:active:not(:disabled) { transform:scale(0.94); }
@@ -4601,12 +4746,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-zoom-btn ha-icon { --mdc-icon-size:clamp(14px, 1.5vw, 18px); color:var(--hik-accent); }
           .hik-video-zoom-track { width:6px; height:clamp(60px, 10vw, 88px); border-radius:999px; position:relative; background:rgba(255,255,255,0.10); overflow:hidden; }
           .hik-video-zoom-track span { position:absolute; left:0; right:0; top:18%; bottom:18%; border-radius:999px; background:linear-gradient(180deg, color-mix(in srgb, var(--hik-accent) 82%, #fff 8%), rgba(255,255,255,0.10)); opacity:0.9; }
-          .hik-video-refocus-btn { position:absolute; left:var(--hik-ov-side-offset); bottom:calc((var(--hik-ov-btn) * 3) + (var(--hik-ov-gap) * 3) + var(--hik-ov-bottom-offset) + 2px); min-height:var(--hik-ov-refocus-height); padding:0 max(8px, calc(var(--hik-ov-chip-px) - 2px)); border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-refocus-btn { position:absolute; left:16px; bottom:calc((var(--hik-ov-btn) * 3) + (var(--hik-ov-gap) * 3) + 18px); min-height:clamp(32px, 3.4vw, 38px); padding:0 clamp(10px, 1vw, 14px); border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-refocus-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-refocus-btn:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
-          .hik-video-media-overlay { position:absolute; inset:var(--hik-ov-top-offset) var(--hik-ov-side-offset) var(--hik-ov-bottom-offset) var(--hik-ov-side-offset); z-index:4; pointer-events:none; }
+          .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
           .hik-grid-view { position:absolute; inset:0; display:grid; grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); gap:10px; padding:10px; background:rgba(0,0,0,0.18); }
           .hik-grid-view.promoted { grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); }
           .hik-grid-primary { min-height:0; position:relative; }
@@ -4632,27 +4777,27 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-tile-overlay { position:absolute; inset:8px 8px auto 8px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:1; }
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
-          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 4px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:var(--hik-ov-max-right); z-index:2; }
+          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
           .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
-          .hik-video-media-bottom { position:absolute; left:50%; bottom:0; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; max-width:min(96%, 520px); }
-           .hik-video-media-btn { min-width:var(--hik-ov-btn); height:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
+          .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-media-btn:active:not(:disabled) { transform:scale(0.95); }
           .hik-video-media-btn.live { box-shadow:0 0 0 1px rgba(255,80,80,0.45), 0 12px 26px rgba(0,0,0,0.28); background:rgba(80,16,16,0.46); }
-          .hik-video-media-btn ha-icon { --mdc-icon-size:var(--hik-ov-icon); color:var(--hik-accent); }
-          .hik-video-audio-chip { min-height:var(--hik-ov-chip-height); padding:0 var(--hik-ov-chip-px); border:none; border-radius:var(--hik-ov-radius); display:inline-flex; align-items:center; gap:var(--hik-ov-chip-gap); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
+          .hik-video-media-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
+          .hik-video-audio-chip { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.9vw, 12px) 0 clamp(8px, 0.8vw, 10px); border:none; border-radius:clamp(10px, 1vw, 14px); display:inline-flex; align-items:center; gap:clamp(6px, 0.8vw, 10px); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
           .hik-video-audio-chip:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-audio-chip:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-audio-chip:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
           .hik-video-audio-chip.is-live { background:rgba(16,32,24,0.52); border-color:rgba(92, 214, 140, 0.34); box-shadow:0 0 0 1px rgba(92,214,140,0.16), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-audio-chip-mic.is-live { background:rgba(52,20,24,0.56); border-color:rgba(255,110,110,0.34); box-shadow:0 0 0 1px rgba(255,110,110,0.16), 0 12px 26px rgba(0,0,0,0.28); }
-          .hik-video-audio-icon { width:var(--hik-ov-audio-icon); height:var(--hik-ov-audio-icon); display:grid; place-items:center; flex:0 0 auto; }
-          .hik-video-audio-icon ha-icon { --mdc-icon-size:var(--hik-ov-icon); color:var(--hik-accent); }
-          .hik-video-audio-meta { display:grid; gap:1px; min-width:0; text-align:left; font-size:var(--hik-ov-font); }
-          .hik-video-audio-label { font-size:var(--hik-ov-meta-size); text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; line-height:1; }
-          .hik-video-audio-state { font-size:var(--hik-ov-font); font-weight:700; line-height:1.15; white-space:nowrap; }
-          .hik-video-audio-waves { width:calc(var(--hik-ov-audio-icon) - 2px); height:calc(var(--hik-ov-audio-icon) - 6px); display:flex; align-items:flex-end; gap:2px; justify-content:center; }
+          .hik-video-audio-icon { width:24px; height:24px; display:grid; place-items:center; }
+          .hik-video-audio-icon ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
+          .hik-video-audio-meta { display:grid; gap:1px; min-width:0; text-align:left; }
+          .hik-video-audio-label { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; line-height:1; }
+          .hik-video-audio-state { font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
+          .hik-video-audio-waves { width:22px; height:18px; display:flex; align-items:flex-end; gap:2px; justify-content:center; }
           .hik-video-audio-waves i { width:4px; border-radius:999px; height:5px; background:rgba(255,255,255,0.34); transform-origin:center bottom; transition:background 120ms ease; }
           .hik-video-audio-chip.is-live .hik-video-audio-waves i:nth-child(1) { animation:hikAudioWave 0.9s ease-in-out infinite; }
           .hik-video-audio-chip.is-live .hik-video-audio-waves i:nth-child(2) { animation:hikAudioWave 0.9s ease-in-out 0.12s infinite; }
@@ -4665,16 +4810,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-mini-select { min-height:clamp(34px, 3.8vw, 42px); padding:clamp(4px, 0.6vw, 6px) clamp(8px, 0.8vw, 10px); border-radius:clamp(10px, 1vw, 14px); display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-mini-select.wide { min-width:min(240px, 56vw); }
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
           .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
-          .hik-video-volume-rail { min-height:var(--hik-ov-chip-height); padding:0 var(--hik-ov-chip-px); border-radius:var(--hik-ov-radius); display:flex; align-items:center; gap:6px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); font-size:var(--hik-ov-font); }          .hik-video-volume-rail.compact { min-width:var(--hik-ov-rail-min-width); padding-right:var(--hik-ov-chip-px); align-self:flex-start; }          .hik-video-volume-rail ha-icon { --mdc-icon-size:var(--hik-ov-icon); }          .hik-video-volume-rail input { width:var(--hik-ov-slider-width); min-width:0; }          .hik-overlay-slider-value { font-size:var(--hik-ov-meta-size); font-weight:700; opacity:0.84; min-width:32px; text-align:right; }                    .hik-video-block.hik-overlay-size-compact .hik-video-audio-state, .hik-video-block.hik-overlay-size-compact .hik-overlay-slider-value { display:none; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-audio-waves { display:none; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-audio-chip { max-width:144px; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-audio-meta { overflow:hidden; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-audio-label { letter-spacing:0.04em; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-volume-rail.compact { min-width:auto; }
-          .hik-video-block.hik-overlay-size-compact .hik-video-media-topright { max-width:min(88%, 400px); }
-          .hik-video-block.hik-overlay-size-compact .hik-video-media-bottom .hik-video-mini-select span { display:none; }
-          .hik-video-block.hik-overlay-size-medium .hik-video-media-topright { max-width:min(80%, 620px); }
-.hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
+          .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
           .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; pointer-events:none; }
           .hik-debug-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.24)); pointer-events:none; }
           .hik-debug-terminal-window { position:absolute; top:0; left:0; width:min(calc(100% - 12px), var(--hik-debug-overlay-width, 960px)); height:min(calc(100% - 12px), var(--hik-debug-overlay-height, 620px)); transform:translate(var(--hik-debug-overlay-x, 24px), var(--hik-debug-overlay-y, 24px)); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); min-width:520px; min-height:320px; max-width:calc(100% - 12px); max-height:calc(100% - 12px); will-change:transform, width, height; }
@@ -4696,7 +4832,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-toolbar.is-terminal { background:rgba(12,18,24,0.88); border-bottom:1px solid rgba(120,255,178,0.1); }
           .hik-debug-list-shell.is-terminal { min-height:260px; max-height:42vh; }
           .hik-debug-detail-pane.is-terminal { background:rgba(9,13,18,0.86); border-color:rgba(120,255,178,0.1); }
-                    .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
+          .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
+          .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
+          .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
           .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
           .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.24); background:rgba(245,166,35,0.08); color:var(--primary-text-color); backdrop-filter: blur(10px); }
           .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
@@ -4768,16 +4906,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.06); }
           .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:12px 14px; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.02)); position:sticky; top:0; z-index:1; backdrop-filter:blur(8px); }
           .hik-debug-feed { max-height:460px; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
-          .hik-debug-feed-entry { display:grid; gap:0; border-bottom:1px solid rgba(255,255,255,0.05); }
-          .hik-debug-feed-entry:last-child { border-bottom:0; }
-          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
+          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
           .hik-debug-row:hover { background:rgba(255,255,255,0.05); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
           .hik-debug-row.selected { background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.035)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hik-accent) 72%, #ffffff 8%), 0 0 0 1px rgba(255,255,255,0.04); }
-          .hik-debug-row-inline-details { display:grid; gap:10px; padding:12px 14px 14px; background:rgba(9,14,20,0.92); border-top:1px solid rgba(120,255,178,0.08); }
-          .hik-debug-row-inline-details.is-terminal { background:rgba(6,10,16,0.95); }
-          .hik-debug-row-inline-meta { display:flex; flex-wrap:wrap; gap:14px; color:rgba(214,231,224,0.78); font-size:12px; }
-          .hik-debug-row-inline-message { color:rgba(238,246,242,0.94); font-size:13px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
-          .hik-debug-row-inline-pre { margin:0; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.08); background:rgba(3,6,10,0.92); color:#dff6eb; font-size:12px; line-height:1.4; overflow:auto; }
           .hik-debug-row.is-error { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--error-color) 60%, transparent); background:linear-gradient(180deg, rgba(255,70,70,0.05), rgba(255,255,255,0.01)); }
           .hik-debug-row.is-warn { box-shadow: inset 2px 0 0 rgba(245, 166, 35, 0.7); background:linear-gradient(180deg, rgba(245,166,35,0.05), rgba(255,255,255,0.01)); }
           .hik-debug-row.is-info { box-shadow: inset 2px 0 0 rgba(90, 169, 255, 0.55); }
@@ -4903,7 +5034,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block hik-overlay-size-${this._overlaySizeMode || "large"} ${playbackActive ? "is-playback" : "is-live"}" data-overlay-size="${this._overlaySizeMode || "large"}">
+                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
@@ -4959,7 +5090,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
                     ${this._renderVersionOverlay(versionInfo)}
-                    ${ui.show_overlay_controls !== false && ui.show_navigation_controls === true ? `
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -4971,9 +5101,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         <ha-icon icon="mdi:chevron-right"></ha-icon>
                       </button>
                     </div>
-                    ` : ``}
-                    ${ui.show_overlay_controls !== false ? `<div class="hik-video-media-topright">` : ``}
-                      ${(ui.show_overlay_controls !== false && !this._gridMode && !playbackActive && !this._playbackOverlayVisible && ui.show_speaker_controls === true) ? `
+                    <div class="hik-video-media-topright">
+                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
                             <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
@@ -4984,7 +5113,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </span>
                           <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
                         </button>
-                        ${ui.show_talk_button === true && isWebRtc ? `
+                        ${isWebRtc ? `
                           <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
                             <span class="hik-video-audio-icon">
                               <ha-icon icon="mdi:microphone"></ha-icon>
@@ -5006,40 +5135,38 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <input id="hik-audio-boost-overlay" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
                           <span class="hik-overlay-slider-value hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</span>
                         </label>
-                        ${ui.show_talk_button === true && isWebRtc ? `
+                        ${isWebRtc ? `
                           <label class="hik-video-volume-rail compact">
                             <ha-icon icon="mdi:microphone-plus"></ha-icon>
                             <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
                             <span class="hik-overlay-slider-value hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</span>
                           </label>
                         ` : ""}
-                        ${ui.show_fullscreen_button === true ? `
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
-                        ` : ""}
                       ` : ""}
-                      ${ui.show_overlay_controls !== false && ui.show_stream_mode_button === true && this.config.show_stream_mode_info !== false ? `
+                      ${this.config.show_stream_mode_info !== false ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}" id="hik-overlay-stream-mode-toggle" title="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}" aria-label="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}">
                           <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
                         </button>
                       ` : ""}
-                      ${ui.show_overlay_controls !== false && ui.show_storage_button === true && storagePanelSupported ? `
+                      ${storagePanelSupported ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
                           <ha-icon icon="mdi:harddisk"></ha-icon>
                         </button>
                       ` : ""}
-                      ${ui.show_overlay_controls !== false && ui.show_debug_button === true && this.config.debug?.enabled === true ? `
+                      ${this.config.debug?.enabled === true ? `
                         <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
-                      ${ui.show_overlay_controls !== false && ui.show_playback_button === true && playbackPanelSupported ? `
+                      ${playbackPanelSupported ? `
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
                       ` : ""}
-                    ${ui.show_overlay_controls !== false ? `</div>` : ``}
+                    </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -5400,13 +5527,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       btn.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        const key = ev.currentTarget?.getAttribute("data-debug-select") || "";
-        const alreadySelected = this._debugSelectedKey === key;
-        this._debugSelectedKey = key;
-        this._debugExpandedKeys = {
-          ...(this._debugExpandedKeys || {}),
-          [key]: alreadySelected ? !(this._debugExpandedKeys?.[key] === true) : true,
-        };
+        this._debugSelectedKey = ev.currentTarget?.getAttribute("data-debug-select") || "";
         this.render();
       });
     });
@@ -5497,8 +5618,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         terminalBodyScrollTop: ev.currentTarget?.scrollTop || 0,
       };
     }, { passive: true });
+    window.requestAnimationFrame(() => {
+      this._ensureLayoutV4Styles();
+      this._attachLayoutV4Chrome();
+      this._bindLayoutV4();
+      this._applyLayoutV4();
+    });
     this._restoreDebugViewState?.();
-    this._setupOverlayResizeObserver();
   }
 }
 
@@ -5518,7 +5644,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
-    const ui = this.config.ui && typeof this.config.ui === "object" ? this.config.ui : {};
     this.innerHTML = `
       <div style="padding:16px;display:grid;gap:16px;">
         <div style="font-size:18px;font-weight:700;">HA Hikvision Bridge Card Editor</div>
@@ -5595,21 +5720,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
 
         <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
-          <div style="font-weight:600;">Video overlay controls</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            ${this.rowCheckbox("ui_show_overlay_controls", "Show overlay controls", ui.show_overlay_controls !== false)}
-            ${this.rowCheckbox("ui_show_navigation_controls", "Show previous / grid / next controls", ui.show_navigation_controls !== false)}
-            ${this.rowCheckbox("ui_show_speaker_controls", "Show speaker / volume controls", ui.show_speaker_controls !== false)}
-            ${this.rowCheckbox("ui_show_talk_button", "Show push-to-talk overlay", ui.show_talk_button !== false)}
-            ${this.rowCheckbox("ui_show_fullscreen_button", "Show fullscreen button", ui.show_fullscreen_button !== false)}
-            ${this.rowCheckbox("ui_show_stream_mode_button", "Show stream mode button", ui.show_stream_mode_button !== false)}
-            ${this.rowCheckbox("ui_show_storage_button", "Show storage button", ui.show_storage_button !== false)}
-            ${this.rowCheckbox("ui_show_debug_button", "Show debug button", ui.show_debug_button !== false)}
-            ${this.rowCheckbox("ui_show_playback_button", "Show playback button", ui.show_playback_button !== false)}
-          </div>
-        </div>
-
-        <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
           <div style="font-weight:600;">Virtual PTZ tracking</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
             <div><label>Max pan steps</label><br><input id="max_pan_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5}" style="width:100%;"></div>
@@ -5620,84 +5730,55 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "ui_show_overlay_controls", "ui_show_navigation_controls", "ui_show_speaker_controls", "ui_show_talk_button", "ui_show_fullscreen_button", "ui_show_stream_mode_button", "ui_show_storage_button", "ui_show_debug_button", "ui_show_playback_button", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
   }
 
   _valueChanged() {
-    const getEl = (selector) => this.querySelector(selector);
-    const getValue = (selector, fallback = "") => {
-      const el = getEl(selector);
-      return el ? el.value : fallback;
-    };
-    const getNumber = (selector, fallback = 0) => {
-      const value = Number(getValue(selector, fallback));
-      return Number.isFinite(value) ? value : fallback;
-    };
-    const getChecked = (selector, fallback = false) => {
-      const el = getEl(selector);
-      return el && typeof el === "boolean" ? el : fallback;
-    };
-
     const config = {
       ...this.config,
       type: "custom:ha-hikvision-bridge-card",
-      title: getValue("#title", this.config.title || ""),
-      speed: getNumber("#speed", Number(this.config.speed ?? 3)),
-      repeat_ms: getNumber("#repeat_ms", Number(this.config.repeat_ms ?? 250)),
-      ptz_duration: getNumber("#ptz_duration", Number(this.config.ptz_duration ?? 500)),
-      lens_step: getNumber("#lens_step", Number(this.config.lens_step ?? 1)),
-      lens_duration: getNumber("#lens_duration", Number(this.config.lens_duration ?? 250)),
-      refocus_step: getNumber("#refocus_step", Number(this.config.refocus_step ?? 1)),
-      video_mode: getValue("#video_mode", this.config.video_mode || "auto"),
-      controls_mode: getValue("#controls_mode", this.config.controls_mode || "overlay"),
-      accent_color: getValue("#accent_color", this.config.accent_color || "#29b6f6"),
-      panel_tint: getNumber("#panel_tint", Number(this.config.panel_tint ?? 60)),
-      speed_position: getValue("#speed_position", this.config.speed_position || "right"),
-      playback_presets: String(getValue("#playback_presets", (this.config.playback_presets || []).join(",")) || "")
-        .split(",")
-        .map((value) => Number(String(value).trim()))
-        .filter((value) => Number.isFinite(value) && value > 0),
-      auto_discover: getChecked("#auto_discover", this.config.auto_discover !== false),
-      show_title: getChecked("#show_title", this.config.show_title !== false),
-      show_camera_chips: getChecked("#show_camera_chips", this.config.show_camera_chips !== false),
-      show_status_pills: getChecked("#show_status_pills", this.config.show_status_pills !== false),
-      show_camera_info: getChecked("#show_camera_info", this.config.show_camera_info !== false),
-      show_stream_info: getChecked("#show_stream_info", this.config.show_stream_info !== false),
-      show_stream_mode_info: getChecked("#show_stream_mode_info", this.config.show_stream_mode_info !== false),
-      show_alarm_dashboard: getChecked("#show_alarm_dashboard", this.config.show_alarm_dashboard !== false),
-      show_controls: getChecked("#show_controls", this.config.show_controls !== false),
-      show_dvr_info: getChecked("#show_dvr_info", this.config.show_dvr_info !== false),
-      show_storage_info: getChecked("#show_storage_info", this.config.show_storage_info !== false),
-      show_position_info: getChecked("#show_position_info", this.config.show_position_info !== false),
-      lens_stop_safeguard: getChecked("#lens_stop_safeguard", this.config.lens_stop_safeguard !== false),
-      show_playback_panel: getChecked("#show_playback_panel", this.config.show_playback_panel !== false),
-      show_audio_controls: getChecked("#show_audio_controls", this.config.show_audio_controls !== false),
-      ui: {
-        ...(this.config.ui || {}),
-        show_overlay_controls: getChecked("#ui_show_overlay_controls", this.config.ui?.show_overlay_controls !== false),
-        show_navigation_controls: getChecked("#ui_show_navigation_controls", this.config.ui?.show_navigation_controls !== false),
-        show_speaker_controls: getChecked("#ui_show_speaker_controls", this.config.ui?.show_speaker_controls !== false),
-        show_talk_button: getChecked("#ui_show_talk_button", this.config.ui?.show_talk_button !== false),
-        show_fullscreen_button: getChecked("#ui_show_fullscreen_button", this.config.ui?.show_fullscreen_button !== false),
-        show_stream_mode_button: getChecked("#ui_show_stream_mode_button", this.config.ui?.show_stream_mode_button !== false),
-        show_storage_button: getChecked("#ui_show_storage_button", this.config.ui?.show_storage_button !== false),
-        show_debug_button: getChecked("#ui_show_debug_button", this.config.ui?.show_debug_button !== false),
-        show_playback_button: getChecked("#ui_show_playback_button", this.config.ui?.show_playback_button !== false),
-      },
+      title: this.querySelector("#title").value,
+      speed: Number(this.querySelector("#speed").value),
+      repeat_ms: Number(this.querySelector("#repeat_ms").value),
+      ptz_duration: Number(this.querySelector("#ptz_duration").value),
+      lens_step: Number(this.querySelector("#lens_step").value),
+      lens_duration: Number(this.querySelector("#lens_duration").value),
+      refocus_step: Number(this.querySelector("#refocus_step").value),
+      video_mode: this.querySelector("#video_mode").value,
+      controls_mode: this.querySelector("#controls_mode").value,
+      accent_color: this.querySelector("#accent_color").value,
+      panel_tint: Number(this.querySelector("#panel_tint").value),
+      speed_position: this.querySelector("#speed_position").value,
+      playback_presets: String(this.querySelector("#playback_presets").value || "").split(",").map((value) => Number(String(value).trim())).filter((value) => Number.isFinite(value) && value > 0),
+      auto_discover: this.querySelector("#auto_discover").checked,
+      show_title: this.querySelector("#show_title").checked,
+      show_camera_chips: this.querySelector("#show_camera_chips").checked,
+      show_status_pills: this.querySelector("#show_status_pills").checked,
+      show_camera_info: this.querySelector("#show_camera_info").checked,
+      show_stream_info: this.querySelector("#show_stream_info").checked,
+      show_stream_mode_info: this.querySelector("#show_stream_mode_info").checked,
+      show_alarm_dashboard: this.querySelector("#show_alarm_dashboard").checked,
+      show_controls: this.querySelector("#show_controls").checked,
+      show_dvr_info: this.querySelector("#show_dvr_info").checked,
+      show_storage_info: this.querySelector("#show_storage_info").checked,
+      show_position_info: this.querySelector("#show_position_info").checked,
+      lens_stop_safeguard: this.querySelector("#lens_stop_safeguard").checked,
+      show_playback_panel: this.querySelector("#show_playback_panel").checked,
+      show_audio_controls: this.querySelector("#show_audio_controls").checked,
       debug: {
         ...(this.config.debug || {}),
-        enabled: getChecked("#debug_enabled", this.config.debug?.enabled === true),
+        enabled: this.querySelector("#debug_enabled").checked,
       },
-      mute_during_talk: getChecked("#mute_during_talk", this.config.mute_during_talk !== false),
+      mute_during_talk: this.querySelector("#mute_during_talk").checked,
       ptz_steps: {
-        pan: getNumber("#max_pan_steps", Number(this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5)),
-        tilt: getNumber("#max_tilt_steps", Number(this.config.ptz_steps?.tilt ?? this.config.max_tilt_steps ?? 5)),
-        zoom: getNumber("#max_zoom_steps", Number(this.config.ptz_steps?.zoom ?? this.config.max_zoom_steps ?? 5)),
+        pan: Number(this.querySelector("#max_pan_steps").value),
+        tilt: Number(this.querySelector("#max_tilt_steps").value),
+        zoom: Number(this.querySelector("#max_zoom_steps").value),
       },
-      return_step_delay: getNumber("#return_step_delay", Number(this.config.return_step_delay ?? 150)),
+      return_step_delay: Number(this.querySelector("#return_step_delay").value),
     };
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
   }
