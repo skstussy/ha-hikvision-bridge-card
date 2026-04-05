@@ -204,6 +204,8 @@ _pushDebugEntry(entry) {
     this._gridFocusTransitionTimer = this._gridFocusTransitionTimer || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
+    this._overlaySizeMode = this._overlaySizeMode || "large";
+    this._overlayResizeObserver = this._overlayResizeObserver || null;
   }
 
   set hass(hass) {
@@ -211,6 +213,43 @@ _pushDebugEntry(entry) {
     if (this._videoCard) this._videoCard.hass = hass;
     this._syncDebugRuntime();
     this.render();
+  }
+
+  _getOverlaySizeMode(width = 0, height = 0) {
+    const w = Number(width) || 0;
+    const h = Number(height) || 0;
+    if (w <= 0 || h <= 0) return this._overlaySizeMode || "large";
+    if (w < 430 || h < 250) return "compact";
+    if (w < 760 || h < 420) return "medium";
+    return "large";
+  }
+
+  _applyOverlaySizeMode(mode = null) {
+    const block = this.querySelector(".hik-video-block");
+    if (!block) return;
+    const nextMode = mode || this._getOverlaySizeMode(block.clientWidth, block.clientHeight);
+    this._overlaySizeMode = nextMode;
+    block.classList.remove("hik-overlay-size-compact", "hik-overlay-size-medium", "hik-overlay-size-large");
+    block.classList.add(`hik-overlay-size-${nextMode}`);
+    block.dataset.overlaySize = nextMode;
+  }
+
+  _setupOverlayResizeObserver() {
+    const block = this.querySelector(".hik-video-block");
+    if (!block) return;
+    this._applyOverlaySizeMode();
+    if (typeof ResizeObserver !== "function") return;
+    if (this._overlayResizeObserver) {
+      try { this._overlayResizeObserver.disconnect(); } catch (err) {}
+    }
+    this._overlayResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries && entries[0];
+      if (!entry) return;
+      const box = entry.contentRect || {};
+      const nextMode = this._getOverlaySizeMode(box.width, box.height);
+      this._applyOverlaySizeMode(nextMode);
+    });
+    this._overlayResizeObserver.observe(block);
   }
 
 
@@ -229,6 +268,10 @@ _pushDebugEntry(entry) {
     this._teardownTalkAudioGraph();
     this._teardownAudioGraph();
     this._cleanupVideoCard();
+    if (this._overlayResizeObserver) {
+      try { this._overlayResizeObserver.disconnect(); } catch (err) {}
+    }
+    this._overlayResizeObserver = null;
   }
 
   stopRepeater() {
@@ -4525,7 +4568,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; } .hik-video-accessory-wrap { margin-top:14px; } .hik-video-accessory-wrap > .hik-panel { margin:0; } .hik-video-accessory-panel { width:100%; }
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
-          .hik-video-block { --hik-ov-btn: clamp(34px, 4.2vw, 56px); --hik-ov-radius: clamp(12px, 1.2vw, 18px); --hik-ov-gap: clamp(6px, 0.8vw, 10px); --hik-ov-icon: clamp(14px, 1.7vw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
+          .hik-video-block { --hik-ov-btn:42px; --hik-ov-radius:14px; --hik-ov-gap:8px; --hik-ov-icon:18px; --hik-ov-chip-height:42px; --hik-ov-chip-px:12px; --hik-ov-chip-gap:10px; --hik-ov-audio-icon:24px; --hik-ov-font:12px; --hik-ov-meta-size:11px; --hik-ov-top-offset:14px; --hik-ov-side-offset:14px; --hik-ov-bottom-offset:14px; --hik-ov-slider-width:86px; --hik-ov-rail-min-width:160px; --hik-ov-max-right:min(72%, 900px); --hik-ov-zoom-width:58px; --hik-ov-refocus-height:38px; position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); } .hik-video-block.hik-overlay-size-medium { --hik-ov-btn:36px; --hik-ov-radius:12px; --hik-ov-gap:6px; --hik-ov-icon:16px; --hik-ov-chip-height:36px; --hik-ov-chip-px:10px; --hik-ov-chip-gap:8px; --hik-ov-audio-icon:20px; --hik-ov-font:11px; --hik-ov-meta-size:10px; --hik-ov-top-offset:10px; --hik-ov-side-offset:10px; --hik-ov-bottom-offset:10px; --hik-ov-slider-width:68px; --hik-ov-rail-min-width:136px; --hik-ov-max-right:min(78%, 640px); --hik-ov-zoom-width:50px; --hik-ov-refocus-height:34px; } .hik-video-block.hik-overlay-size-compact { --hik-ov-btn:30px; --hik-ov-radius:10px; --hik-ov-gap:5px; --hik-ov-icon:14px; --hik-ov-chip-height:30px; --hik-ov-chip-px:8px; --hik-ov-chip-gap:6px; --hik-ov-audio-icon:16px; --hik-ov-font:10px; --hik-ov-meta-size:10px; --hik-ov-top-offset:8px; --hik-ov-side-offset:8px; --hik-ov-bottom-offset:8px; --hik-ov-slider-width:48px; --hik-ov-rail-min-width:112px; --hik-ov-max-right:min(82%, 460px); --hik-ov-zoom-width:42px; --hik-ov-refocus-height:30px; }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-ptz-overlay { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transform:scale(0.985); transition:opacity 180ms ease, transform 180ms ease; }
@@ -4538,7 +4581,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
           .hik-video-ptz-chip.subtle { opacity:0.9; }
           .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
-          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
+          .hik-video-ptz-pad { position:absolute; left:var(--hik-ov-side-offset); bottom:var(--hik-ov-bottom-offset); display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
           .hik-video-ptz-btn { position:relative; min-height:var(--hik-ov-btn); min-width:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
           .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
           .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
@@ -4547,7 +4590,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-btn.center { overflow:hidden; background:rgba(18,24,32,0.46); }
           .hik-video-ptz-center-core { position:absolute; inset:10px; border-radius:999px; background:radial-gradient(circle at 50% 45%, rgba(255,255,255,0.18), rgba(255,255,255,0.02) 65%); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08); }
           .hik-video-ptz-btn.center ha-icon { position:relative; color:var(--hik-accent); --mdc-icon-size:20px; }
-          .hik-video-zoom-rail { position:absolute; right:16px; top:50%; transform:translateY(-50%); width:clamp(44px, 5vw, 58px); padding:clamp(6px, 0.8vw, 10px) clamp(6px, 0.7vw, 8px); border-radius:clamp(14px, 1.4vw, 20px); display:grid; gap:var(--hik-ov-gap); place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-zoom-rail { position:absolute; right:var(--hik-ov-side-offset); top:50%; transform:translateY(-50%); width:var(--hik-ov-zoom-width); padding:6px; border-radius:calc(var(--hik-ov-radius) + 4px); display:grid; gap:var(--hik-ov-gap); place-items:center; pointer-events:auto; background:rgba(10,14,20,0.30); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-zoom-btn { width:clamp(32px, 3.8vw, 42px); height:clamp(32px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-zoom-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(255,255,255,0.12); box-shadow:0 8px 18px rgba(0,0,0,0.24); }
           .hik-video-zoom-btn:active:not(:disabled) { transform:scale(0.94); }
@@ -4555,12 +4598,12 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-zoom-btn ha-icon { --mdc-icon-size:clamp(14px, 1.5vw, 18px); color:var(--hik-accent); }
           .hik-video-zoom-track { width:6px; height:clamp(60px, 10vw, 88px); border-radius:999px; position:relative; background:rgba(255,255,255,0.10); overflow:hidden; }
           .hik-video-zoom-track span { position:absolute; left:0; right:0; top:18%; bottom:18%; border-radius:999px; background:linear-gradient(180deg, color-mix(in srgb, var(--hik-accent) 82%, #fff 8%), rgba(255,255,255,0.10)); opacity:0.9; }
-          .hik-video-refocus-btn { position:absolute; left:16px; bottom:calc((var(--hik-ov-btn) * 3) + (var(--hik-ov-gap) * 3) + 18px); min-height:clamp(32px, 3.4vw, 38px); padding:0 clamp(10px, 1vw, 14px); border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
+          .hik-video-refocus-btn { position:absolute; left:var(--hik-ov-side-offset); bottom:calc((var(--hik-ov-btn) * 3) + (var(--hik-ov-gap) * 3) + var(--hik-ov-bottom-offset) + 2px); min-height:var(--hik-ov-refocus-height); padding:0 max(8px, calc(var(--hik-ov-chip-px) - 2px)); border:none; border-radius:999px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--primary-text-color); background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); pointer-events:auto; transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }
           .hik-video-refocus-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-refocus-btn:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-refocus-btn:disabled { opacity:0.42; cursor:not-allowed; box-shadow:none; }
           .hik-video-refocus-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
-          .hik-video-media-overlay { position:absolute; inset:14px 14px 14px 14px; z-index:4; pointer-events:none; }
+          .hik-video-media-overlay { position:absolute; inset:var(--hik-ov-top-offset) var(--hik-ov-side-offset) var(--hik-ov-bottom-offset) var(--hik-ov-side-offset); z-index:4; pointer-events:none; }
           .hik-grid-view { position:absolute; inset:0; display:grid; grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); gap:10px; padding:10px; background:rgba(0,0,0,0.18); }
           .hik-grid-view.promoted { grid-template-rows:minmax(0, 1fr) minmax(116px, 24%); }
           .hik-grid-primary { min-height:0; position:relative; }
@@ -4586,27 +4629,27 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-tile-overlay { position:absolute; inset:8px 8px auto 8px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:1; }
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
-          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
+          .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 4px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:var(--hik-ov-max-right); z-index:2; }
           .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
           .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
-          .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
-          .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-media-bottom { position:absolute; left:50%; bottom:0; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; max-width:min(96%, 520px); }
+           .hik-video-media-btn { min-width:var(--hik-ov-btn); height:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-media-btn:active:not(:disabled) { transform:scale(0.95); }
           .hik-video-media-btn.live { box-shadow:0 0 0 1px rgba(255,80,80,0.45), 0 12px 26px rgba(0,0,0,0.28); background:rgba(80,16,16,0.46); }
-          .hik-video-media-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
-          .hik-video-audio-chip { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.9vw, 12px) 0 clamp(8px, 0.8vw, 10px); border:none; border-radius:clamp(10px, 1vw, 14px); display:inline-flex; align-items:center; gap:clamp(6px, 0.8vw, 10px); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
+          .hik-video-media-btn ha-icon { --mdc-icon-size:var(--hik-ov-icon); color:var(--hik-accent); }
+          .hik-video-audio-chip { min-height:var(--hik-ov-chip-height); padding:0 var(--hik-ov-chip-px); border:none; border-radius:var(--hik-ov-radius); display:inline-flex; align-items:center; gap:var(--hik-ov-chip-gap); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
           .hik-video-audio-chip:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-audio-chip:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-audio-chip:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
           .hik-video-audio-chip.is-live { background:rgba(16,32,24,0.52); border-color:rgba(92, 214, 140, 0.34); box-shadow:0 0 0 1px rgba(92,214,140,0.16), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-audio-chip-mic.is-live { background:rgba(52,20,24,0.56); border-color:rgba(255,110,110,0.34); box-shadow:0 0 0 1px rgba(255,110,110,0.16), 0 12px 26px rgba(0,0,0,0.28); }
-          .hik-video-audio-icon { width:24px; height:24px; display:grid; place-items:center; }
-          .hik-video-audio-icon ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
-          .hik-video-audio-meta { display:grid; gap:1px; min-width:0; text-align:left; }
-          .hik-video-audio-label { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; line-height:1; }
-          .hik-video-audio-state { font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
-          .hik-video-audio-waves { width:22px; height:18px; display:flex; align-items:flex-end; gap:2px; justify-content:center; }
+          .hik-video-audio-icon { width:var(--hik-ov-audio-icon); height:var(--hik-ov-audio-icon); display:grid; place-items:center; flex:0 0 auto; }
+          .hik-video-audio-icon ha-icon { --mdc-icon-size:var(--hik-ov-icon); color:var(--hik-accent); }
+          .hik-video-audio-meta { display:grid; gap:1px; min-width:0; text-align:left; font-size:var(--hik-ov-font); }
+          .hik-video-audio-label { font-size:var(--hik-ov-meta-size); text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; line-height:1; }
+          .hik-video-audio-state { font-size:var(--hik-ov-font); font-weight:700; line-height:1.15; white-space:nowrap; }
+          .hik-video-audio-waves { width:calc(var(--hik-ov-audio-icon) - 2px); height:calc(var(--hik-ov-audio-icon) - 6px); display:flex; align-items:flex-end; gap:2px; justify-content:center; }
           .hik-video-audio-waves i { width:4px; border-radius:999px; height:5px; background:rgba(255,255,255,0.34); transform-origin:center bottom; transition:background 120ms ease; }
           .hik-video-audio-chip.is-live .hik-video-audio-waves i:nth-child(1) { animation:hikAudioWave 0.9s ease-in-out infinite; }
           .hik-video-audio-chip.is-live .hik-video-audio-waves i:nth-child(2) { animation:hikAudioWave 0.9s ease-in-out 0.12s infinite; }
@@ -4619,7 +4662,16 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-mini-select { min-height:clamp(34px, 3.8vw, 42px); padding:clamp(4px, 0.6vw, 6px) clamp(8px, 0.8vw, 10px); border-radius:clamp(10px, 1vw, 14px); display:grid; gap:3px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-mini-select.wide { min-width:min(240px, 56vw); }
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
           .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
-          .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
+          .hik-video-volume-rail { min-height:var(--hik-ov-chip-height); padding:0 var(--hik-ov-chip-px); border-radius:var(--hik-ov-radius); display:flex; align-items:center; gap:6px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); font-size:var(--hik-ov-font); }          .hik-video-volume-rail.compact { min-width:var(--hik-ov-rail-min-width); padding-right:var(--hik-ov-chip-px); align-self:flex-start; }          .hik-video-volume-rail ha-icon { --mdc-icon-size:var(--hik-ov-icon); }          .hik-video-volume-rail input { width:var(--hik-ov-slider-width); min-width:0; }          .hik-overlay-slider-value { font-size:var(--hik-ov-meta-size); font-weight:700; opacity:0.84; min-width:32px; text-align:right; }                    .hik-video-block.hik-overlay-size-compact .hik-video-audio-state, .hik-video-block.hik-overlay-size-compact .hik-overlay-slider-value { display:none; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-audio-waves { display:none; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-audio-chip { max-width:144px; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-audio-meta { overflow:hidden; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-audio-label { letter-spacing:0.04em; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-volume-rail.compact { min-width:auto; }
+          .hik-video-block.hik-overlay-size-compact .hik-video-media-topright { max-width:min(88%, 400px); }
+          .hik-video-block.hik-overlay-size-compact .hik-video-media-bottom .hik-video-mini-select span { display:none; }
+          .hik-video-block.hik-overlay-size-medium .hik-video-media-topright { max-width:min(80%, 620px); }
+.hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
           .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; pointer-events:none; }
           .hik-debug-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.24)); pointer-events:none; }
           .hik-debug-terminal-window { position:absolute; top:0; left:0; width:min(calc(100% - 12px), var(--hik-debug-overlay-width, 960px)); height:min(calc(100% - 12px), var(--hik-debug-overlay-height, 620px)); transform:translate(var(--hik-debug-overlay-x, 24px), var(--hik-debug-overlay-y, 24px)); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); min-width:520px; min-height:320px; max-width:calc(100% - 12px); max-height:calc(100% - 12px); will-change:transform, width, height; }
@@ -4641,9 +4693,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-toolbar.is-terminal { background:rgba(12,18,24,0.88); border-bottom:1px solid rgba(120,255,178,0.1); }
           .hik-debug-list-shell.is-terminal { min-height:260px; max-height:42vh; }
           .hik-debug-detail-pane.is-terminal { background:rgba(9,13,18,0.86); border-color:rgba(120,255,178,0.1); }
-          .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
-          .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
-          .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
+                    .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
           .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
           .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.24); background:rgba(245,166,35,0.08); color:var(--primary-text-color); backdrop-filter: blur(10px); }
           .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
@@ -4850,7 +4900,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
+                <div class="hik-video-block hik-overlay-size-${this._overlaySizeMode || "large"} ${playbackActive ? "is-playback" : "is-live"}" data-overlay-size="${this._overlaySizeMode || "large"}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
@@ -5445,6 +5495,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       };
     }, { passive: true });
     this._restoreDebugViewState?.();
+    this._setupOverlayResizeObserver();
   }
 }
 
