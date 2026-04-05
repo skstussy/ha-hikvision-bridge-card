@@ -5624,60 +5624,77 @@ class HikvisionPTZCardEditor extends HTMLElement {
   }
 
   _valueChanged() {
+    const getEl = (selector) => this.querySelector(selector);
+    const getValue = (selector, fallback = "") => {
+      const el = getEl(selector);
+      return el ? el.value : fallback;
+    };
+    const getNumber = (selector, fallback = 0) => {
+      const value = Number(getValue(selector, fallback));
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const getChecked = (selector, fallback = false) => {
+      const el = getEl(selector);
+      return el && typeof el.checked === "boolean" ? el.checked : fallback;
+    };
+
     const config = {
       ...this.config,
       type: "custom:ha-hikvision-bridge-card",
-      title: this.querySelector("#title").value,
-      speed: Number(this.querySelector("#speed").value),
-      repeat_ms: Number(this.querySelector("#repeat_ms").value),
-      ptz_duration: Number(this.querySelector("#ptz_duration").value),
-      lens_step: Number(this.querySelector("#lens_step").value),
-      lens_duration: Number(this.querySelector("#lens_duration").value),
-      refocus_step: Number(this.querySelector("#refocus_step").value),
-      video_mode: this.querySelector("#video_mode").value,
-      controls_mode: this.querySelector("#controls_mode").value,
-      accent_color: this.querySelector("#accent_color").value,
-      panel_tint: Number(this.querySelector("#panel_tint").value),
-      speed_position: this.querySelector("#speed_position").value,
-      playback_presets: String(this.querySelector("#playback_presets").value || "").split(",").map((value) => Number(String(value).trim())).filter((value) => Number.isFinite(value) && value > 0),
-      auto_discover: this.querySelector("#auto_discover").checked,
-      show_title: this.querySelector("#show_title").checked,
-      show_camera_chips: this.querySelector("#show_camera_chips").checked,
-      show_status_pills: this.querySelector("#show_status_pills").checked,
-      show_camera_info: this.querySelector("#show_camera_info").checked,
-      show_stream_info: this.querySelector("#show_stream_info").checked,
-      show_stream_mode_info: this.querySelector("#show_stream_mode_info").checked,
-      show_alarm_dashboard: this.querySelector("#show_alarm_dashboard").checked,
-      show_controls: this.querySelector("#show_controls").checked,
-      show_dvr_info: this.querySelector("#show_dvr_info").checked,
-      show_storage_info: this.querySelector("#show_storage_info").checked,
-      show_position_info: this.querySelector("#show_position_info").checked,
-      lens_stop_safeguard: this.querySelector("#lens_stop_safeguard").checked,
-      show_playback_panel: this.querySelector("#show_playback_panel")?.checked ?? true,
-      show_audio_controls: this.querySelector("#show_audio_controls").checked,
+      title: getValue("#title", this.config.title || ""),
+      speed: getNumber("#speed", Number(this.config.speed ?? 3)),
+      repeat_ms: getNumber("#repeat_ms", Number(this.config.repeat_ms ?? 250)),
+      ptz_duration: getNumber("#ptz_duration", Number(this.config.ptz_duration ?? 500)),
+      lens_step: getNumber("#lens_step", Number(this.config.lens_step ?? 1)),
+      lens_duration: getNumber("#lens_duration", Number(this.config.lens_duration ?? 250)),
+      refocus_step: getNumber("#refocus_step", Number(this.config.refocus_step ?? 1)),
+      video_mode: getValue("#video_mode", this.config.video_mode || "auto"),
+      controls_mode: getValue("#controls_mode", this.config.controls_mode || "overlay"),
+      accent_color: getValue("#accent_color", this.config.accent_color || "#29b6f6"),
+      panel_tint: getNumber("#panel_tint", Number(this.config.panel_tint ?? 60)),
+      speed_position: getValue("#speed_position", this.config.speed_position || "right"),
+      playback_presets: String(getValue("#playback_presets", (this.config.playback_presets || []).join(",")) || "")
+        .split(",")
+        .map((value) => Number(String(value).trim()))
+        .filter((value) => Number.isFinite(value) && value > 0),
+      auto_discover: getChecked("#auto_discover", this.config.auto_discover !== false),
+      show_title: getChecked("#show_title", this.config.show_title !== false),
+      show_camera_chips: getChecked("#show_camera_chips", this.config.show_camera_chips !== false),
+      show_status_pills: getChecked("#show_status_pills", this.config.show_status_pills !== false),
+      show_camera_info: getChecked("#show_camera_info", this.config.show_camera_info !== false),
+      show_stream_info: getChecked("#show_stream_info", this.config.show_stream_info !== false),
+      show_stream_mode_info: getChecked("#show_stream_mode_info", this.config.show_stream_mode_info !== false),
+      show_alarm_dashboard: getChecked("#show_alarm_dashboard", this.config.show_alarm_dashboard !== false),
+      show_controls: getChecked("#show_controls", this.config.show_controls !== false),
+      show_dvr_info: getChecked("#show_dvr_info", this.config.show_dvr_info !== false),
+      show_storage_info: getChecked("#show_storage_info", this.config.show_storage_info !== false),
+      show_position_info: getChecked("#show_position_info", this.config.show_position_info !== false),
+      lens_stop_safeguard: getChecked("#lens_stop_safeguard", this.config.lens_stop_safeguard !== false),
+      show_playback_panel: getChecked("#show_playback_panel", this.config.show_playback_panel !== false),
+      show_audio_controls: getChecked("#show_audio_controls", this.config.show_audio_controls !== false),
       ui: {
         ...(this.config.ui || {}),
-        show_overlay_controls: this.querySelector("#ui_show_overlay_controls").checked,
-        show_navigation_controls: this.querySelector("#ui_show_navigation_controls").checked,
-        show_speaker_controls: this.querySelector("#ui_show_speaker_controls").checked,
-        show_talk_button: this.querySelector("#ui_show_talk_button").checked,
-        show_fullscreen_button: this.querySelector("#ui_show_fullscreen_button").checked,
-        show_stream_mode_button: this.querySelector("#ui_show_stream_mode_button").checked,
-        show_storage_button: this.querySelector("#ui_show_storage_button").checked,
-        show_debug_button: this.querySelector("#ui_show_debug_button").checked,
-        show_playback_button: this.querySelector("#ui_show_playback_button").checked,
+        show_overlay_controls: getChecked("#ui_show_overlay_controls", this.config.ui?.show_overlay_controls !== false),
+        show_navigation_controls: getChecked("#ui_show_navigation_controls", this.config.ui?.show_navigation_controls !== false),
+        show_speaker_controls: getChecked("#ui_show_speaker_controls", this.config.ui?.show_speaker_controls !== false),
+        show_talk_button: getChecked("#ui_show_talk_button", this.config.ui?.show_talk_button !== false),
+        show_fullscreen_button: getChecked("#ui_show_fullscreen_button", this.config.ui?.show_fullscreen_button !== false),
+        show_stream_mode_button: getChecked("#ui_show_stream_mode_button", this.config.ui?.show_stream_mode_button !== false),
+        show_storage_button: getChecked("#ui_show_storage_button", this.config.ui?.show_storage_button !== false),
+        show_debug_button: getChecked("#ui_show_debug_button", this.config.ui?.show_debug_button !== false),
+        show_playback_button: getChecked("#ui_show_playback_button", this.config.ui?.show_playback_button !== false),
       },
       debug: {
         ...(this.config.debug || {}),
-        enabled: this.querySelector("#debug_enabled").checked,
+        enabled: getChecked("#debug_enabled", this.config.debug?.enabled === true),
       },
-      mute_during_talk: this.querySelector("#mute_during_talk").checked,
+      mute_during_talk: getChecked("#mute_during_talk", this.config.mute_during_talk !== false),
       ptz_steps: {
-        pan: Number(this.querySelector("#max_pan_steps").value),
-        tilt: Number(this.querySelector("#max_tilt_steps").value),
-        zoom: Number(this.querySelector("#max_zoom_steps").value),
+        pan: getNumber("#max_pan_steps", Number(this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5)),
+        tilt: getNumber("#max_tilt_steps", Number(this.config.ptz_steps?.tilt ?? this.config.max_tilt_steps ?? 5)),
+        zoom: getNumber("#max_zoom_steps", Number(this.config.ptz_steps?.zoom ?? this.config.max_zoom_steps ?? 5)),
       },
-      return_step_delay: Number(this.querySelector("#return_step_delay").value),
+      return_step_delay: getNumber("#return_step_delay", Number(this.config.return_step_delay ?? 150)),
     };
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
   }
