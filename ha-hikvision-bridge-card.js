@@ -159,6 +159,9 @@ _pushDebugEntry(entry) {
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
     this._videoAccessoryPanel = this._videoAccessoryPanel || "";
     this._debugOverlayOpen = this._debugOverlayOpen || false;
+    this._debugOverlayRect = this._normalizeDebugOverlayRect(this._debugOverlayRect || this._loadDebugOverlayRect());
+    this._debugOverlayDrag = this._debugOverlayDrag || null;
+    this._debugOverlayResize = this._debugOverlayResize || null;
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
@@ -628,6 +631,147 @@ _pushDebugEntry(entry) {
         ${content}
       </div>
     `;
+  }
+
+
+  _debugOverlayStorageKey() {
+    return "ha_hikvision_bridge_card.debug_overlay_rect";
+  }
+
+  _normalizeDebugOverlayRect(rect = null) {
+    const defaults = { width: 960, height: 620, x: 24, y: 24 };
+    const src = rect && typeof rect === "object" ? rect : {};
+    const width = Math.max(520, Math.min(1400, Number(src.width) || defaults.width));
+    const height = Math.max(320, Math.min(1000, Number(src.height) || defaults.height));
+    const x = Math.max(0, Number(src.x) || defaults.x);
+    const y = Math.max(0, Number(src.y) || defaults.y);
+    return { width, height, x, y };
+  }
+
+  _loadDebugOverlayRect() {
+    try {
+      const raw = window?.localStorage?.getItem?.(this._debugOverlayStorageKey());
+      if (!raw) return null;
+      return this._normalizeDebugOverlayRect(JSON.parse(raw));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  _saveDebugOverlayRect() {
+    try {
+      window?.localStorage?.setItem?.(this._debugOverlayStorageKey(), JSON.stringify(this._normalizeDebugOverlayRect(this._debugOverlayRect)));
+    } catch (err) {}
+  }
+
+  _setDebugOverlayRect(nextRect = {}, { persist = true, rerender = true } = {}) {
+    this._debugOverlayRect = this._normalizeDebugOverlayRect({ ...(this._debugOverlayRect || {}), ...(nextRect || {}) });
+    if (persist) this._saveDebugOverlayRect();
+    if (rerender) this.render();
+  }
+
+  _getDebugOverlayStyle() {
+    const rect = this._normalizeDebugOverlayRect(this._debugOverlayRect);
+    return `--hik-debug-overlay-x:${Math.round(rect.x)}px; --hik-debug-overlay-y:${Math.round(rect.y)}px; --hik-debug-overlay-width:${Math.round(rect.width)}px; --hik-debug-overlay-height:${Math.round(rect.height)}px;`;
+  }
+
+  _resetDebugOverlayRect() {
+    this._setDebugOverlayRect(this._normalizeDebugOverlayRect(null));
+  }
+
+  _clampDebugOverlayRect(rect = null) {
+    const next = this._normalizeDebugOverlayRect(rect || this._debugOverlayRect);
+    const host = this.querySelector('.hik-video-block') || this.querySelector('.hik-card') || this;
+    const hostWidth = Math.max(640, Math.round(host?.clientWidth || 0) || 960);
+    const hostHeight = Math.max(420, Math.round(host?.clientHeight || 0) || 620);
+    const width = Math.min(Math.max(520, next.width), Math.max(520, hostWidth - 24));
+    const height = Math.min(Math.max(320, next.height), Math.max(320, hostHeight - 24));
+    const maxX = Math.max(0, hostWidth - width - 12);
+    const maxY = Math.max(0, hostHeight - height - 12);
+    return { width, height, x: Math.min(Math.max(0, next.x), maxX), y: Math.min(Math.max(0, next.y), maxY) };
+  }
+
+  _bindDebugOverlayInteractions() {
+    const overlay = this.querySelector('.hik-debug-terminal-window');
+    const handle = this.querySelector('.hik-debug-terminal-head');
+    const resizeHandle = this.querySelector('.hik-debug-resize-handle');
+    if (!overlay || !handle || !resizeHandle) return;
+
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      const target = event.target;
+      if (target?.closest?.('button, input, select, textarea, a, [data-debug-global-action], [data-debug-entry-action], [data-debug-filter]')) return;
+      event.preventDefault();
+      const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._debugOverlayDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect };
+      overlay.classList.add('is-moving');
+      try { handle.setPointerCapture(event.pointerId); } catch (err) {}
+    });
+
+    handle.addEventListener('pointermove', (event) => {
+      if (!this._debugOverlayDrag || this._debugOverlayDrag.pointerId !== event.pointerId) return;
+      const start = this._debugOverlayDrag;
+      const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + (event.clientX - start.startX), y: start.rect.y + (event.clientY - start.startY) });
+      this._debugOverlayRect = next;
+      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+    });
+
+    const endDrag = (event) => {
+      if (!this._debugOverlayDrag || this._debugOverlayDrag.pointerId !== event.pointerId) return;
+      try { handle.releasePointerCapture(event.pointerId); } catch (err) {}
+      overlay.classList.remove('is-moving');
+      this._debugOverlayDrag = null;
+      const next = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+    };
+
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      event.preventDefault();
+      const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._debugOverlayResize = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect };
+      overlay.classList.add('is-resizing');
+      try { resizeHandle.setPointerCapture(event.pointerId); } catch (err) {}
+    });
+
+    resizeHandle.addEventListener('pointermove', (event) => {
+      if (!this._debugOverlayResize || this._debugOverlayResize.pointerId !== event.pointerId) return;
+      const start = this._debugOverlayResize;
+      const next = this._clampDebugOverlayRect({
+        ...start.rect,
+        width: start.rect.width + (event.clientX - start.startX),
+        height: start.rect.height + (event.clientY - start.startY),
+      });
+      this._debugOverlayRect = next;
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+    });
+
+    const endResize = (event) => {
+      if (!this._debugOverlayResize || this._debugOverlayResize.pointerId !== event.pointerId) return;
+      try { resizeHandle.releasePointerCapture(event.pointerId); } catch (err) {}
+      overlay.classList.remove('is-resizing');
+      this._debugOverlayResize = null;
+      const next = this._clampDebugOverlayRect(this._debugOverlayRect);
+      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+      overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
+    };
+
+    resizeHandle.addEventListener('pointerup', endResize);
+    resizeHandle.addEventListener('pointercancel', endResize);
   }
 
   _pushDebug(category = "general", level = "info", event = "event", message = "", details = {}, source = "frontend") {
@@ -1139,7 +1283,7 @@ _toggleDebugFilter(kind, value) {
     if (!this._isDebugPanelActive()) return "";
     return `
       <div class="hik-debug-terminal-overlay" role="dialog" aria-modal="false" aria-label="Debug console overlay">
-        <div class="hik-debug-terminal-window">
+        <div class="hik-debug-terminal-window" style="${this._getDebugOverlayStyle()}">
           <div class="hik-debug-terminal-head">
             <div class="hik-debug-terminal-title">
               <span class="hik-debug-terminal-dot red"></span>
@@ -1149,6 +1293,9 @@ _toggleDebugFilter(kind, value) {
               <span>Debug Console</span>
             </div>
             <div class="hik-debug-terminal-actions">
+              <button type="button" class="hik-video-media-btn" id="hik-debug-overlay-reset" title="Reset debug console size and position" aria-label="Reset debug console size and position">
+                <ha-icon icon="mdi:fit-to-screen-outline"></ha-icon>
+              </button>
               <button type="button" class="hik-video-media-btn" id="hik-debug-overlay-minimize" title="Close debug console" aria-label="Close debug console">
                 <ha-icon icon="mdi:close"></ha-icon>
               </button>
@@ -1157,6 +1304,7 @@ _toggleDebugFilter(kind, value) {
           <div class="hik-debug-terminal-body">
             ${this._renderDebugDashboardBody(camAttrs, { terminal: true })}
           </div>
+          <button type="button" class="hik-debug-resize-handle" aria-label="Resize debug console" title="Resize debug console"></button>
         </div>
       </div>`;
   }
@@ -4073,10 +4221,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
           .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
           .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
-          .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
+          .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; pointer-events:none; }
           .hik-debug-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.24)); pointer-events:none; }
-          .hik-debug-terminal-window { width:min(100%, 980px); max-height:min(78vh, 820px); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); }
-          .hik-debug-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:linear-gradient(180deg, rgba(18,25,32,0.98), rgba(11,16,22,0.96)); border-bottom:1px solid rgba(120,255,178,0.12); }
+          .hik-debug-terminal-window { position:absolute; top:0; left:0; width:min(calc(100% - 12px), var(--hik-debug-overlay-width, 960px)); height:min(calc(100% - 12px), var(--hik-debug-overlay-height, 620px)); transform:translate(var(--hik-debug-overlay-x, 24px), var(--hik-debug-overlay-y, 24px)); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); min-width:520px; min-height:320px; max-width:calc(100% - 12px); max-height:calc(100% - 12px); }
+          .hik-debug-terminal-window.is-moving, .hik-debug-terminal-window.is-resizing { user-select:none; }
+          .hik-debug-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:linear-gradient(180deg, rgba(18,25,32,0.98), rgba(11,16,22,0.96)); border-bottom:1px solid rgba(120,255,178,0.12); cursor:move; touch-action:none; }
           .hik-debug-terminal-title { display:inline-flex; align-items:center; gap:10px; font-weight:700; letter-spacing:0.02em; }
           .hik-debug-terminal-title ha-icon { --mdc-icon-size:16px; color:#87f7b9; }
           .hik-debug-terminal-dot { width:10px; height:10px; border-radius:50%; display:inline-block; box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset; }
@@ -4085,6 +4234,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-terminal-dot.green { background:#28c840; }
           .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; }
           .hik-debug-terminal-body { min-height:0; overflow:auto; padding:12px; display:grid; gap:12px; background:rgba(5,8,12,0.22); }
+          .hik-debug-resize-handle { position:absolute; right:0; bottom:0; width:24px; height:24px; border:none; background:transparent; cursor:nwse-resize; pointer-events:auto; }
+          .hik-debug-resize-handle::before { content:""; position:absolute; right:6px; bottom:6px; width:12px; height:12px; border-right:2px solid rgba(135,247,185,0.68); border-bottom:2px solid rgba(135,247,185,0.68); opacity:0.9; }
           .hik-debug-warning-banner.is-terminal { background:rgba(80,180,120,0.06); border-color:rgba(120,255,178,0.12); }
           .hik-debug-overview.is-terminal { background:rgba(10,14,20,0.72); border:1px solid rgba(120,255,178,0.08); border-radius:14px; padding:12px; }
           .hik-debug-console-shell.is-terminal { background:rgba(6,10,14,0.74); border:1px solid rgba(120,255,178,0.1); box-shadow:none; }
@@ -4547,6 +4698,25 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._toggleVideoAccessoryPanel("debug");
       }
     });
+    this.querySelector("#hik-debug-overlay-reset")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._resetDebugOverlayRect();
+    });
+    if (this._debugOverlayOpen) {
+      this._bindDebugOverlayInteractions();
+      const clamped = this._clampDebugOverlayRect(this._debugOverlayRect);
+      if (JSON.stringify(clamped) !== JSON.stringify(this._debugOverlayRect)) {
+        this._setDebugOverlayRect(clamped, { persist: true, rerender: false });
+        const overlay = this.querySelector('.hik-debug-terminal-window');
+        if (overlay) {
+          overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(clamped.x)}px`);
+          overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(clamped.y)}px`);
+          overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(clamped.width)}px`);
+          overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(clamped.height)}px`);
+        }
+      }
+    }
 
     const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
     if (streamModeOverlayToggle) {
