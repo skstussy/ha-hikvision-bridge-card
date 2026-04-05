@@ -4313,7 +4313,9 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-ptz-mini-btn:active:not(:disabled) { transform:scale(0.98); }
           .hik-video-ptz-mini-btn:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
           .hik-video-ptz-mini-btn ha-icon { --mdc-icon-size:15px; color:var(--hik-accent); }
-          .hik-video-ptz-bottom { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; pointer-events:auto; }
+          .hik-video-ptz-bottom { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:12px; align-items:end; pointer-events:auto; }
+          .hik-video-ptz-bottom-main { display:grid; gap:10px; min-width:0; }
+          .hik-video-ptz-bottom-side { display:grid; gap:8px; justify-items:end; align-content:end; min-width:min(42vw, 420px); }
           .hik-video-ptz-lens-stack { display:grid; gap:10px; min-width:0; }
           .hik-video-lens-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
           .hik-video-lens-card { padding:10px; border-radius:16px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(12px) saturate(1.1); box-shadow:0 10px 22px rgba(0,0,0,0.18); display:grid; gap:8px; pointer-events:auto; }
@@ -4338,7 +4340,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-ptz-top-right { position:static; max-width:none; justify-items:start; margin-top:42px; }
             .hik-video-ptz-top-actions { justify-content:flex-start; }
             .hik-video-ptz-quickbar { justify-content:flex-start; }
-            .hik-video-ptz-bottom { justify-content:flex-start; }
+            .hik-video-ptz-bottom { grid-template-columns:1fr; }
+            .hik-video-ptz-bottom-side { justify-items:start; min-width:0; }
+            .hik-video-audio-groups { width:100%; justify-items:start; }
+            .hik-video-audio-group { justify-content:flex-start; flex-wrap:wrap; }
           }
           
           .hik-system-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
@@ -4454,6 +4459,12 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-overlay-row-audio { gap:8px 10px; align-items:flex-start; }
           .hik-video-overlay-row-utility { gap:6px; }
           .hik-video-audio-sliders { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+          .hik-video-audio-groups { display:grid; gap:8px; justify-items:end; width:min(100%, 420px); }
+          .hik-video-audio-group { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:nowrap; width:100%; }
+          .hik-video-audio-group .hik-video-audio-chip { flex:0 0 auto; min-width:132px; justify-content:flex-start; }
+          .hik-video-audio-group .hik-video-volume-rail { flex:1 1 auto; min-width:148px; }
+          .hik-video-audio-group .hik-video-volume-rail.compact { min-height:38px; }
+          .hik-video-audio-group .hik-video-volume-rail.compact input { min-width:92px; }
           .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
           .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
@@ -4842,19 +4853,66 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           </div>
                         </div>
                         <div class="hik-video-ptz-bottom">
-                          <button type="button" class="hik-video-refocus-btn refocus-overlay-btn" id="hik-refocus-overlay" ${(!online || this._returningHome) ? 'disabled' : ''}>
-                            <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                            <span>Refocus</span>
-                          </button>
-                          ${presets.length ? `
-                            <div class="hik-video-presets-overlay" aria-label="PTZ presets">
-                              ${presets.map((p) => {
-                                const pid = typeof p === "object" ? p.id : p;
-                                const pname = typeof p === "object" ? (p.name || `Preset ${p.id}`) : `Preset ${p}`;
-                                return `<button type="button" class="hik-video-preset-chip preset-btn" data-preset="${pid}" ${(!ptz || !online || this._returningHome) ? "disabled" : ""} title="${this.escapeHtml(pname)}">${this.escapeHtml(pname)}</button>`;
-                              }).join("")}
+                          <div class="hik-video-ptz-bottom-main">
+                            <button type="button" class="hik-video-refocus-btn refocus-overlay-btn" id="hik-refocus-overlay" ${(!online || this._returningHome) ? 'disabled' : ''}>
+                              <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
+                              <span>Refocus</span>
+                            </button>
+                            ${presets.length ? `
+                              <div class="hik-video-presets-overlay" aria-label="PTZ presets">
+                                ${presets.map((p) => {
+                                  const pid = typeof p === "object" ? p.id : p;
+                                  const pname = typeof p === "object" ? (p.name || `Preset ${p.id}`) : `Preset ${p}`;
+                                  return `<button type="button" class="hik-video-preset-chip preset-btn" data-preset="${pid}" ${(!ptz || !online || this._returningHome) ? "disabled" : ""} title="${this.escapeHtml(pname)}">${this.escapeHtml(pname)}</button>`;
+                                }).join("")}
+                              </div>
+                            ` : ""}
+                          </div>
+                          <div class="hik-video-ptz-bottom-side">
+                            <div class="hik-video-audio-groups" aria-label="Audio controls">
+                              <div class="hik-video-audio-group hik-video-audio-group-speaker">
+                                <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
+                                  <span class="hik-video-audio-icon">
+                                    <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                                  </span>
+                                  <span class="hik-video-audio-meta">
+                                    <span class="hik-video-audio-label">Speaker</span>
+                                    <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
+                                  </span>
+                                  <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
+                                </button>
+                                <label class="hik-video-volume-rail compact">
+                                  <ha-icon icon="mdi:volume-medium"></ha-icon>
+                                  <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+                                  <span class="hik-overlay-slider-value hik-volume-value">${Math.round(this._volume)}%</span>
+                                </label>
+                                <label class="hik-video-volume-rail compact">
+                                  <ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon>
+                                  <input id="hik-audio-boost-overlay" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
+                                  <span class="hik-overlay-slider-value hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</span>
+                                </label>
+                              </div>
+                              ${isWebRtc ? `
+                                <div class="hik-video-audio-group hik-video-audio-group-mic">
+                                  <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
+                                    <span class="hik-video-audio-icon">
+                                      <ha-icon icon="mdi:microphone"></ha-icon>
+                                    </span>
+                                    <span class="hik-video-audio-meta">
+                                      <span class="hik-video-audio-label">Mic</span>
+                                      <span class="hik-video-audio-state">${this._talkHoldActive || this._talkRequested ? "Live" : "Hold to talk"}</span>
+                                    </span>
+                                    <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
+                                  </button>
+                                  <label class="hik-video-volume-rail compact">
+                                    <ha-icon icon="mdi:microphone-plus"></ha-icon>
+                                    <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
+                                    <span class="hik-overlay-slider-value hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</span>
+                                  </label>
+                                </div>
+                              ` : ""}
                             </div>
-                          ` : ""}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -4891,47 +4949,49 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                             ` : ""}
                           </div>
                         ` : ""}
-                        ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
+                        ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && !ptz) ? `
                           <div class="hik-video-overlay-row hik-video-overlay-row-audio">
-                            <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
-                              <span class="hik-video-audio-icon">
-                                <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
-                              </span>
-                              <span class="hik-video-audio-meta">
-                                <span class="hik-video-audio-label">Speaker</span>
-                                <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
-                              </span>
-                              <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
-                            </button>
-                            ${isWebRtc ? `
-                              <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
-                                <span class="hik-video-audio-icon">
-                                  <ha-icon icon="mdi:microphone"></ha-icon>
-                                </span>
-                                <span class="hik-video-audio-meta">
-                                  <span class="hik-video-audio-label">Mic</span>
-                                  <span class="hik-video-audio-state">${this._talkHoldActive || this._talkRequested ? "Live" : "Hold to talk"}</span>
-                                </span>
-                                <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
-                              </button>
-                            ` : ""}
-                            <div class="hik-video-audio-sliders">
-                              <label class="hik-video-volume-rail compact">
-                                <ha-icon icon="mdi:volume-medium"></ha-icon>
-                                <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
-                                <span class="hik-overlay-slider-value hik-volume-value">${Math.round(this._volume)}%</span>
-                              </label>
-                              <label class="hik-video-volume-rail compact">
-                                <ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon>
-                                <input id="hik-audio-boost-overlay" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
-                                <span class="hik-overlay-slider-value hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</span>
-                              </label>
-                              ${isWebRtc ? `
+                            <div class="hik-video-audio-groups" aria-label="Audio controls">
+                              <div class="hik-video-audio-group hik-video-audio-group-speaker">
+                                <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
+                                  <span class="hik-video-audio-icon">
+                                    <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                                  </span>
+                                  <span class="hik-video-audio-meta">
+                                    <span class="hik-video-audio-label">Speaker</span>
+                                    <span class="hik-video-audio-state">${this._speakerEnabled ? "On" : "Off"}</span>
+                                  </span>
+                                  <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
+                                </button>
                                 <label class="hik-video-volume-rail compact">
-                                  <ha-icon icon="mdi:microphone-plus"></ha-icon>
-                                  <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
-                                  <span class="hik-overlay-slider-value hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</span>
+                                  <ha-icon icon="mdi:volume-medium"></ha-icon>
+                                  <input id="hik-volume-overlay" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+                                  <span class="hik-overlay-slider-value hik-volume-value">${Math.round(this._volume)}%</span>
                                 </label>
+                                <label class="hik-video-volume-rail compact">
+                                  <ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon>
+                                  <input id="hik-audio-boost-overlay" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
+                                  <span class="hik-overlay-slider-value hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</span>
+                                </label>
+                              </div>
+                              ${isWebRtc ? `
+                                <div class="hik-video-audio-group hik-video-audio-group-mic">
+                                  <button type="button" class="hik-video-audio-chip hik-video-audio-chip-mic ${this._talkHoldActive || this._talkRequested ? "is-live" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
+                                    <span class="hik-video-audio-icon">
+                                      <ha-icon icon="mdi:microphone"></ha-icon>
+                                    </span>
+                                    <span class="hik-video-audio-meta">
+                                      <span class="hik-video-audio-label">Mic</span>
+                                      <span class="hik-video-audio-state">${this._talkHoldActive || this._talkRequested ? "Live" : "Hold to talk"}</span>
+                                    </span>
+                                    <span class="hik-video-audio-waves" aria-hidden="true"><i></i><i></i><i></i></span>
+                                  </button>
+                                  <label class="hik-video-volume-rail compact">
+                                    <ha-icon icon="mdi:microphone-plus"></ha-icon>
+                                    <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
+                                    <span class="hik-overlay-slider-value hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</span>
+                                  </label>
+                                </div>
                               ` : ""}
                             </div>
                           </div>
