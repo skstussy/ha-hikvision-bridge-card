@@ -1,3 +1,6 @@
+
+// UI STATE PATCH
+_initUIState(){this._uiState=this._uiState||{position:{x:0,y:0},size:{w:480,h:320},toggles:{}}}
 /* UI Split Patch 2.6.1 */
 
 const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
@@ -5635,7 +5638,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
     };
     const getChecked = (selector, fallback = false) => {
       const el = getEl(selector);
-      return el && typeof el.checked === "boolean" ? el.checked : fallback;
+      return el && typeof el === "boolean" ? el : fallback;
     };
 
     const config = {
