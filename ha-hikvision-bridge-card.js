@@ -2910,6 +2910,34 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       .replace(/^./, (m) => m.toUpperCase());
   }
 
+  _storageCapabilities(storage = {}, dvr = {}, camAttrs = {}) {
+    const storageInfoSupported = this.pickValue([storage, dvr, camAttrs], ["storage_info_supported"], null);
+    const storageHddCapsSupported = this.pickValue([storage, dvr, camAttrs], ["storage_hdd_caps_supported"], null);
+    const storagePresent = this.pickValue([storage, dvr, camAttrs], ["storage_present"], null);
+    const playbackSupported = this.pickValue([camAttrs, storage, dvr], ["playback_supported"], null);
+    return {
+      storageInfoSupported: storageInfoSupported === null ? null : storageInfoSupported === true,
+      storageHddCapsSupported: storageHddCapsSupported === null ? null : storageHddCapsSupported === true,
+      storagePresent: storagePresent === null ? null : storagePresent === true,
+      playbackSupported: playbackSupported === null ? null : playbackSupported === true,
+    };
+  }
+
+  _canShowStoragePanel(storage = {}, dvr = {}, camAttrs = {}) {
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    if (caps.storagePresent === false) return false;
+    if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) return false;
+    return this.config.show_storage_info !== false;
+  }
+
+  _canShowPlaybackControls(storage = {}, dvr = {}, camAttrs = {}) {
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    if (caps.playbackSupported !== null) return caps.playbackSupported;
+    if (caps.storagePresent === false) return false;
+    if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) return false;
+    return this.config.show_playback_panel !== false;
+  }
+
   summarizeStorage(attrs = {}, stateObj = null) {
     const sourceHdds = Array.isArray(attrs.hdds) ? attrs.hdds : [];
     const hdds = sourceHdds.map((disk, index) => {
@@ -2954,6 +2982,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       diskMode,
       health,
       hdds,
+      storageInfoSupported: attrs.storage_info_supported === true,
+      storageHddCapsSupported: attrs.storage_hdd_caps_supported === true,
+      storageExtraCapsSupported: attrs.storage_extra_caps_supported === true,
+      storagePresent: attrs.storage_present === true,
+      playbackSupported: attrs.playback_supported === true,
     };
   }
 
@@ -3868,6 +3901,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const dvr = dvrEntity?.attributes || {};
     const storage = storageEntity?.attributes || {};
     const storageSummary = this.summarizeStorage(storage, storageEntity);
+    const storagePanelSupported = this._canShowStoragePanel(storage, dvr, camAttrs);
+    const playbackPanelSupported = this._canShowPlaybackControls(storage, dvr, camAttrs);
     const online = onlineEntity ? onlineEntity.state === "on" : camAttrs.online !== false;
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
@@ -3977,7 +4012,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
-    if (this.config.show_storage_info === false && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
@@ -4589,7 +4625,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
                         </button>
                       ` : ""}
-                      ${this.config.show_storage_info !== false ? `
+                      ${storagePanelSupported ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
                           <ha-icon icon="mdi:harddisk"></ha-icon>
                         </button>
@@ -4599,9 +4635,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
+                      ${playbackPanelSupported ? `
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
+                      ` : ""}
                     </div>
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -4620,7 +4658,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
                       </div>
                     ` : ""}
-                    ${(this._playbackOverlayVisible || playbackActive) ? `
+                    ${playbackPanelSupported && (this._playbackOverlayVisible || playbackActive) ? `
                       <div class="hik-video-playback-panel ${playbackActive ? "is-recording" : "is-standby"}">
                         <div class="hik-video-playback-head">
                           <div class="hik-video-playback-title">
