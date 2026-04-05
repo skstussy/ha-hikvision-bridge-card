@@ -640,7 +640,17 @@ _pushDebugEntry(entry) {
 
 
   _debugOverlayStorageKey() {
-    return "ha_hikvision_bridge_card.debug_overlay_rect";
+    const cameraKey = this.selectedCamera?.entity || this.selectedCamera?.channel || this.selected || 'default';
+    return `ha_hikvision_bridge_card.debug_overlay_rect.${cameraKey}`;
+  }
+
+  _debugOverlayMemoryStore() {
+    try {
+      if (!window.__haHikvisionBridgeCardDebugOverlayRects) window.__haHikvisionBridgeCardDebugOverlayRects = {};
+      return window.__haHikvisionBridgeCardDebugOverlayRects;
+    } catch (err) {
+      return null;
+    }
   }
 
   _normalizeDebugOverlayRect(rect = null) {
@@ -659,9 +669,15 @@ _pushDebugEntry(entry) {
 
   _loadDebugOverlayRect() {
     try {
-      const raw = window?.localStorage?.getItem?.(this._debugOverlayStorageKey());
+      const key = this._debugOverlayStorageKey();
+      const memory = this._debugOverlayMemoryStore();
+      const fromMemory = memory && memory[key];
+      if (fromMemory) return this._normalizeDebugOverlayRect(fromMemory);
+      const raw = window?.localStorage?.getItem?.(key);
       if (!raw) return null;
-      return this._normalizeDebugOverlayRect(JSON.parse(raw));
+      const parsed = this._normalizeDebugOverlayRect(JSON.parse(raw));
+      if (memory) memory[key] = parsed;
+      return parsed;
     } catch (err) {
       return null;
     }
@@ -669,7 +685,11 @@ _pushDebugEntry(entry) {
 
   _saveDebugOverlayRect() {
     try {
-      window?.localStorage?.setItem?.(this._debugOverlayStorageKey(), JSON.stringify(this._normalizeDebugOverlayRect(this._debugOverlayRect)));
+      const key = this._debugOverlayStorageKey();
+      const rect = this._normalizeDebugOverlayRect(this._debugOverlayRect);
+      const memory = this._debugOverlayMemoryStore();
+      if (memory) memory[key] = rect;
+      window?.localStorage?.setItem?.(key, JSON.stringify(rect));
     } catch (err) {}
   }
 
@@ -677,6 +697,17 @@ _pushDebugEntry(entry) {
     this._debugOverlayRect = this._normalizeDebugOverlayRect({ ...(this._debugOverlayRect || {}), ...(nextRect || {}) });
     if (persist) this._saveDebugOverlayRect();
     if (rerender) this.render();
+  }
+
+
+  _applyDebugOverlayRectToElement(overlay = null, rect = null) {
+    const el = overlay || this.querySelector('.hik-debug-terminal-window');
+    if (!el) return;
+    const next = this._normalizeDebugOverlayRect(rect || this._debugOverlayRect);
+    el.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
+    el.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+    el.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
+    el.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
   }
 
   _getDebugOverlayStyle() {
@@ -705,6 +736,11 @@ _pushDebugEntry(entry) {
     const handle = this.querySelector('.hik-debug-terminal-head');
     const resizeHandle = this.querySelector('.hik-debug-resize-handle');
     if (!overlay || !handle || !resizeHandle) return;
+    if (overlay.__hikDebugOverlayBound === true) {
+      this._applyDebugOverlayRectToElement(overlay);
+      return;
+    }
+    overlay.__hikDebugOverlayBound = true;
 
     handle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
@@ -722,8 +758,7 @@ _pushDebugEntry(entry) {
       const start = this._debugOverlayDrag;
       const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + (event.clientX - start.startX), y: start.rect.y + (event.clientY - start.startY) });
       this._debugOverlayRect = next;
-      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      this._applyDebugOverlayRectToElement(overlay, next);
     });
 
     const endDrag = (event) => {
@@ -733,8 +768,7 @@ _pushDebugEntry(entry) {
       this._debugOverlayDrag = null;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect);
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
-      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      this._applyDebugOverlayRectToElement(overlay, next);
       overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
       overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
     };
@@ -762,8 +796,7 @@ _pushDebugEntry(entry) {
       this._debugOverlayRect = next;
       overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
       overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      this._applyDebugOverlayRectToElement(overlay, next);
     });
 
     const endResize = (event) => {
@@ -773,8 +806,7 @@ _pushDebugEntry(entry) {
       this._debugOverlayResize = null;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect);
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
-      overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(next.x)}px`);
-      overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(next.y)}px`);
+      this._applyDebugOverlayRectToElement(overlay, next);
       overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(next.width)}px`);
       overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(next.height)}px`);
     };
