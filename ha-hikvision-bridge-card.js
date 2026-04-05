@@ -159,7 +159,12 @@ _pushDebugEntry(entry) {
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
     this._videoAccessoryPanel = this._videoAccessoryPanel || "";
     this._debugOverlayOpen = this._debugOverlayOpen || false;
-    this._debugOverlayRect = this._normalizeDebugOverlayRect(this._debugOverlayRect || this._loadDebugOverlayRect());
+    this._debugOverlayRectLoaded = this._debugOverlayRectLoaded === true;
+    const debugOverlayRectSeed = this._debugOverlayRectLoaded
+      ? this._debugOverlayRect
+      : (this._debugOverlayRect ?? this._loadDebugOverlayRect());
+    this._debugOverlayRect = this._normalizeDebugOverlayRect(debugOverlayRectSeed);
+    this._debugOverlayRectLoaded = true;
     this._debugOverlayDrag = this._debugOverlayDrag || null;
     this._debugOverlayResize = this._debugOverlayResize || null;
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
@@ -641,10 +646,14 @@ _pushDebugEntry(entry) {
   _normalizeDebugOverlayRect(rect = null) {
     const defaults = { width: 960, height: 620, x: 24, y: 24 };
     const src = rect && typeof rect === "object" ? rect : {};
-    const width = Math.max(520, Math.min(1400, Number(src.width) || defaults.width));
-    const height = Math.max(320, Math.min(1000, Number(src.height) || defaults.height));
-    const x = Math.max(0, Number(src.x) || defaults.x);
-    const y = Math.max(0, Number(src.y) || defaults.y);
+    const widthRaw = Number(src.width);
+    const heightRaw = Number(src.height);
+    const xRaw = Number(src.x);
+    const yRaw = Number(src.y);
+    const width = Math.max(520, Math.min(1400, Number.isFinite(widthRaw) ? widthRaw : defaults.width));
+    const height = Math.max(320, Math.min(1000, Number.isFinite(heightRaw) ? heightRaw : defaults.height));
+    const x = Math.max(0, Number.isFinite(xRaw) ? xRaw : defaults.x);
+    const y = Math.max(0, Number.isFinite(yRaw) ? yRaw : defaults.y);
     return { width, height, x, y };
   }
 
@@ -4223,7 +4232,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
           .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; pointer-events:none; }
           .hik-debug-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.24)); pointer-events:none; }
-          .hik-debug-terminal-window { position:absolute; top:0; left:0; width:min(calc(100% - 12px), var(--hik-debug-overlay-width, 960px)); height:min(calc(100% - 12px), var(--hik-debug-overlay-height, 620px)); transform:translate(var(--hik-debug-overlay-x, 24px), var(--hik-debug-overlay-y, 24px)); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); min-width:520px; min-height:320px; max-width:calc(100% - 12px); max-height:calc(100% - 12px); }
+          .hik-debug-terminal-window { position:absolute; top:0; left:0; width:min(calc(100% - 12px), var(--hik-debug-overlay-width, 960px)); height:min(calc(100% - 12px), var(--hik-debug-overlay-height, 620px)); transform:translate(var(--hik-debug-overlay-x, 24px), var(--hik-debug-overlay-y, 24px)); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); min-width:520px; min-height:320px; max-width:calc(100% - 12px); max-height:calc(100% - 12px); will-change:transform, width, height; }
           .hik-debug-terminal-window.is-moving, .hik-debug-terminal-window.is-resizing { user-select:none; }
           .hik-debug-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:linear-gradient(180deg, rgba(18,25,32,0.98), rgba(11,16,22,0.96)); border-bottom:1px solid rgba(120,255,178,0.12); cursor:move; touch-action:none; }
           .hik-debug-terminal-title { display:inline-flex; align-items:center; gap:10px; font-weight:700; letter-spacing:0.02em; }
@@ -4705,15 +4714,17 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     });
     if (this._debugOverlayOpen) {
       this._bindDebugOverlayInteractions();
-      const clamped = this._clampDebugOverlayRect(this._debugOverlayRect);
-      if (JSON.stringify(clamped) !== JSON.stringify(this._debugOverlayRect)) {
-        this._setDebugOverlayRect(clamped, { persist: true, rerender: false });
-        const overlay = this.querySelector('.hik-debug-terminal-window');
-        if (overlay) {
-          overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(clamped.x)}px`);
-          overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(clamped.y)}px`);
-          overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(clamped.width)}px`);
-          overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(clamped.height)}px`);
+      if (!this._debugOverlayDrag && !this._debugOverlayResize) {
+        const clamped = this._clampDebugOverlayRect(this._debugOverlayRect);
+        if (JSON.stringify(clamped) !== JSON.stringify(this._debugOverlayRect)) {
+          this._setDebugOverlayRect(clamped, { persist: true, rerender: false });
+          const overlay = this.querySelector('.hik-debug-terminal-window');
+          if (overlay) {
+            overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(clamped.x)}px`);
+            overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(clamped.y)}px`);
+            overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(clamped.width)}px`);
+            overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(clamped.height)}px`);
+          }
         }
       }
     }
