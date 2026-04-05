@@ -88,7 +88,6 @@ _pushDebugEntry(entry) {
       refocus_step: 40,
       auto_discover: true,
       video_mode: "rtsp_direct",
-      controls_mode: "always",
       accent_color: "var(--primary-color)",
       panel_tint: "8",
       show_camera_info: true,
@@ -99,7 +98,6 @@ _pushDebugEntry(entry) {
       show_status_pills: true,
       show_alarm_dashboard: true,
       show_stream_mode_info: true,
-      show_controls: true,
       show_title: true,
       show_position_info: true,
       speed_orientation: "vertical",
@@ -129,7 +127,6 @@ _pushDebugEntry(entry) {
     this._repeatHandle = null;
     this._videoCard = null;
     this._videoCardConfig = this._videoCardConfig || null;
-    this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
     this._playbackOverlayVisible = this._playbackOverlayVisible ?? false;
     this._playbackRate = this._playbackRate ?? 2;
     this._playbackSeekInFlight = this._playbackSeekInFlight ?? false;
@@ -1147,14 +1144,6 @@ _toggleDebugFilter(kind, value) {
       panel.classList.add('hik-expandable-panel');
     };
 
-    wrapPanel(this.querySelector('.hik-controls-block'), {
-      key: 'controls',
-      title: 'Controls',
-      icon: 'mdi:gamepad-round-up',
-      headerClass: 'hik-controls-head',
-      note: this._controlsVisible ? 'PTZ, zoom, focus, presets' : 'Use Show controls to expand'
-    });
-
     const playbackPanel = this.querySelector('.hik-playback-panel');
     wrapPanel(playbackPanel, {
       key: 'playback',
@@ -1791,7 +1780,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   getCardSize() {
-    return this._controlsVisible ? 11 : 9;
+    return 9;
   }
 
   static getStubConfig() {
@@ -1799,14 +1788,12 @@ _toggleDebugFilter(kind, value) {
       type: "custom:ha-hikvision-bridge-card",
       title: "ha-hikvision-bridge-card",
       auto_discover: true,
-      controls_mode: "always",
       show_camera_info: true,
       show_stream_info: true,
       show_dvr_info: true,
       show_storage_info: true,
       show_alarm_dashboard: true,
       show_stream_mode_info: true,
-      show_controls: true,
       show_playback_panel: true,
       playback_presets: [1, 5, 10, 30, 60, 300, 600, 3600],
     };
@@ -2266,9 +2253,6 @@ _toggleDebugFilter(kind, value) {
 
   handleCenter() {
     this.handleReturnHome();
-    if (this.config.controls_mode === "toggle") {
-      this._controlsVisible = true;
-    }
   }
 
   gotoPreset(preset) {
@@ -2440,119 +2424,6 @@ handleDebugAction(ev) {
   }
 
   return false;
-}
-
-renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges = [] } = {}) {
-  if (this.config.show_controls === false && !this._controlsVisible) return "";
-  return `
-    <div class="hik-panel hik-controls-block">
-      <div class="hik-controls-head">
-        <div class="hik-sub" style="margin:0;"><ha-icon icon="mdi:gamepad-round-up"></ha-icon>Controls</div>
-      </div>
-
-      ${this._controlsVisible ? `
-        <div class="hik-ptz-shell">
-          <div class="hik-console-surface hik-motion-console">
-            <div class="hik-console-topbar">
-              <div>
-                <div class="hik-console-kicker">Motion Console</div>
-              </div>
-              <div class="hik-console-badges">
-                <span class="hik-console-badge"><ha-icon icon="mdi:speedometer"></ha-icon>PTZ ${speed}</span>
-                <span class="hik-console-badge"><ha-icon icon="mdi:timer-outline"></ha-icon>PTZ ${this.getPTZDuration()}ms</span>
-                ${cameraAlarmBadges.length ? `<span class="hik-console-badge"><ha-icon icon="mdi:alert-outline"></ha-icon>${cameraAlarmBadges.length} alarm${cameraAlarmBadges.length === 1 ? "" : "s"}</span>` : ""}
-                <button type="button" class="hik-btn hik-console-action" id="hik-refocus" ${(!online || this._returningHome) ? 'disabled' : ''}>
-                  <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                  <span>Refocus</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="hik-motion-grid hik-motion-grid-overlay">
-              <div class="hik-pad-shell">
-                <div class="hik-pad-wrap hik-webrtc-pad-wrap">
-                  <div class="hik-pad-stage hik-webrtc-stage">
-                    <div class="hik-pad-meta-row">
-                      <span class="hik-console-badge"><ha-icon icon="mdi:star-four-points-outline"></ha-icon>Primary control surface is now on-video</span>
-                    </div>
-                    <div class="hik-webrtc-note hik-overlay-primary-note">
-                      <ha-icon icon="mdi:gesture-tap-hold"></ha-icon>
-                      <div>
-                        <div class="hik-webrtc-note-title">Premium overlay active</div>
-                        <div class="hik-webrtc-note-copy">Pan, tilt, zoom, and refocus now live directly on the video. The lower motion console keeps only speed and status context.</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="hik-rail speed">
-                  <div class="hik-speed-wrap">
-                    <div class="hik-speed-label">
-                      <span>PTZ speed</span>
-                      <span class="hik-speed-value">${speed}</span>
-                    </div>
-                    <div class="hik-speed-track">
-                      <input id="hik-speed" type="range" min="1" max="100" step="1" value="${speed}">
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="hik-console-surface hik-lens-console">
-            <div class="hik-console-topbar">
-              <div>
-                <div class="hik-console-kicker">Lens Console</div>
-              </div>
-              <div class="hik-console-badges">
-                <span class="hik-console-badge"><ha-icon icon="mdi:tune-variant"></ha-icon>Lens ${Number(this.config.lens_step || 60)}</span>
-                <span class="hik-console-badge"><ha-icon icon="mdi:camera-control"></ha-icon>Lens ${this.getLensDuration()}ms</span>
-              </div>
-            </div>
-
-            <div class="hik-lens-grid">
-              <div class="hik-rail focus">
-                <div class="hik-rail-head"><ha-icon icon="mdi:image-filter-center-focus"></ha-icon><span>Focus</span></div>
-                <div class="hik-rail-stack horizontal lens-pair">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus near" aria-label="Focus near">
-                    <ha-icon icon="mdi:arrow-expand-horizontal"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">Near</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="focus" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus far" aria-label="Focus far">
-                    <ha-icon icon="mdi:arrow-collapse-horizontal"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Far</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="hik-rail iris">
-                <div class="hik-rail-head"><ha-icon icon="mdi:camera-iris"></ha-icon><span>Iris</span></div>
-                <div class="hik-rail-stack horizontal lens-pair">
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Open iris" aria-label="Open iris">
-                    <ha-icon icon="mdi:brightness-7"></ha-icon>
-                    <span class="hik-rail-sign">+</span>
-                    <span class="hik-rail-text">Open</span>
-                  </button>
-                  <button type="button" class="hik-rail-btn lens-btn" data-service="iris" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Close iris" aria-label="Close iris">
-                    <ha-icon icon="mdi:brightness-5"></ha-icon>
-                    <span class="hik-rail-sign">−</span>
-                    <span class="hik-rail-text">Close</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ` : `
-        <div class="hik-empty" style="text-align:center;">
-          <div style="margin-bottom:8px;">Controls hidden</div>
-          <div class="hik-mini-note">Use the toggle on the video panel to reveal the control console.</div>
-        </div>
-      `}
-    </div>
-  `;
 }
 
 renderPlaybackDebug(debugEntries = []) {
@@ -4100,7 +3971,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const nvrAlarmBadges = this.collectNvrAlarmBadges(globalRefs, dvr);
     const accent = this.normalizeColor(this.config.accent_color);
     const panelTint = Math.max(0, Math.min(24, Number(this.config.panel_tint || 8)));
-    const controlsMode = this.config.controls_mode || "always";
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
@@ -4314,7 +4184,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-icon-btn:hover:not(:disabled), .hik-btn:hover:not(:disabled), .hik-toggle-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.16); }
           .hik-icon-btn:disabled, .hik-btn:disabled, .hik-toggle-btn:disabled { opacity:0.45; cursor:not-allowed; box-shadow:none; }
           .hik-toggle-btn { width:100%; background: color-mix(in srgb, var(--hik-accent) 16%, var(--secondary-background-color)); font-weight:600; }
-          .hik-ptz-shell { display:grid; gap:14px; }
           .hik-motion-grid-overlay { grid-template-columns: minmax(0, 1fr); }
           .hik-webrtc-pad-wrap { min-height: 180px; }
           .hik-webrtc-stage { display:grid; gap:12px; align-content:start; }
@@ -4323,7 +4192,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-webrtc-note-title { font-weight:700; font-size:14px; }
           .hik-webrtc-note-copy { font-size:12px; color:var(--secondary-text-color); line-height:1.45; }
           .hik-webrtc-inline-actions { display:flex; justify-content:flex-start; }
-          .hik-console-surface { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:22px; padding:14px; background: linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 95%, var(--hik-accent) 5%), color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); display:grid; gap:12px; overflow:hidden; }
           .hik-console-topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
           .hik-console-kicker { font-size:10px; letter-spacing:0.12em; text-transform:uppercase; opacity:0.62; }
                     .hik-console-badges { display:flex; gap:8px; flex-wrap:wrap; }
@@ -4345,7 +4213,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-rail-btn ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-rail-sign { font-size:16px; line-height:1; font-weight:700; }
           .hik-rail-text { font-size:10px; line-height:1.1; opacity:0.72; }
-          .hik-pad-shell { display:grid; gap:10px; min-width:0; }
           .hik-pad-stage { display:grid; gap:10px; }
           .hik-pad-meta-row { display:flex; justify-content:flex-end; }
           .hik-lens-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
@@ -4355,15 +4222,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-pad-wrap { border:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); border-radius:20px; padding:10px; background: color-mix(in srgb, var(--card-background-color) 88%, var(--hik-accent) 12%); display:grid; justify-content:center; }
           .hik-pad { display:grid; grid-template-columns:repeat(3,minmax(54px,1fr)); gap:8px; justify-content:center; align-items:center; max-width:230px; width:min(100%,230px); }
           .hik-pad-fallback, .hik-rail.zoom.fallback { display:none !important; }
-          .hik-overlay-primary-note { background:rgba(255,255,255,0.025); border-style:dashed; }
           .hik-pad .hik-icon-btn { min-height:54px; min-width:54px; border-radius:16px; background: color-mix(in srgb, var(--secondary-background-color) 92%, transparent); }
           .hik-pad .hik-icon-btn ha-icon { --mdc-icon-size:18px; }
           .hik-pad .hik-icon-btn.center { background: color-mix(in srgb, var(--hik-accent) 22%, var(--secondary-background-color)); }
           .hik-controls-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom: 12px; }
-          .hik-speed-wrap { display:grid; gap:8px; min-width:0; }
-          .hik-speed-label { display:flex; justify-content:space-between; align-items:center; font-size: 12px; gap:8px; }
-          .hik-speed-value { font-weight: 700; opacity: 0.8; color: var(--hik-accent); }
-          .hik-speed-track { width:100%; }
           input[type=range] { width: 100%; accent-color: var(--hik-accent); }
           .hik-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
           .hik-meta { display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px; font-size:14px; }
@@ -4533,7 +4395,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
           .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
           .hik-video-block video, .hik-video-block img, .hik-video-block iframe { width:100%; height:100%; object-fit:contain; background:#000; }
-          .hik-controls-block { border-top:1px solid color-mix(in srgb, var(--hik-accent) 10%, var(--divider-color)); padding-top:14px; }
           .hik-overlay-toggle { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3; }
           .hik-overlay-toggle .hik-toggle-btn { width:auto; padding: 0 16px; border-radius:999px; min-height:42px; box-shadow:0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px); }
           .hik-faint { opacity:0.72; }
@@ -4921,8 +4782,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
               </div>
             </div>
 
-            ${this.renderControlsPanel({ online, ptz, speed, cameraAlarmBadges })}
-
 
                 ${this.config.show_position_info !== false ? this.renderPTZIndicator() : ""}
 
@@ -5132,10 +4991,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       this._cleanupGridVideoCards();
     }
 
-    const toggleControls = () => {
-      this._controlsVisible = !this._controlsVisible;
-      this.render();
-    };
     this.querySelector("#hik-playback-overlay-toggle")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       this._playbackOverlayVisible = !this._playbackOverlayVisible;
@@ -5267,10 +5122,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this.querySelector("#hik-playback-rate-overlay")?.addEventListener("change", (ev) => {
       this._setPlaybackRate(ev.target.value);
     });
-    this.querySelector("#hik-speed")?.addEventListener("input", (ev) => {
-      this.config = { ...this.config, speed: Number(ev.target.value) };
-      this.render();
-    });
     this.querySelector('[data-debug-follow-toggle]')?.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -5310,7 +5161,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
 
   render() {
     const videoMode = this.config.video_mode || "rtsp_direct";
-    const controlsMode = this.config.controls_mode || "always";
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
@@ -5334,13 +5184,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
               <option value="rtsp_direct" ${videoMode === "rtsp_direct" ? "selected" : ""}>RTSP direct</option>
               <option value="rtsp" ${videoMode === "rtsp" ? "selected" : ""}>RTSP ISAPI</option>
               <option value="snapshot" ${videoMode === "snapshot" ? "selected" : ""}>Snapshot</option>
-            </select>
-          </div>
-          <div>
-            <label>Controls display</label><br>
-            <select id="controls_mode" style="width:100%;">
-              <option value="always" ${controlsMode === "always" ? "selected" : ""}>Always show controls</option>
-              <option value="toggle" ${controlsMode === "toggle" ? "selected" : ""}>Show only when button is pressed</option>
             </select>
           </div>
           <div><label>Accent color</label><br><input id="accent_color" type="color" value="${accent.startsWith('#') ? accent : '#03a9f4'}" style="width:100%;height:38px;"></div>
@@ -5378,7 +5221,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
             ${this.rowCheckbox("show_stream_info", "Show Stream Info", this.config.show_stream_info !== false)}
             ${this.rowCheckbox("show_stream_mode_info", "Show Stream Mode Info", this.config.show_stream_mode_info !== false)}
             ${this.rowCheckbox("show_alarm_dashboard", "Show Alarm Dashboard", this.config.show_alarm_dashboard !== false)}
-            ${this.rowCheckbox("show_controls", "Show control console by default", this.config.show_controls !== false)}
             ${this.rowCheckbox("show_dvr_info", "Show NVR System Info", this.config.show_dvr_info !== false)}
             ${this.rowCheckbox("show_storage_info", "Show NVR Storage Info", this.config.show_storage_info !== false)}
             ${this.rowCheckbox("show_position_info", "Show PTZ position tracker", this.config.show_position_info !== false)}
@@ -5400,7 +5242,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
@@ -5418,7 +5260,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
       lens_duration: Number(this.querySelector("#lens_duration").value),
       refocus_step: Number(this.querySelector("#refocus_step").value),
       video_mode: this.querySelector("#video_mode").value,
-      controls_mode: this.querySelector("#controls_mode").value,
       accent_color: this.querySelector("#accent_color").value,
       panel_tint: Number(this.querySelector("#panel_tint").value),
       speed_position: this.querySelector("#speed_position").value,
@@ -5431,7 +5272,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
       show_stream_info: this.querySelector("#show_stream_info").checked,
       show_stream_mode_info: this.querySelector("#show_stream_mode_info").checked,
       show_alarm_dashboard: this.querySelector("#show_alarm_dashboard").checked,
-      show_controls: this.querySelector("#show_controls").checked,
       show_dvr_info: this.querySelector("#show_dvr_info").checked,
       show_storage_info: this.querySelector("#show_storage_info").checked,
       show_position_info: this.querySelector("#show_position_info").checked,
