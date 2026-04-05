@@ -1,5 +1,7 @@
 /* UI Split Patch 2.6.1 */
 
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
+
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
   entry._expanded = !entry._expanded;
@@ -4055,6 +4057,36 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
 
+  _resolveVersionInfo(info = {}, camAttrs = {}, dvr = {}, storage = {}) {
+    const frontend = HIKVISION_BRIDGE_CARD_FRONTEND_VERSION;
+    const backend = this.pickValue(
+      [dvr, storage, camAttrs, info],
+      [
+        "backend_version",
+        "integration_version",
+        "bridge_version",
+        "version",
+        "component_version",
+        "sw_version",
+        "software_version"
+      ],
+      ""
+    );
+    return {
+      frontend: String(frontend || "-").trim() || "-",
+      backend: String(backend || "").trim() || "-",
+    };
+  }
+
+  _renderVersionOverlay(versionInfo = {}) {
+    return `
+      <div class="hik-version-overlay" aria-label="Frontend and backend versions">
+        <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
+        <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
+      </div>
+    `;
+  }
+
   render() {
     this._captureDebugViewState?.();
     if (!this._hass) return;
@@ -4102,6 +4134,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const playbackPresets = this.getPlaybackPresets();
     if (!playbackPresets.includes(Number(playbackState.preset))) playbackState.preset = playbackPresets[0] || 1;
     const playbackIndicator = this.formatPlaybackIndicatorState(camAttrs, playbackState);
+    const versionInfo = this._resolveVersionInfo(info, camAttrs, dvr, storage);
     const playbackActive = playbackIndicator.playbackActive;
     const isWebRtc = String(streamMode || "").toLowerCase() === "webrtc_direct";
     const cameraAlarmBadges = this.collectCameraAlarmBadges(refs);
@@ -4453,6 +4486,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
+          .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
+          .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -4762,6 +4797,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
+                    ${this._renderVersionOverlay(versionInfo)}
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
