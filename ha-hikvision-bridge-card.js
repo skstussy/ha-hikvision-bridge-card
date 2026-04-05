@@ -1,6 +1,6 @@
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.4.1";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -1797,298 +1797,6 @@ _toggleDebugFilter(kind, value) {
       window.removeEventListener("blur", blurFinish, opts);
       document.removeEventListener("visibilitychange", visibilityFinish, opts);
     };
-  }
-
-
-  _layoutV4StorageKey() {
-    const cam = this.selectedCamera?.channel || "default";
-    return `ha_hikvision_bridge_card.layout_v4.${cam}`;
-  }
-
-  _loadLayoutV4() {
-    try {
-      const raw = window?.localStorage?.getItem?.(this._layoutV4StorageKey());
-      return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  _saveLayoutV4() {
-    try {
-      if (!this._layoutV4?.panels) return;
-      window?.localStorage?.setItem?.(this._layoutV4StorageKey(), JSON.stringify({ panels: this._layoutV4.panels }));
-    } catch (err) {}
-  }
-
-  _initLayoutV4() {
-    if (this._layoutV4) return;
-    const saved = this._loadLayoutV4() || {};
-    this._layoutV4 = {
-      activePanel: null,
-      dragMode: null,
-      startX: 0,
-      startY: 0,
-      snapPreview: "",
-      panels: saved.panels || {
-        video: { x: 0, y: 0, w: 720, h: 520 },
-        controls: { x: 0, y: 540, w: 720, h: 360 },
-        info: { x: 740, y: 0, w: 420, h: 900 },
-      },
-    };
-  }
-
-  _ensureLayoutV4Styles() {
-    if (this.querySelector("#hik-layout-v4-style")) return;
-    const style = document.createElement("style");
-    style.id = "hik-layout-v4-style";
-    style.textContent = `
-      .hik-wrap.hik-layout-v4-root { position: relative; min-height: 940px; }
-      .hik-layout-v4-panel { position: absolute !important; box-sizing: border-box; transition: left 140ms ease, top 140ms ease, width 140ms ease, height 140ms ease, box-shadow 140ms ease, border-color 140ms ease; z-index: 2; }
-      .hik-layout-v4-panel.hik-layout-v4-dragging,
-      .hik-layout-v4-panel.hik-layout-v4-resizing { transition: none !important; z-index: 12; }
-      .hik-layout-v4-panel > .hik-layout-v4-head {
-        display:flex; align-items:center; justify-content:space-between; gap:8px;
-        min-height:36px; padding:8px 10px; cursor:grab; user-select:none;
-        border-bottom:1px solid rgba(255,255,255,0.08);
-        background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-        border-top-left-radius: inherit; border-top-right-radius: inherit;
-      }
-      .hik-layout-v4-panel > .hik-layout-v4-head:active { cursor:grabbing; }
-      .hik-layout-v4-head-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; letter-spacing:0.02em; min-width:0; }
-      .hik-layout-v4-head-title ha-icon { --mdc-icon-size: 18px; opacity:0.92; }
-      .hik-layout-v4-head-actions { display:inline-flex; align-items:center; gap:6px; }
-      .hik-layout-v4-head-btn { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:0; border-radius:9px; background:rgba(255,255,255,0.08); color:inherit; cursor:pointer; }
-      .hik-layout-v4-head-btn:hover { background:rgba(255,255,255,0.14); }
-      .hik-layout-v4-head-btn ha-icon { --mdc-icon-size: 16px; }
-      .hik-layout-v4-panel[data-layout-panel="video"] .hik-layout-v4-content { padding:0; height:calc(100% - 36px); overflow:hidden; }
-      .hik-layout-v4-panel:not([data-layout-panel="video"]) .hik-layout-v4-content { height:calc(100% - 36px); overflow:auto; }
-      .hik-layout-v4-resize {
-        position:absolute; right:8px; bottom:8px; width:18px; height:18px; border:0; border-radius:6px;
-        cursor:nwse-resize; background:
-        linear-gradient(135deg, transparent 0 35%, rgba(255,255,255,0.18) 35% 50%, transparent 50% 65%, rgba(255,255,255,0.34) 65% 80%, transparent 80% 100%),
-        rgba(255,255,255,0.07);
-        z-index:4;
-      }
-      .hik-layout-v4-snap {
-        position:absolute; pointer-events:none; z-index:11; border-radius:18px;
-        border:2px dashed rgba(90,170,255,0.85);
-        background:linear-gradient(180deg, rgba(90,170,255,0.16), rgba(90,170,255,0.08));
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px rgba(90,170,255,0.24);
-        display:none;
-      }
-      .hik-layout-v4-snap.is-visible { display:block; }
-    `;
-    this.querySelector("ha-card")?.prepend(style);
-  }
-
-  _getLayoutV4Root() {
-    return this.querySelector(".hik-wrap");
-  }
-
-  _getLayoutV4PanelMap() {
-    const gridPanels = Array.from(this.querySelectorAll(".hik-grid > .hik-panel"));
-    const video = gridPanels[0] || null;
-    const controls = gridPanels[1] || null;
-    const info = this.querySelector(".hik-info-grid") || null;
-    return { video, controls, info };
-  }
-
-  _layoutV4Meta(panelId = "") {
-    const id = String(panelId || "");
-    return {
-      title: { video: "Live View", controls: "Controls", info: "Info" }[id] || "Panel",
-      icon: { video: "mdi:cctv", controls: "mdi:gamepad-round-up", info: "mdi:information-outline" }[id] || "mdi:view-dashboard-outline",
-    };
-  }
-
-  _ensureLayoutV4SnapOverlay() {
-    const root = this._getLayoutV4Root();
-    if (!root) return null;
-    let overlay = root.querySelector(".hik-layout-v4-snap");
-    if (!overlay) {
-      overlay = document.createElement("div");
-      overlay.className = "hik-layout-v4-snap";
-      root.appendChild(overlay);
-    }
-    return overlay;
-  }
-
-  _updateLayoutV4SnapOverlay(zone = "") {
-    const overlay = this._ensureLayoutV4SnapOverlay();
-    const root = this._getLayoutV4Root();
-    if (!overlay || !root) return;
-    const rect = root.getBoundingClientRect();
-    overlay.className = "hik-layout-v4-snap";
-    if (!zone) return;
-    overlay.classList.add("is-visible");
-    if (zone === "left") {
-      overlay.style.left = "0px"; overlay.style.top = "0px"; overlay.style.width = `${Math.max(120, Math.round(rect.width / 2) - 5)}px`; overlay.style.height = `${Math.round(rect.height)}px`;
-    } else if (zone === "right") {
-      overlay.style.left = `${Math.max(0, Math.round(rect.width / 2) + 5)}px`; overlay.style.top = "0px"; overlay.style.width = `${Math.max(120, Math.round(rect.width / 2) - 5)}px`; overlay.style.height = `${Math.round(rect.height)}px`;
-    } else if (zone === "top") {
-      overlay.style.left = "0px"; overlay.style.top = "0px"; overlay.style.width = `${Math.round(rect.width)}px`; overlay.style.height = `${Math.max(120, Math.round(rect.height * 0.55) - 5)}px`;
-    }
-  }
-
-  _getLayoutV4SnapZone(clientX, clientY) {
-    const root = this._getLayoutV4Root();
-    if (!root) return "";
-    const rect = root.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const edge = 88;
-    if (x < edge) return "left";
-    if (x > rect.width - edge) return "right";
-    if (y < edge) return "top";
-    return "";
-  }
-
-  _applyLayoutV4Snap(panelId, zone) {
-    const root = this._getLayoutV4Root();
-    const panel = this._layoutV4?.panels?.[panelId];
-    if (!root || !panel || !zone) return;
-    const rect = root.getBoundingClientRect();
-    if (zone === "left") Object.assign(panel, { x: 0, y: 0, w: Math.round(rect.width / 2) - 8, h: Math.round(rect.height) - 8 });
-    else if (zone === "right") Object.assign(panel, { x: Math.round(rect.width / 2) + 8, y: 0, w: Math.round(rect.width / 2) - 8, h: Math.round(rect.height) - 8 });
-    else if (zone === "top") Object.assign(panel, { x: 0, y: 0, w: Math.round(rect.width) - 8, h: Math.max(360, Math.round(rect.height * 0.55)) });
-    this._layoutV4.snapPreview = "";
-    this._updateLayoutV4SnapOverlay("");
-    this._saveLayoutV4();
-  }
-
-  _attachLayoutV4Chrome() {
-    const map = this._getLayoutV4PanelMap();
-    Object.entries(map).forEach(([id, el]) => {
-      if (!el) return;
-      el.dataset.layoutPanel = id;
-      el.classList.add("hik-layout-v4-panel");
-      let head = el.querySelector(":scope > .hik-layout-v4-head");
-      let content = el.querySelector(":scope > .hik-layout-v4-content");
-      if (!head) {
-        const meta = this._layoutV4Meta(id);
-        head = document.createElement("div");
-        head.className = "hik-layout-v4-head";
-        head.dataset.layoutDrag = id;
-        head.innerHTML = `
-          <div class="hik-layout-v4-head-title"><ha-icon icon="${meta.icon}"></ha-icon><span>${meta.title}</span></div>
-          <div class="hik-layout-v4-head-actions">
-            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:left" title="Dock left" aria-label="Dock left"><ha-icon icon="mdi:dock-left"></ha-icon></button>
-            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:right" title="Dock right" aria-label="Dock right"><ha-icon icon="mdi:dock-right"></ha-icon></button>
-            <button type="button" class="hik-layout-v4-head-btn" data-layout-snap="${id}:top" title="Maximize" aria-label="Maximize"><ha-icon icon="mdi:window-maximize"></ha-icon></button>
-          </div>`;
-        el.prepend(head);
-      }
-      if (!content) {
-        content = document.createElement("div");
-        content.className = "hik-layout-v4-content";
-        const children = Array.from(el.childNodes).filter((node) => !(node.classList && (node.classList.contains("hik-layout-v4-head") || node.classList.contains("hik-layout-v4-resize"))));
-        children.forEach((node) => content.appendChild(node));
-        const resize = el.querySelector(":scope > .hik-layout-v4-resize");
-        if (resize) el.insertBefore(content, resize); else el.appendChild(content);
-      }
-      if (!el.querySelector(":scope > .hik-layout-v4-resize")) {
-        const resize = document.createElement("button");
-        resize.type = "button";
-        resize.className = "hik-layout-v4-resize";
-        resize.dataset.layoutResize = id;
-        resize.title = "Resize panel";
-        resize.setAttribute("aria-label", "Resize panel");
-        el.appendChild(resize);
-      }
-    });
-  }
-
-  _applyLayoutV4() {
-    this._initLayoutV4();
-    const root = this._getLayoutV4Root();
-    if (!root) return;
-    root.classList.add("hik-layout-v4-root");
-    const map = this._getLayoutV4PanelMap();
-    let maxBottom = 0;
-    Object.entries(map).forEach(([id, el]) => {
-      if (!el) return;
-      const p = this._layoutV4.panels[id];
-      if (!p) return;
-      el.style.left = `${Math.round(p.x)}px`;
-      el.style.top = `${Math.round(p.y)}px`;
-      el.style.width = `${Math.max(260, Math.round(p.w))}px`;
-      el.style.height = `${Math.max(id === "video" ? 260 : 220, Math.round(p.h))}px`;
-      maxBottom = Math.max(maxBottom, Math.round(p.y + p.h));
-    });
-    root.style.minHeight = `${Math.max(940, maxBottom + 40)}px`;
-    this._updateLayoutV4SnapOverlay(this._layoutV4.snapPreview || "");
-  }
-
-  _bindLayoutV4() {
-    if (this._layoutV4Bound) return;
-    this._layoutV4Bound = true;
-
-    this.addEventListener("pointerdown", (ev) => {
-      const snapBtn = ev.target.closest("[data-layout-snap]");
-      if (snapBtn) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const [panelId, zone] = String(snapBtn.dataset.layoutSnap || "").split(":");
-        this._applyLayoutV4Snap(panelId, zone);
-        this._applyLayoutV4();
-        return;
-      }
-
-      const resize = ev.target.closest("[data-layout-resize]");
-      const drag = ev.target.closest("[data-layout-drag]");
-      if (!resize && !drag) return;
-
-      const panelId = resize?.dataset.layoutResize || drag?.dataset.layoutDrag || "";
-      if (!panelId || !this._layoutV4?.panels?.[panelId]) return;
-
-      ev.preventDefault();
-      ev.stopPropagation();
-      this._layoutV4.activePanel = panelId;
-      this._layoutV4.dragMode = resize ? "resize" : "drag";
-      this._layoutV4.startX = ev.clientX;
-      this._layoutV4.startY = ev.clientY;
-      const map = this._getLayoutV4PanelMap();
-      map[panelId]?.classList.add(this._layoutV4.dragMode === "resize" ? "hik-layout-v4-resizing" : "hik-layout-v4-dragging");
-      try { ev.target.setPointerCapture(ev.pointerId); } catch (err) {}
-    }, true);
-
-    window.addEventListener("pointermove", (ev) => {
-      const state = this._layoutV4;
-      if (!state?.activePanel) return;
-      const panel = state.panels[state.activePanel];
-      if (!panel) return;
-
-      const dx = ev.clientX - state.startX;
-      const dy = ev.clientY - state.startY;
-
-      if (state.dragMode === "drag") {
-        panel.x += dx;
-        panel.y += dy;
-        state.snapPreview = this._getLayoutV4SnapZone(ev.clientX, ev.clientY);
-      } else if (state.dragMode === "resize") {
-        panel.w = Math.max(260, panel.w + dx);
-        panel.h = Math.max(state.activePanel === "video" ? 260 : 220, panel.h + dy);
-      }
-
-      state.startX = ev.clientX;
-      state.startY = ev.clientY;
-      this._applyLayoutV4();
-    }, true);
-
-    window.addEventListener("pointerup", () => {
-      const state = this._layoutV4;
-      if (!state?.activePanel) return;
-      const panelId = state.activePanel;
-      if (state.snapPreview) this._applyLayoutV4Snap(panelId, state.snapPreview);
-      const map = this._getLayoutV4PanelMap();
-      Object.values(map).forEach((el) => el?.classList.remove("hik-layout-v4-dragging", "hik-layout-v4-resizing"));
-      state.activePanel = null;
-      state.dragMode = null;
-      state.snapPreview = "";
-      this._saveLayoutV4();
-      this._applyLayoutV4();
-    }, true);
   }
 
   getCardSize() {
@@ -5618,12 +5326,6 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         terminalBodyScrollTop: ev.currentTarget?.scrollTop || 0,
       };
     }, { passive: true });
-    window.requestAnimationFrame(() => {
-      this._ensureLayoutV4Styles();
-      this._attachLayoutV4Chrome();
-      this._bindLayoutV4();
-      this._applyLayoutV4();
-    });
     this._restoreDebugViewState?.();
   }
 }
@@ -5800,3 +5502,157 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
 
 /* phase3 premium grid intelligence applied on 1.2.7 */
+
+
+
+// ===== V4 FULL ENABLE (AUTO-INJECTED) =====
+
+connectedCallback() {
+  if (super.connectedCallback) super.connectedCallback();
+  setTimeout(() => {
+    try {
+      this._v4_init();
+    } catch(e){ console.warn("V4 init error", e); }
+  }, 500);
+}
+
+_v4_init(){
+  if(this._v4_ready) return;
+  this._v4_ready = true;
+
+  this._v4 = {
+    active:null, mode:null, startX:0, startY:0,
+    snap:null,
+    panels:{
+      video:{x:0,y:0,w:600,h:350},
+      controls:{x:620,y:0,w:320,h:350},
+      info:{x:0,y:370,w:940,h:260}
+    }
+  };
+
+  this._v4_attachPanels();
+  this._v4_bind();
+  this._v4_apply();
+  this._v4_css();
+}
+
+_v4_attachPanels(){
+  const map = {
+    video: this.querySelector(".hik-video-block"),
+    controls: this.querySelector(".hik-controls-block"),
+    info: this.querySelector(".hik-info-grid")
+  };
+
+  Object.entries(map).forEach(([id, el])=>{
+    if(!el) return;
+    el.setAttribute("data-panel", id);
+
+    if(!el.querySelector(".v4-head")){
+      const head=document.createElement("div");
+      head.className="v4-head";
+      head.textContent=id.toUpperCase();
+      el.prepend(head);
+
+      const resize=document.createElement("div");
+      resize.className="v4-resize";
+      el.appendChild(resize);
+    }
+  });
+}
+
+_v4_bind(){
+  this.addEventListener("pointerdown",(e)=>{
+    const panel=e.target.closest("[data-panel]");
+    if(!panel) return;
+
+    if(e.target.closest("button,input,select")) return;
+
+    this._v4.active=panel.dataset.panel;
+    this._v4.startX=e.clientX;
+    this._v4.startY=e.clientY;
+
+    if(e.target.classList.contains("v4-resize")){
+      this._v4.mode="resize";
+    }else if(e.target.classList.contains("v4-head")){
+      this._v4.mode="drag";
+    }
+  });
+
+  window.addEventListener("pointermove",(e)=>{
+    if(!this._v4?.active) return;
+    const p=this._v4.panels[this._v4.active];
+    if(!p) return;
+
+    const dx=e.clientX-this._v4.startX;
+    const dy=e.clientY-this._v4.startY;
+
+    if(this._v4.mode==="drag"){
+      p.x+=dx; p.y+=dy;
+
+      const rect=this.getBoundingClientRect();
+      if(e.clientX<80) this._v4.snap="left";
+      else if(e.clientX>rect.width-80) this._v4.snap="right";
+      else if(e.clientY<80) this._v4.snap="top";
+      else this._v4.snap=null;
+    }
+
+    if(this._v4.mode==="resize"){
+      p.w+=dx; p.h+=dy;
+    }
+
+    this._v4.startX=e.clientX;
+    this._v4.startY=e.clientY;
+
+    this._v4_apply();
+  });
+
+  window.addEventListener("pointerup",()=>{
+    if(!this._v4?.active) return;
+
+    const p=this._v4.panels[this._v4.active];
+    const rect=this.getBoundingClientRect();
+
+    if(this._v4.snap==="left") Object.assign(p,{x:0,y:0,w:rect.width/2,h:rect.height});
+    if(this._v4.snap==="right") Object.assign(p,{x:rect.width/2,y:0,w:rect.width/2,h:rect.height});
+    if(this._v4.snap==="top") Object.assign(p,{x:0,y:0,w:rect.width,h:rect.height/2});
+
+    this._v4.active=null;
+    this._v4.mode=null;
+    this._v4.snap=null;
+
+    this._v4_apply();
+  });
+}
+
+_v4_apply(){
+  const map = {
+    video: this.querySelector(".hik-video-block"),
+    controls: this.querySelector(".hik-controls-block"),
+    info: this.querySelector(".hik-info-grid")
+  };
+
+  Object.entries(map).forEach(([id,el])=>{
+    if(!el) return;
+    const p=this._v4.panels[id];
+    if(!p) return;
+
+    el.style.position="absolute";
+    el.style.left=p.x+"px";
+    el.style.top=p.y+"px";
+    el.style.width=p.w+"px";
+    el.style.height=p.h+"px";
+    el.style.transition="all .15s ease";
+  });
+}
+
+_v4_css(){
+  if(this._v4_css_done) return;
+  this._v4_css_done=true;
+
+  const s=document.createElement("style");
+  s.textContent=`
+  .v4-head{height:32px;background:rgba(255,255,255,.06);cursor:grab;padding:4px}
+  .v4-resize{position:absolute;right:4px;bottom:4px;width:14px;height:14px;background:#aaa;cursor:nwse-resize}
+  `;
+  this.appendChild(s);
+}
