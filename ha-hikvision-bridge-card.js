@@ -158,6 +158,7 @@ _pushDebugEntry(entry) {
     this._talkHoldActive = this._talkHoldActive || false;
     this._talkReleaseCleanup = this._talkReleaseCleanup || null;
     this._videoAccessoryPanel = this._videoAccessoryPanel || "";
+    this._debugOverlayOpen = this._debugOverlayOpen || false;
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
@@ -589,7 +590,7 @@ _pushDebugEntry(entry) {
   }
 
   _isDebugPanelActive() {
-    return this.config?.debug?.enabled === true && this._videoAccessoryPanel === "debug";
+    return this.config?.debug?.enabled === true && this._debugOverlayOpen === true;
   }
 
   _syncDebugRuntime() {
@@ -607,7 +608,14 @@ _pushDebugEntry(entry) {
 
   _toggleVideoAccessoryPanel(panel = "") {
     const next = String(panel || "");
-    this._videoAccessoryPanel = this._videoAccessoryPanel === next ? "" : next;
+    if (next === "debug") {
+      const willOpen = this._debugOverlayOpen !== true;
+      this._debugOverlayOpen = willOpen;
+      if (willOpen) this._videoAccessoryPanel = "";
+    } else {
+      this._debugOverlayOpen = false;
+      this._videoAccessoryPanel = this._videoAccessoryPanel === next ? "" : next;
+    }
     this._syncDebugRuntime();
     this.render();
   }
@@ -970,8 +978,9 @@ _toggleDebugFilter(kind, value) {
     return entry?.details?.trace_id || "";
   }
 
-  renderDebugDashboard(camAttrs = {}) {
+  _renderDebugDashboardBody(camAttrs = {}, options = {}) {
     if (!this.isDebugEnabled()) return "";
+    const terminalMode = options?.terminal === true;
     this._lastCameraAttrs = camAttrs || {};
     this._syncBackendDebugEntries(camAttrs?.playback_debug || []);
     const entries = this._getFilteredDebugEntries();
@@ -984,9 +993,8 @@ _toggleDebugFilter(kind, value) {
     };
     const categories = ["all", "audio", "playback", "video", "backend", "controls", "ptz", "webrtc", "service", "state", "render"];
     const levels = ["all", "error", "warn", "info", "debug"];
-    const openAttr = this._debugDashboardOpen ? "open" : "";
     const searchValue = this.escapeHtml(String(this._debugSearchQuery || ""));
-    const visibleEntries = entries.slice(0, 80);
+    const visibleEntries = entries.slice(0, terminalMode ? 120 : 80);
     const entryKey = (entry) => [
       entry?.time || "",
       entry?.category || "",
@@ -1009,115 +1017,147 @@ _toggleDebugFilter(kind, value) {
       return "is-info";
     };
     return `
+      <div class="hik-debug-warning-banner ${terminalMode ? "is-terminal" : ""}">
+        <ha-icon icon="mdi:alert-outline"></ha-icon>
+        <div>
+          <b>Debug mode enabled</b>
+          <span>Verbose diagnostics can reduce browser performance. Disable when not actively troubleshooting.</span>
+        </div>
+      </div>
+      <div class="hik-debug-overview ${terminalMode ? "is-terminal" : ""}">
+        <div class="hik-mini-note">Current snapshot</div>
+        ${this._renderDebugSnapshot(camAttrs)}
+        <div class="hik-status-row">
+          <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
+          <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:alert-outline"></ha-icon>Warn ${this.escapeHtml(String(summary.warn))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:microphone-outline"></ha-icon>Audio ${this.escapeHtml(String(summary.audio))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Controls ${this.escapeHtml(String(summary.controls))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(summary.ptz))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC ${this.escapeHtml(String(summary.webrtc))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:api"></ha-icon>Service ${this.escapeHtml(String(summary.service))}</span>
+          <span class="hik-pill neutral"><ha-icon icon="mdi:state-machine"></ha-icon>State ${this.escapeHtml(String(summary.state))}</span>
+        </div>
+      </div>
+      <div class="hik-debug-console-shell ${terminalMode ? "is-terminal" : ""}">
+        <div class="hik-debug-toolbar ${terminalMode ? "is-terminal" : ""}">
+          <div class="hik-debug-toolbar-head">
+            <label class="hik-debug-search-wrap">
+              <ha-icon icon="mdi:magnify"></ha-icon>
+              <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
+            </label>
+            <div class="hik-debug-actions">
+              <button type="button" class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
+              <button type="button" class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
+              <button type="button" class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
+              <button type="button" class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
+            </div>
+          </div>
+          <div class="hik-debug-filter-group">
+            ${categories.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.categories || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="categories" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
+          </div>
+          <div class="hik-debug-filter-group">
+            ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
+          </div>
+        </div>
+        <div class="hik-debug-list-shell ${terminalMode ? "is-terminal" : ""}">
+          <div class="hik-debug-list-head" role="row">
+            <span>Level</span>
+            <span>Time</span>
+            <span>Category</span>
+            <span>Event</span>
+            <span>Message</span>
+            <span>Cam</span>
+          </div>
+          <div class="hik-debug-feed" role="log" aria-live="polite">
+            ${visibleEntries.length ? visibleEntries.map((entry) => {
+              const key = entryKey(entry);
+              const selected = key === selectedKey;
+              return `
+                <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" title="${this.escapeHtml(entry.message || entry.event || "")}">
+                  <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
+                  <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
+                  <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
+                  <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
+                  <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
+                  <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
+                </button>`;
+            }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
+          </div>
+        </div>
+        ${selectedEntry ? `
+          <div class="hik-debug-detail-pane ${terminalMode ? "is-terminal" : ""}">
+            <div class="hik-debug-detail-head">
+              <div class="hik-debug-detail-title">
+                <div class="hik-debug-detail-kicker">Selected event</div>
+                <div class="hik-debug-detail-name">${this.escapeHtml(selectedEntry.event || "event")}</div>
+              </div>
+              <div class="hik-debug-actions">
+                <button type="button" class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
+                <button type="button" class="hik-debug-btn" data-debug-entry-action="download">Download</button>
+              </div>
+            </div>
+            <div class="hik-status-row">
+              <span class="hik-pill ${rowClass(selectedEntry) === "is-error" ? "warn" : rowClass(selectedEntry) === "is-warn" ? "primary" : "neutral"}"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(selectedEntry.level || "info")}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(selectedEntry.time || "")}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:shape-outline"></ha-icon>${this.escapeHtml(selectedEntry.category || "general")}</span>
+              <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(selectedEntry.source || "frontend")}</span>
+              ${selectedEntry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(selectedEntry.camera))}</span>` : ""}
+              ${selectedEntry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.details.trace_id))}</span>` : ""}
+            </div>
+            <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
+            <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
+            ${selectedEntry?.details ? `
+              <details class="hik-debug-nested-details">
+                <summary>Details JSON</summary>
+                <pre class="hik-debug-pre">${this.escapeHtml(selectedDetailsText)}</pre>
+              </details>
+            ` : ""}
+          </div>
+        ` : ""}
+      </div>`;
+  }
+
+  renderDebugDashboard(camAttrs = {}) {
+    if (!this.isDebugEnabled()) return "";
+    const openAttr = this._debugDashboardOpen ? "open" : "";
+    return `
       <div class="hik-panel hik-info-card hik-debug-dashboard">
         <details id="hik-debug-dashboard-details" ${openAttr}>
           <summary class="hik-debug-summary">
             <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
-            <span class="hik-mini-note">${this.escapeHtml(String(entries.length))} shown · ${this.escapeHtml(String(summary.total))} captured</span>
           </summary>
-          <div class="hik-debug-warning-banner">
-            <ha-icon icon="mdi:alert-outline"></ha-icon>
-            <div>
-              <b>Debug mode enabled</b>
-              <span>Verbose diagnostics can reduce browser performance. Disable when not actively troubleshooting.</span>
-            </div>
-          </div>
-          <div class="hik-debug-overview">
-            <div class="hik-mini-note">Current snapshot</div>
-            ${this._renderDebugSnapshot(camAttrs)}
-            <div class="hik-status-row">
-              <span class="hik-pill neutral"><ha-icon icon="mdi:counter"></ha-icon>Total ${this.escapeHtml(String(summary.total))}</span>
-              <span class="hik-pill ${summary.error ? "warn" : "neutral"}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Errors ${this.escapeHtml(String(summary.error))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:alert-outline"></ha-icon>Warn ${this.escapeHtml(String(summary.warn))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:microphone-outline"></ha-icon>Audio ${this.escapeHtml(String(summary.audio))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>Playback ${this.escapeHtml(String(summary.playback))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(String(summary.video))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:server-network-outline"></ha-icon>Backend ${this.escapeHtml(String(summary.backend))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Controls ${this.escapeHtml(String(summary.controls))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:axis-arrow"></ha-icon>PTZ ${this.escapeHtml(String(summary.ptz))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>WebRTC ${this.escapeHtml(String(summary.webrtc))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:api"></ha-icon>Service ${this.escapeHtml(String(summary.service))}</span>
-              <span class="hik-pill neutral"><ha-icon icon="mdi:state-machine"></ha-icon>State ${this.escapeHtml(String(summary.state))}</span>
-            </div>
-          </div>
-          <div class="hik-debug-console-shell">
-            <div class="hik-debug-toolbar">
-              <div class="hik-debug-toolbar-head">
-                <label class="hik-debug-search-wrap">
-                  <ha-icon icon="mdi:magnify"></ha-icon>
-                  <input class="hik-debug-search" type="search" placeholder="Search event, message, trace, details" value="${searchValue}" data-debug-search>
-                </label>
-                <div class="hik-debug-actions">
-                  <button type="button" class="hik-debug-btn" data-debug-global-action="copy-all">Copy shown</button>
-                  <button type="button" class="hik-debug-btn" data-debug-global-action="download-all">Download shown</button>
-                  <button type="button" class="hik-debug-btn" data-debug-global-action="copy-last-ptz-trace">Copy last PTZ trace</button>
-                  <button type="button" class="hik-debug-btn" data-debug-global-action="clear">Clear frontend</button>
-                </div>
-              </div>
-              <div class="hik-debug-filter-group">
-                ${categories.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.categories || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="categories" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-              </div>
-              <div class="hik-debug-filter-group">
-                ${levels.map((value) => `<button type="button" class="hik-debug-chip ${(this._debugFilters?.levels || ["all"]).includes(value) ? "active" : ""}" data-debug-filter="levels" data-debug-value="${value}">${this.escapeHtml(value)}</button>`).join("")}
-              </div>
-            </div>
-            <div class="hik-debug-list-shell">
-              <div class="hik-debug-list-head" role="row">
-                <span>Level</span>
-                <span>Time</span>
-                <span>Category</span>
-                <span>Event</span>
-                <span>Message</span>
-                <span>Cam</span>
-              </div>
-              <div class="hik-debug-feed" role="log" aria-live="polite">
-                ${visibleEntries.length ? visibleEntries.map((entry) => {
-                  const key = entryKey(entry);
-                  const selected = key === selectedKey;
-                  return `
-                    <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" title="${this.escapeHtml(entry.message || entry.event || "")}">
-                      <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
-                      <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
-                      <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
-                      <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
-                      <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
-                      <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
-                    </button>`;
-                }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
-              </div>
-            </div>
-            ${selectedEntry ? `
-              <div class="hik-debug-detail-pane">
-                <div class="hik-debug-detail-head">
-                  <div class="hik-debug-detail-title">
-                    <div class="hik-debug-detail-kicker">Selected event</div>
-                    <div class="hik-debug-detail-name">${this.escapeHtml(selectedEntry.event || "event")}</div>
-                  </div>
-                  <div class="hik-debug-actions">
-                    <button type="button" class="hik-debug-btn" data-debug-entry-action="copy">Copy</button>
-                    <button type="button" class="hik-debug-btn" data-debug-entry-action="download">Download</button>
-                  </div>
-                </div>
-                <div class="hik-status-row">
-                  <span class="hik-pill ${rowClass(selectedEntry) === "is-error" ? "warn" : rowClass(selectedEntry) === "is-warn" ? "primary" : "neutral"}"><ha-icon icon="mdi:flag-outline"></ha-icon>${this.escapeHtml(selectedEntry.level || "info")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:timeline-clock-outline"></ha-icon>${this.escapeHtml(selectedEntry.time || "")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:shape-outline"></ha-icon>${this.escapeHtml(selectedEntry.category || "general")}</span>
-                  <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(selectedEntry.source || "frontend")}</span>
-                  ${selectedEntry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(selectedEntry.camera))}</span>` : ""}
-                  ${selectedEntry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.details.trace_id))}</span>` : ""}
-                </div>
-                <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
-                <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
-                ${selectedEntry?.details ? `
-                  <details class="hik-debug-nested-details">
-                    <summary>Details JSON</summary>
-                    <pre class="hik-debug-pre">${this.escapeHtml(selectedDetailsText)}</pre>
-                  </details>
-                ` : ""}
-              </div>
-            ` : ""}
-          </div>
+          ${this._renderDebugDashboardBody(camAttrs, { terminal: false })}
         </details>
+      </div>`;
+  }
+
+  renderDebugOverlay(camAttrs = {}) {
+    if (!this._isDebugPanelActive()) return "";
+    return `
+      <div class="hik-debug-terminal-overlay" role="dialog" aria-modal="false" aria-label="Debug console overlay">
+        <div class="hik-debug-terminal-window">
+          <div class="hik-debug-terminal-head">
+            <div class="hik-debug-terminal-title">
+              <span class="hik-debug-terminal-dot red"></span>
+              <span class="hik-debug-terminal-dot amber"></span>
+              <span class="hik-debug-terminal-dot green"></span>
+              <ha-icon icon="mdi:console-line"></ha-icon>
+              <span>Debug Console</span>
+            </div>
+            <div class="hik-debug-terminal-actions">
+              <button type="button" class="hik-video-media-btn" id="hik-debug-overlay-minimize" title="Close debug console" aria-label="Close debug console">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-debug-terminal-body">
+            ${this._renderDebugDashboardBody(camAttrs, { terminal: true })}
+          </div>
+        </div>
       </div>`;
   }
 
@@ -3749,7 +3789,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
     if (this.config.show_storage_info === false && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
-    if (this.config.debug?.enabled !== true && this._videoAccessoryPanel === "debug") this._videoAccessoryPanel = "";
+    if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
       <div class="hik-panel hik-info-card hik-video-accessory-panel">
@@ -3806,14 +3846,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       </div>
     ` : "";
 
-    const debugAccessoryPanel = this.config.debug?.enabled === true && this._videoAccessoryPanel === "debug" ? this.renderDebugDashboard(camAttrs) : "";
     const videoAccessoryPanelContent = this._videoAccessoryPanel === "stream_mode"
       ? streamModeAccessoryPanel
       : this._videoAccessoryPanel === "storage"
         ? storageAccessoryPanel
-        : this._videoAccessoryPanel === "debug"
-          ? debugAccessoryPanel
-          : "";
+        : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -4036,6 +4073,24 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-mini-select span { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.72; }
           .hik-video-mini-select select, .hik-video-mini-input { background:transparent; color:inherit; border:none; outline:none; font-size:12px; min-width:112px; }
           .hik-video-volume-rail { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.8vw, 12px); border-radius:clamp(10px, 1vw, 14px); display:flex; align-items:center; gap:8px; background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }          .hik-video-volume-rail.compact { min-width:160px; padding-right:10px; align-self:flex-start; }          .hik-overlay-slider-value { font-size:11px; font-weight:700; opacity:0.84; min-width:38px; text-align:right; }          .hik-video-playback-panel { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(92%, 520px); display:grid; gap:10px; padding:12px; border-radius:18px; pointer-events:auto; background:rgba(18,18,22,0.46); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(14px) saturate(1.1); box-shadow:0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-panel.is-recording { border-color:rgba(255,80,80,0.46); box-shadow:0 0 0 1px rgba(255,80,80,0.16), 0 12px 26px rgba(0,0,0,0.32); }          .hik-video-playback-head { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }          .hik-video-playback-title { display:inline-flex; align-items:center; gap:8px; font-weight:700; }          .hik-video-playback-title ha-icon { --mdc-icon-size:16px; color:#ff6b6b; }          .hik-video-playback-state { font-size:12px; opacity:0.84; }          .hik-video-playback-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px, 0.45fr); gap:10px; }          .hik-video-playback-actions { display:flex; gap:var(--hik-ov-gap); justify-content:center; flex-wrap:wrap; }
+          .hik-debug-terminal-overlay { position:absolute; inset:12px; z-index:12; display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
+          .hik-debug-terminal-overlay::before { content:""; position:absolute; inset:0; border-radius:18px; background:linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.24)); pointer-events:none; }
+          .hik-debug-terminal-window { width:min(100%, 980px); max-height:min(78vh, 820px); display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; pointer-events:auto; background:linear-gradient(180deg, rgba(8,12,16,0.985), rgba(10,14,20,0.97)); border:1px solid rgba(120,255,178,0.16); box-shadow:0 24px 64px rgba(0,0,0,0.58), 0 0 0 1px rgba(77,208,132,0.06); backdrop-filter:blur(14px) saturate(1.08); }
+          .hik-debug-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:linear-gradient(180deg, rgba(18,25,32,0.98), rgba(11,16,22,0.96)); border-bottom:1px solid rgba(120,255,178,0.12); }
+          .hik-debug-terminal-title { display:inline-flex; align-items:center; gap:10px; font-weight:700; letter-spacing:0.02em; }
+          .hik-debug-terminal-title ha-icon { --mdc-icon-size:16px; color:#87f7b9; }
+          .hik-debug-terminal-dot { width:10px; height:10px; border-radius:50%; display:inline-block; box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset; }
+          .hik-debug-terminal-dot.red { background:#ff5f57; }
+          .hik-debug-terminal-dot.amber { background:#ffbd2e; }
+          .hik-debug-terminal-dot.green { background:#28c840; }
+          .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; }
+          .hik-debug-terminal-body { min-height:0; overflow:auto; padding:12px; display:grid; gap:12px; background:rgba(5,8,12,0.22); }
+          .hik-debug-warning-banner.is-terminal { background:rgba(80,180,120,0.06); border-color:rgba(120,255,178,0.12); }
+          .hik-debug-overview.is-terminal { background:rgba(10,14,20,0.72); border:1px solid rgba(120,255,178,0.08); border-radius:14px; padding:12px; }
+          .hik-debug-console-shell.is-terminal { background:rgba(6,10,14,0.74); border:1px solid rgba(120,255,178,0.1); box-shadow:none; }
+          .hik-debug-toolbar.is-terminal { background:rgba(12,18,24,0.88); border-bottom:1px solid rgba(120,255,178,0.1); }
+          .hik-debug-list-shell.is-terminal { min-height:260px; max-height:42vh; }
+          .hik-debug-detail-pane.is-terminal { background:rgba(9,13,18,0.86); border-color:rgba(120,255,178,0.1); }
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
@@ -4348,7 +4403,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         </button>
                       ` : ""}
                       ${this.config.debug?.enabled === true ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "debug" ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._videoAccessoryPanel === "debug" ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._videoAccessoryPanel === "debug" ? "Hide debug dashboard" : "Show debug dashboard"}">
+                        <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
@@ -4435,6 +4490,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
+                ${this.renderDebugOverlay(camAttrs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
             </div>
@@ -4484,6 +4540,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._toggleVideoAccessoryPanel("debug");
       });
     }
+    this.querySelector("#hik-debug-overlay-minimize")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._debugOverlayOpen) {
+        this._toggleVideoAccessoryPanel("debug");
+      }
+    });
 
     const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
     if (streamModeOverlayToggle) {
