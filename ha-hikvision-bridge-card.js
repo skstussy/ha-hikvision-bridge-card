@@ -866,6 +866,13 @@ _buildBackendDebugEntries(debugEntries = []) {
     const responseStatus = Number(entry?.response?.status || 0);
     const legacyLevel = responseStatus >= 400 || entry?.ok === false || entry?.reason || entry?.error ? "error" : "info";
     const cameraId = entry?.camera_id || entry?.camera || this.selectedCamera?.channel || "";
+    const classification = String(
+      entry?.classification
+      || entry?.response?.classification
+      || entry?.context?.classification
+      || entry?.details?.classification
+      || ""
+    ).trim().toLowerCase();
     return {
       idx: entry?.id || `backend-${index}-${entry?.requested_time || entry?.search_start || entry?.ts || index}`,
       time: entry?.ts || entry?.time || entry?.requested_time || entry?.search_start || new Date().toISOString(),
@@ -875,8 +882,10 @@ _buildBackendDebugEntries(debugEntries = []) {
       event: entry?.event || "backend_event",
       message: entry?.message || entry?.reason || entry?.error || `Backend event${responseStatus ? ` HTTP ${responseStatus}` : ""}`,
       camera: cameraId ? String(cameraId) : "",
+      classification,
       details: this._sanitizeDebugObject({
         entry_id: entry?.entry_id,
+        classification,
         context: entry?.context,
         track_id: entry?.track_id,
         requested_time: entry?.requested_time,
@@ -1291,8 +1300,10 @@ _toggleDebugFilter(kind, value) {
               <span class="hik-pill neutral"><ha-icon icon="mdi:shape-outline"></ha-icon>${this.escapeHtml(selectedEntry.category || "general")}</span>
               <span class="hik-pill neutral"><ha-icon icon="mdi:source-branch"></ha-icon>${this.escapeHtml(selectedEntry.source || "frontend")}</span>
               ${selectedEntry.camera ? `<span class="hik-pill neutral"><ha-icon icon="mdi:cctv"></ha-icon>CH ${this.escapeHtml(String(selectedEntry.camera))}</span>` : ""}
+              ${selectedEntry.classification ? `<span class="hik-pill neutral"><ha-icon icon="mdi:shape-plus-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.classification))}</span>` : ""}
               ${selectedEntry?.details?.trace_id ? `<span class="hik-pill neutral"><ha-icon icon="mdi:timeline-text-outline"></ha-icon>${this.escapeHtml(String(selectedEntry.details.trace_id))}</span>` : ""}
             </div>
+            ${selectedEntry.classification ? `<div class="hik-debug-classification-note">Endpoint classification: <b>${this.escapeHtml(String(selectedEntry.classification))}</b></div>` : ""}
             <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
             <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
             ${selectedEntry?.details ? `
@@ -2910,6 +2921,92 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       .replace(/^./, (m) => m.toUpperCase());
   }
 
+  _storageCapabilities(storage = {}, dvr = {}, camAttrs = {}) {
+    const storageInfoSupported = this.pickValue([storage, dvr, camAttrs], ["storage_info_supported"], null);
+    const storageHddCapsSupported = this.pickValue([storage, dvr, camAttrs], ["storage_hdd_caps_supported"], null);
+    const storagePresent = this.pickValue([storage, dvr, camAttrs], ["storage_present"], null);
+    const playbackSupported = this.pickValue([camAttrs, storage, dvr], ["playback_supported"], null);
+    return {
+      storageInfoSupported: storageInfoSupported === null ? null : storageInfoSupported === true,
+      storageHddCapsSupported: storageHddCapsSupported === null ? null : storageHddCapsSupported === true,
+      storagePresent: storagePresent === null ? null : storagePresent === true,
+      playbackSupported: playbackSupported === null ? null : playbackSupported === true,
+    };
+  }
+
+  _canShowStoragePanel(storage = {}, dvr = {}, camAttrs = {}) {
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    if (caps.storagePresent === false) return false;
+    if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) return false;
+    return this.config.show_storage_info !== false;
+  }
+
+  _canShowPlaybackControls(storage = {}, dvr = {}, camAttrs = {}) {
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    if (caps.playbackSupported !== null) return caps.playbackSupported;
+    if (caps.storagePresent === false) return false;
+    if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) return false;
+    return this.config.show_playback_panel !== false;
+  }
+
+  _buildCapabilityNotices(camAttrs = {}, storage = {}, dvr = {}) {
+    const notices = [];
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    const ptzCapabilityMode = String(camAttrs.ptz_capability_mode || "").trim();
+    const ptzImplementation = String(camAttrs.ptz_implementation || "").trim();
+    const ptzUnsupportedReason = String(camAttrs.ptz_unsupported_reason || "").trim();
+    const ptzSupported = camAttrs.ptz_supported === true;
+
+    if (!ptzSupported && (ptzCapabilityMode || ptzImplementation || ptzUnsupportedReason)) {
+      notices.push({
+        icon: 'mdi:axis-arrow-lock',
+        title: 'PTZ controls hidden',
+        text: ptzUnsupportedReason || `This build only enables PTZ when the device exposes a compatible ${ptzImplementation || ptzCapabilityMode || 'supported'} mode.`,
+      });
+    }
+
+    if (caps.playbackSupported === false) {
+      let reason = 'Recording playback is unavailable on this device.';
+      if (caps.storagePresent === false) reason = 'Recording playback is hidden because no recording storage is detected.';
+      else if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) reason = 'Recording playback is hidden because the NVR does not expose supported storage capability endpoints.';
+      notices.push({
+        icon: 'mdi:play-box-multiple-outline',
+        title: 'Playback unavailable',
+        text: reason,
+      });
+    }
+
+    if (caps.storagePresent === false || (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false)) {
+      let reason = 'Storage details are hidden because the device does not expose supported HDD information.';
+      if (caps.storagePresent === false) reason = 'Storage details are hidden because no HDD or recording media is detected on this device.';
+      notices.push({
+        icon: 'mdi:harddisk-remove',
+        title: 'Storage panel hidden',
+        text: reason,
+      });
+    }
+
+    return notices;
+  }
+
+  renderCapabilityBanner(camAttrs = {}, storage = {}, dvr = {}) {
+    const notices = this._buildCapabilityNotices(camAttrs, storage, dvr);
+    if (!notices.length) return '';
+    return `
+      <div class="hik-capability-banner">
+        ${notices.map((notice) => `
+          <div class="hik-capability-banner-item">
+            <ha-icon icon="${notice.icon}"></ha-icon>
+            <div>
+              <b>${this.escapeHtml(notice.title || 'Capability note')}</b>
+              <span>${this.escapeHtml(notice.text || '')}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   summarizeStorage(attrs = {}, stateObj = null) {
     const sourceHdds = Array.isArray(attrs.hdds) ? attrs.hdds : [];
     const hdds = sourceHdds.map((disk, index) => {
@@ -2954,6 +3051,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       diskMode,
       health,
       hdds,
+      storageInfoSupported: attrs.storage_info_supported === true,
+      storageHddCapsSupported: attrs.storage_hdd_caps_supported === true,
+      storageExtraCapsSupported: attrs.storage_extra_caps_supported === true,
+      storagePresent: attrs.storage_present === true,
+      playbackSupported: attrs.playback_supported === true,
     };
   }
 
@@ -3868,6 +3970,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const dvr = dvrEntity?.attributes || {};
     const storage = storageEntity?.attributes || {};
     const storageSummary = this.summarizeStorage(storage, storageEntity);
+    const storagePanelSupported = this._canShowStoragePanel(storage, dvr, camAttrs);
+    const playbackPanelSupported = this._canShowPlaybackControls(storage, dvr, camAttrs);
     const online = onlineEntity ? onlineEntity.state === "on" : camAttrs.online !== false;
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
@@ -3878,6 +3982,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
     const entityName = refs.camera || "-";
     const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_proxy_supported ? "proxy" : (camAttrs.ptz_direct_supported ? "direct" : "none"));
+    const ptzCapabilityMode = camAttrs.ptz_capability_mode || info.ptz_capability_mode || "-";
+    const ptzImplementation = camAttrs.ptz_implementation || info.ptz_implementation || "-";
+    const ptzUnsupportedReason = camAttrs.ptz_unsupported_reason || info.ptz_unsupported_reason || "";
     const streamMode = String(camAttrs.stream_mode || "rtsp_direct").toLowerCase();
     const videoMethod = camAttrs.video_method || (streamMode === "snapshot" ? "Snapshot" : streamMode === "webrtc_direct" ? "WebRTC Direct" : streamMode === "webrtc" ? "WebRTC" : streamMode === "rtsp_direct" ? "RTSP Direct" : "RTSP");
     const playbackState = this.syncPlaybackState(camAttrs);
@@ -3906,6 +4013,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
             ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
             ["Control method", ptzMode || "-"],
+            ["PTZ capability", ptzCapabilityMode || "-"],
+            ["PTZ implementation", ptzImplementation || "-"],
+            ["PTZ unsupported reason", ptzUnsupportedReason || "-"],
             ["Firmware", this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-")],
             ["Serial", this.pickValue([info, camAttrs], ["serial_number", "serial"], "-")],
           ])}
@@ -3977,7 +4087,8 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
-    if (this.config.show_storage_info === false && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
+    if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
 
     const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
@@ -4286,6 +4397,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
+          .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
+          .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.24); background:rgba(245,166,35,0.08); color:var(--primary-text-color); backdrop-filter: blur(10px); }
+          .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-capability-banner-item b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-capability-banner-item span { display:block; font-size:12px; opacity:0.88; line-height:1.4; }
           .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
           .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
           .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
@@ -4332,6 +4448,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px 12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.08)); }
           .hik-debug-summary::-webkit-details-marker { display:none; }
           .hik-debug-warning-banner { margin:0 14px 12px; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:16px; border:1px solid rgba(245,166,35,0.28); background:linear-gradient(180deg, rgba(245,166,35,0.12), rgba(245,166,35,0.08)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); color:var(--primary-text-color); }
+          .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
+          .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:16px; border:1px solid rgba(245,166,35,0.24); background:linear-gradient(180deg, rgba(245,166,35,0.12), rgba(245,166,35,0.07)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); color:var(--primary-text-color); }
+          .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-capability-banner-item b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-capability-banner-item span { display:block; font-size:12px; opacity:0.88; line-height:1.4; }
           .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
           .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
           .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
@@ -4368,6 +4489,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-detail-title { display:grid; gap:4px; }
           .hik-debug-detail-kicker { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.62; }
           .hik-debug-detail-name { font-size:15px; font-weight:700; }
+          .hik-debug-classification-note { margin:8px 0 0; padding:10px 12px; border-radius:14px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.03); font-size:12px; line-height:1.45; color:rgba(255,255,255,0.88); }
           .hik-debug-detail-message { font-size:13px; line-height:1.45; opacity:0.9; padding:10px 12px; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); }
           .hik-debug-nested-details > summary { cursor:pointer; font-size:12px; opacity:0.9; }
           .hik-debug-pre { margin:8px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.38; padding:12px; border-radius:14px; background:rgba(10,14,20,0.40); border:1px solid rgba(255,255,255,0.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
@@ -4589,7 +4711,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
                         </button>
                       ` : ""}
-                      ${this.config.show_storage_info !== false ? `
+                      ${storagePanelSupported ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
                           <ha-icon icon="mdi:harddisk"></ha-icon>
                         </button>
@@ -4599,10 +4721,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
+                      ${playbackPanelSupported ? `
                       <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
                         <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
                       </button>
+                      ` : ""}
                     </div>
+                    ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
@@ -4620,7 +4745,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
                       </div>
                     ` : ""}
-                    ${(this._playbackOverlayVisible || playbackActive) ? `
+                    ${playbackPanelSupported && (this._playbackOverlayVisible || playbackActive) ? `
                       <div class="hik-video-playback-panel ${playbackActive ? "is-recording" : "is-standby"}">
                         <div class="hik-video-playback-head">
                           <div class="hik-video-playback-title">
