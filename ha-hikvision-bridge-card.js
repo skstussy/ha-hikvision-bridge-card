@@ -1,6 +1,8 @@
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.17";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.15";
+
+const HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER = "HP-1.3.15";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -88,12 +90,6 @@ _pushDebugEntry(entry) {
       refocus_step: 40,
       auto_discover: true,
       video_mode: "rtsp_direct",
-      video_aspect_ratio: "16 / 9",
-      video_width: "100%",
-      video_max_width: "",
-      video_height: "",
-      video_max_height: "",
-      video_min_height: 240,
       controls_mode: "always",
       accent_color: "var(--primary-color)",
       panel_tint: "8",
@@ -196,51 +192,6 @@ _pushDebugEntry(entry) {
     this._gridFocusTransitionTimer = this._gridFocusTransitionTimer || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
-  }
-
-
-  _normalizeCssSize(value, options = {}) {
-    const { allowPercent = true, allowAuto = false } = options;
-    if (value === null || value === undefined) return "";
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value > 0 ? `${value}px` : "";
-    }
-    const raw = String(value).trim();
-    if (!raw) return "";
-    if (allowAuto && raw === "auto") return raw;
-    const pattern = allowPercent
-      ? /^\d+(?:\.\d+)?(?:px|%|vw|vh|rem|em)$/i
-      : /^\d+(?:\.\d+)?(?:px|vw|vh|rem|em)$/i;
-    if (pattern.test(raw)) return raw;
-    if (/^\d+(?:\.\d+)?$/.test(raw)) return `${raw}px`;
-    return "";
-  }
-
-  _normalizeAspectRatio(value) {
-    const raw = String(value ?? "").trim();
-    if (!raw) return "16 / 9";
-    if (/^\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?$/.test(raw)) return raw.replace(/\s*\/\s*/, " / ");
-    if (/^auto$/i.test(raw)) return "auto";
-    return "16 / 9";
-  }
-
-  _getVideoBlockStyle() {
-    const width = this._normalizeCssSize(this.config.video_width, { allowPercent: true, allowAuto: true }) || "100%";
-    const maxWidth = this._normalizeCssSize(this.config.video_max_width, { allowPercent: true });
-    const height = this._normalizeCssSize(this.config.video_height, { allowPercent: false, allowAuto: true });
-    const maxHeight = this._normalizeCssSize(this.config.video_max_height, { allowPercent: false });
-    const minHeight = this._normalizeCssSize(this.config.video_min_height, { allowPercent: false }) || "240px";
-    const aspectRatio = this._normalizeAspectRatio(this.config.video_aspect_ratio);
-    const styles = [
-      `width:${width}`,
-      maxWidth ? `max-width:${maxWidth}` : "",
-      height ? `height:${height}` : "",
-      maxHeight ? `max-height:${maxHeight}` : "",
-      `min-height:${minHeight}`,
-      `aspect-ratio:${aspectRatio}`,
-      'margin-inline:auto'
-    ].filter(Boolean);
-    return styles.join(';');
   }
 
   set hass(hass) {
@@ -568,7 +519,7 @@ _pushDebugEntry(entry) {
     const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
     const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
     return {
-      card_version: "1.0.22",
+      card_version: `frontend-${HIKVISION_BRIDGE_CARD_FRONTEND_VERSION}`,
       selected_camera: cam?.name || "",
       channel: cam?.channel != null ? String(cam.channel) : "",
       online: !!this.isOnline?.(),
@@ -4131,9 +4082,18 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
   _renderVersionOverlay(versionInfo = {}) {
     return `
-      <div class="hik-version-overlay" aria-label="Frontend and backend versions">
-        <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
+      <div class="hik-version-overlay hik-version-overlay--video" aria-label="Frontend and backend versions">
+        <span class="hik-version-chip hik-version-chip--proof" title="Hard-proof frontend build marker">LIVE FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
         <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
+        <span class="hik-version-chip hik-version-chip--proof" title="Hard-proof marker">${this.escapeHtml(HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER)}</span>
+      </div>
+    `;
+  }
+
+  _renderHeaderVersionMarker(versionInfo = {}) {
+    return html`
+      <div class="hik-header-version-marker" aria-label="Loaded frontend build marker">
+        LIVE FE ${this.escapeHtml(versionInfo.frontend || "-")} · ${this.escapeHtml(HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER)}
       </div>
     `;
   }
@@ -4351,6 +4311,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     this.innerHTML = `
       <ha-card data-entity="${this.escapeHtml(entityName)}" style="--hik-accent:${accent};--hik-panel-tint:${panelTint}%;">
+        ${this._renderHeaderVersionMarker(versionInfo)}
         <style>
           .hik-wrap { padding: 14px; }
           .hik-titlebar { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom: 14px; }
@@ -4539,6 +4500,9 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
           .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
+          .hik-version-overlay--video { top:8px; left:8px; }
+          .hik-version-chip--proof { color:#fff; background:rgba(0,0,0,0.72); border-color:rgba(255,255,255,0.28); }
+          .hik-header-version-marker { margin:0 0 8px 0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:rgba(255,255,255,0.82); opacity:0.96; }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -4793,7 +4757,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}" style="${this._getVideoBlockStyle()}">
+                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"}" aria-label="PTZ video overlay">
@@ -5419,12 +5383,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
               <option value="snapshot" ${videoMode === "snapshot" ? "selected" : ""}>Snapshot</option>
             </select>
           </div>
-          <div><label>Video width</label><br><input id="video_width" type="text" value="${this.config.video_width ?? "100%"}" style="width:100%;" placeholder="100% or 960px"></div>
-          <div><label>Video max width</label><br><input id="video_max_width" type="text" value="${this.config.video_max_width ?? ""}" style="width:100%;" placeholder="960px"></div>
-          <div><label>Video height</label><br><input id="video_height" type="text" value="${this.config.video_height ?? ""}" style="width:100%;" placeholder="Optional fixed height"></div>
-          <div><label>Video max height</label><br><input id="video_max_height" type="text" value="${this.config.video_max_height ?? ""}" style="width:100%;" placeholder="520px"></div>
-          <div><label>Video min height (px)</label><br><input id="video_min_height" type="number" min="120" value="${Number(this.config.video_min_height ?? 240)}" style="width:100%;"></div>
-          <div><label>Video aspect ratio</label><br><input id="video_aspect_ratio" type="text" value="${this.config.video_aspect_ratio ?? "16 / 9"}" style="width:100%;" placeholder="16 / 9"></div>
           <div>
             <label>Controls display</label><br>
             <select id="controls_mode" style="width:100%;">
@@ -5489,7 +5447,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "video_width", "video_max_width", "video_height", "video_max_height", "video_min_height", "video_aspect_ratio", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
@@ -5507,12 +5465,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
       lens_duration: Number(this.querySelector("#lens_duration").value),
       refocus_step: Number(this.querySelector("#refocus_step").value),
       video_mode: this.querySelector("#video_mode").value,
-      video_width: String(this.querySelector("#video_width").value || "").trim() || "100%",
-      video_max_width: String(this.querySelector("#video_max_width").value || "").trim(),
-      video_height: String(this.querySelector("#video_height").value || "").trim(),
-      video_max_height: String(this.querySelector("#video_max_height").value || "").trim(),
-      video_min_height: Number(this.querySelector("#video_min_height").value || 240),
-      video_aspect_ratio: String(this.querySelector("#video_aspect_ratio").value || "16 / 9").trim() || "16 / 9",
       controls_mode: this.querySelector("#controls_mode").value,
       accent_color: this.querySelector("#accent_color").value,
       panel_tint: Number(this.querySelector("#panel_tint").value),
@@ -5549,6 +5501,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
   }
 }
 
+console.info(`[ha-hikvision-bridge-card] frontend ${HIKVISION_BRIDGE_CARD_FRONTEND_VERSION} loaded (${HIKVISION_BRIDGE_CARD_HARD_PROOF_MARKER})`);
 if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
 
 if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.define("ha-hikvision-bridge-card-editor", HikvisionPTZCardEditor);
@@ -5565,3 +5518,5 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
 
 /* phase3 premium grid intelligence applied on 1.2.7 */
+
+
