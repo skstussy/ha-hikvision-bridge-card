@@ -1,6 +1,6 @@
 /* UI Split Patch 2.6.1 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.14";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.4.1-realpatch";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -5330,6 +5330,83 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 }
 
+
+
+// ===== REAL VISIBLE PATCH v1 =====
+_v4realInit() {
+  if (this.__v4realInitDone) return;
+  this.__v4realInitDone = true;
+
+  const apply = () => {
+    const panels = [
+      ["video", ".hik-video-block"],
+      ["controls", ".hik-controls-block"],
+      ["info", ".hik-info-grid"],
+    ];
+
+    panels.forEach(([id, selector]) => {
+      const el = this.querySelector(selector);
+      if (!el) return;
+      el.dataset.panel = id;
+      if (!el.querySelector(":scope > .v4real-head")) {
+        const head = document.createElement("div");
+        head.className = "v4real-head";
+        head.textContent = id.toUpperCase();
+        el.prepend(head);
+      }
+      if (!el.querySelector(":scope > .v4real-resize")) {
+        const resize = document.createElement("div");
+        resize.className = "v4real-resize";
+        el.appendChild(resize);
+      }
+    });
+
+    if (!this.querySelector(":scope > .v4real-style")) {
+      const style = document.createElement("style");
+      style.className = "v4real-style";
+      style.textContent = `
+        .hik-video-block, .hik-controls-block, .hik-info-grid { position: relative !important; }
+        .v4real-head {
+          height: 34px;
+          display:flex;
+          align-items:center;
+          padding: 0 10px;
+          font-weight: 700;
+          letter-spacing: .04em;
+          background: rgba(255,255,255,.08);
+          border-bottom: 1px solid rgba(255,255,255,.08);
+          cursor: grab;
+          user-select: none;
+        }
+        .v4real-resize {
+          position:absolute;
+          right:6px;
+          bottom:6px;
+          width:14px;
+          height:14px;
+          border-radius:3px;
+          background: rgba(255,255,255,.35);
+          cursor: nwse-resize;
+          z-index: 4;
+        }
+      `;
+      this.appendChild(style);
+    }
+  };
+
+  requestAnimationFrame(() => requestAnimationFrame(apply));
+}
+
+firstUpdated(...args) {
+  if (super.firstUpdated) super.firstUpdated(...args);
+  this._v4realInit();
+}
+
+updated(...args) {
+  if (super.updated) super.updated(...args);
+  this._v4realInit();
+}
+
 class HikvisionPTZCardEditor extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
@@ -5502,157 +5579,3 @@ if (!customElements.get("ha-hikvision-bridge-card-editor")) customElements.defin
 /* grid focus stability + audio sync suppression applied on 1.2.7 */
 
 /* phase3 premium grid intelligence applied on 1.2.7 */
-
-
-
-// ===== V4 FULL ENABLE (AUTO-INJECTED) =====
-
-connectedCallback() {
-  if (super.connectedCallback) super.connectedCallback();
-  setTimeout(() => {
-    try {
-      this._v4_init();
-    } catch(e){ console.warn("V4 init error", e); }
-  }, 500);
-}
-
-_v4_init(){
-  if(this._v4_ready) return;
-  this._v4_ready = true;
-
-  this._v4 = {
-    active:null, mode:null, startX:0, startY:0,
-    snap:null,
-    panels:{
-      video:{x:0,y:0,w:600,h:350},
-      controls:{x:620,y:0,w:320,h:350},
-      info:{x:0,y:370,w:940,h:260}
-    }
-  };
-
-  this._v4_attachPanels();
-  this._v4_bind();
-  this._v4_apply();
-  this._v4_css();
-}
-
-_v4_attachPanels(){
-  const map = {
-    video: this.querySelector(".hik-video-block"),
-    controls: this.querySelector(".hik-controls-block"),
-    info: this.querySelector(".hik-info-grid")
-  };
-
-  Object.entries(map).forEach(([id, el])=>{
-    if(!el) return;
-    el.setAttribute("data-panel", id);
-
-    if(!el.querySelector(".v4-head")){
-      const head=document.createElement("div");
-      head.className="v4-head";
-      head.textContent=id.toUpperCase();
-      el.prepend(head);
-
-      const resize=document.createElement("div");
-      resize.className="v4-resize";
-      el.appendChild(resize);
-    }
-  });
-}
-
-_v4_bind(){
-  this.addEventListener("pointerdown",(e)=>{
-    const panel=e.target.closest("[data-panel]");
-    if(!panel) return;
-
-    if(e.target.closest("button,input,select")) return;
-
-    this._v4.active=panel.dataset.panel;
-    this._v4.startX=e.clientX;
-    this._v4.startY=e.clientY;
-
-    if(e.target.classList.contains("v4-resize")){
-      this._v4.mode="resize";
-    }else if(e.target.classList.contains("v4-head")){
-      this._v4.mode="drag";
-    }
-  });
-
-  window.addEventListener("pointermove",(e)=>{
-    if(!this._v4?.active) return;
-    const p=this._v4.panels[this._v4.active];
-    if(!p) return;
-
-    const dx=e.clientX-this._v4.startX;
-    const dy=e.clientY-this._v4.startY;
-
-    if(this._v4.mode==="drag"){
-      p.x+=dx; p.y+=dy;
-
-      const rect=this.getBoundingClientRect();
-      if(e.clientX<80) this._v4.snap="left";
-      else if(e.clientX>rect.width-80) this._v4.snap="right";
-      else if(e.clientY<80) this._v4.snap="top";
-      else this._v4.snap=null;
-    }
-
-    if(this._v4.mode==="resize"){
-      p.w+=dx; p.h+=dy;
-    }
-
-    this._v4.startX=e.clientX;
-    this._v4.startY=e.clientY;
-
-    this._v4_apply();
-  });
-
-  window.addEventListener("pointerup",()=>{
-    if(!this._v4?.active) return;
-
-    const p=this._v4.panels[this._v4.active];
-    const rect=this.getBoundingClientRect();
-
-    if(this._v4.snap==="left") Object.assign(p,{x:0,y:0,w:rect.width/2,h:rect.height});
-    if(this._v4.snap==="right") Object.assign(p,{x:rect.width/2,y:0,w:rect.width/2,h:rect.height});
-    if(this._v4.snap==="top") Object.assign(p,{x:0,y:0,w:rect.width,h:rect.height/2});
-
-    this._v4.active=null;
-    this._v4.mode=null;
-    this._v4.snap=null;
-
-    this._v4_apply();
-  });
-}
-
-_v4_apply(){
-  const map = {
-    video: this.querySelector(".hik-video-block"),
-    controls: this.querySelector(".hik-controls-block"),
-    info: this.querySelector(".hik-info-grid")
-  };
-
-  Object.entries(map).forEach(([id,el])=>{
-    if(!el) return;
-    const p=this._v4.panels[id];
-    if(!p) return;
-
-    el.style.position="absolute";
-    el.style.left=p.x+"px";
-    el.style.top=p.y+"px";
-    el.style.width=p.w+"px";
-    el.style.height=p.h+"px";
-    el.style.transition="all .15s ease";
-  });
-}
-
-_v4_css(){
-  if(this._v4_css_done) return;
-  this._v4_css_done=true;
-
-  const s=document.createElement("style");
-  s.textContent=`
-  .v4-head{height:32px;background:rgba(255,255,255,.06);cursor:grab;padding:4px}
-  .v4-resize{position:absolute;right:4px;bottom:4px;width:14px;height:14px;background:#aaa;cursor:nwse-resize}
-  `;
-  this.appendChild(s);
-}
