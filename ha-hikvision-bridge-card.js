@@ -2938,6 +2938,64 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     return this.config.show_playback_panel !== false;
   }
 
+  _buildCapabilityNotices(camAttrs = {}, storage = {}, dvr = {}) {
+    const notices = [];
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    const ptzCapabilityMode = String(camAttrs.ptz_capability_mode || "").trim();
+    const ptzImplementation = String(camAttrs.ptz_implementation || "").trim();
+    const ptzUnsupportedReason = String(camAttrs.ptz_unsupported_reason || "").trim();
+    const ptzSupported = camAttrs.ptz_supported === true;
+
+    if (!ptzSupported && (ptzCapabilityMode || ptzImplementation || ptzUnsupportedReason)) {
+      notices.push({
+        icon: 'mdi:axis-arrow-lock',
+        title: 'PTZ controls hidden',
+        text: ptzUnsupportedReason || `This build only enables PTZ when the device exposes a compatible ${ptzImplementation || ptzCapabilityMode || 'supported'} mode.`,
+      });
+    }
+
+    if (caps.playbackSupported === false) {
+      let reason = 'Recording playback is unavailable on this device.';
+      if (caps.storagePresent === false) reason = 'Recording playback is hidden because no recording storage is detected.';
+      else if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) reason = 'Recording playback is hidden because the NVR does not expose supported storage capability endpoints.';
+      notices.push({
+        icon: 'mdi:play-box-multiple-outline',
+        title: 'Playback unavailable',
+        text: reason,
+      });
+    }
+
+    if (caps.storagePresent === false || (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false)) {
+      let reason = 'Storage details are hidden because the device does not expose supported HDD information.';
+      if (caps.storagePresent === false) reason = 'Storage details are hidden because no HDD or recording media is detected on this device.';
+      notices.push({
+        icon: 'mdi:harddisk-remove',
+        title: 'Storage panel hidden',
+        text: reason,
+      });
+    }
+
+    return notices;
+  }
+
+  renderCapabilityBanner(camAttrs = {}, storage = {}, dvr = {}) {
+    const notices = this._buildCapabilityNotices(camAttrs, storage, dvr);
+    if (!notices.length) return '';
+    return `
+      <div class="hik-capability-banner">
+        ${notices.map((notice) => `
+          <div class="hik-capability-banner-item">
+            <ha-icon icon="${notice.icon}"></ha-icon>
+            <div>
+              <b>${this.escapeHtml(notice.title || 'Capability note')}</b>
+              <span>${this.escapeHtml(notice.text || '')}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   summarizeStorage(attrs = {}, stateObj = null) {
     const sourceHdds = Array.isArray(attrs.hdds) ? attrs.hdds : [];
     const hdds = sourceHdds.map((disk, index) => {
@@ -4328,6 +4386,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
+          .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
+          .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.24); background:rgba(245,166,35,0.08); color:var(--primary-text-color); backdrop-filter: blur(10px); }
+          .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-capability-banner-item b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-capability-banner-item span { display:block; font-size:12px; opacity:0.88; line-height:1.4; }
           .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
           .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
           .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
@@ -4374,6 +4437,11 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px 12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.08)); }
           .hik-debug-summary::-webkit-details-marker { display:none; }
           .hik-debug-warning-banner { margin:0 14px 12px; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:16px; border:1px solid rgba(245,166,35,0.28); background:linear-gradient(180deg, rgba(245,166,35,0.12), rgba(245,166,35,0.08)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); color:var(--primary-text-color); }
+          .hik-capability-banner { margin:10px 0 0; display:grid; gap:8px; }
+          .hik-capability-banner-item { padding:10px 12px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:16px; border:1px solid rgba(245,166,35,0.24); background:linear-gradient(180deg, rgba(245,166,35,0.12), rgba(245,166,35,0.07)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); color:var(--primary-text-color); }
+          .hik-capability-banner-item ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
+          .hik-capability-banner-item b { display:block; font-size:12px; margin-bottom:2px; }
+          .hik-capability-banner-item span { display:block; font-size:12px; opacity:0.88; line-height:1.4; }
           .hik-debug-warning-banner ha-icon { --mdc-icon-size:18px; color:#f5a623; margin-top:1px; }
           .hik-debug-warning-banner b { display:block; font-size:12px; margin-bottom:2px; }
           .hik-debug-warning-banner span { display:block; font-size:12px; opacity:0.85; line-height:1.4; }
@@ -4647,6 +4715,7 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                       </button>
                       ` : ""}
                     </div>
+                    ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
