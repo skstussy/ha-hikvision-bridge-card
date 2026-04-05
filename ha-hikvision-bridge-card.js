@@ -4833,40 +4833,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="${this._ptzOverlayPinned ? "mdi:axis-arrow-lock" : "mdi:axis-arrow-info"}"></ha-icon>
                         </button>
                       ` : ""}
-                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
-                        <div class="hik-video-ptz-visible-actions" aria-label="PTZ overlay actions">
-                          <button type="button" class="hik-video-media-btn hik-set-home-action" ${(!online || this._returningHome) ? 'disabled' : ''} title="Set current PTZ position as home" aria-label="Set current PTZ position as home">
-                            <ha-icon icon="mdi:home-edit-outline"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn hik-return-home-action" ${(this._returningHome || (!this.getPTZState().pan && !this.getPTZState().tilt && !this.getPTZState().zoom) || !this.canPtz() || !online) ? 'disabled' : ''} title="Return PTZ to home" aria-label="Return PTZ to home">
-                            <ha-icon icon="mdi:home-arrow-left"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn lens-btn" data-service="focus" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus near" aria-label="Focus near">
-                            <ha-icon icon="mdi:plus"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn lens-btn" data-service="focus" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Focus far" aria-label="Focus far">
-                            <ha-icon icon="mdi:minus"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn lens-btn" data-service="iris" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Iris open" aria-label="Iris open">
-                            <ha-icon icon="mdi:plus-circle-outline"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn lens-btn" data-service="iris" data-direction="-1" ${(!online || this._returningHome) ? 'disabled' : ''} title="Iris close" aria-label="Iris close">
-                            <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-media-btn refocus-overlay-btn" ${(!online || this._returningHome) ? 'disabled' : ''} title="Refocus" aria-label="Refocus">
-                            <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
-                          </button>
-                        </div>
-                        ${presets.length ? `
-                          <div class="hik-video-ptz-visible-presets" aria-label="PTZ presets">
-                            ${presets.map((p) => {
-                              const pid = typeof p === "object" ? p.id : p;
-                              const pname = typeof p === "object" ? (p.name || `Preset ${p.id}`) : `Preset ${p}`;
-                              return `<button type="button" class="hik-video-preset-chip preset-btn" data-preset="${pid}" ${(!ptz || !online || this._returningHome) ? "disabled" : ""} title="${this.escapeHtml(pname)}" aria-label="${this.escapeHtml(pname)}">${this.escapeHtml(pname)}</button>`;
-                            }).join("")}
-                          </div>
-                        ` : ""}
-                      ` : ""}
                       ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
