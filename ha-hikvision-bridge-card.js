@@ -2928,6 +2928,143 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 }
 
 
+  buildSystemInfoSections({
+    entityName = "-",
+    cam = {},
+    info = {},
+    camAttrs = {},
+    stream = {},
+    streamEntity = null,
+    cameraEntity = null,
+    streamProfile = "main",
+    streamProfileLabel = "Main-stream",
+    rtspUrl = "",
+    directRtspUrl = "",
+    globalRefs = {},
+    dvr = {},
+    dvrEntity = null,
+    storage = {},
+    streamMode = "",
+    videoMethod = "",
+    ptzMode = "",
+    ptzCapabilityMode = "",
+    ptzImplementation = "",
+    ptzUnsupportedReason = "",
+  } = {}) {
+    const cameraRows = [
+      { name: "Entity", value: entityName || "-", icon: "mdi:identifier" },
+      { name: "Channel", value: String(cam.channel || this.pickValue([info, camAttrs], ["channel"], "-")), icon: "mdi:numeric" },
+      { name: "Model", value: this.pickValue([info, camAttrs], ["model"], "-"), icon: "mdi:cctv" },
+      { name: "IP", value: this.pickValue([info, camAttrs], ["ip_address", "ip"], "-"), icon: "mdi:ip-network-outline" },
+      { name: "Manage port", value: this.pickValue([info, camAttrs], ["manage_port"], "-"), icon: "mdi:ethernet" },
+      { name: "Control method", value: ptzMode || "-", icon: "mdi:gamepad-square-outline" },
+      { name: "PTZ capability", value: ptzCapabilityMode || "-", icon: "mdi:axis-arrow-info" },
+      { name: "PTZ implementation", value: ptzImplementation || "-", icon: "mdi:code-tags" },
+      { name: "PTZ unsupported reason", value: ptzUnsupportedReason || "-", icon: "mdi:alert-circle-outline" },
+      { name: "Firmware", value: this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-"), icon: "mdi:chip" },
+      { name: "Serial", value: this.pickValue([info, camAttrs], ["serial_number", "serial"], "-"), icon: "mdi:barcode" },
+    ];
+
+    const streamRows = [
+      { name: "Profile", value: streamProfileLabel, icon: "mdi:camera-switch" },
+      { name: "Stream", value: streamEntity?.state || cameraEntity?.state || "-", icon: "mdi:video-wireless-outline" },
+      { name: "Stream ID", value: camAttrs.stream_id || stream.stream_id || info.stream_id || "-", icon: "mdi:identifier" },
+      { name: "Transport", value: camAttrs.stream_transport || stream.transport || "-", icon: "mdi:transit-connection-variant" },
+      { name: "Bitrate mode", value: camAttrs.stream_bitrate_mode || stream.bitrate_mode || "-", icon: "mdi:speedometer-medium" },
+      { name: "Bitrate", value: camAttrs.stream_bitrate || stream.constant_bitrate || stream.bitrate || "-", icon: "mdi:gauge" },
+      { name: "Max frame rate", value: camAttrs.stream_max_frame_rate || stream.max_frame_rate || stream.frame_rate || "-", icon: "mdi:video-high-definition" },
+      { name: "Audio codec", value: camAttrs.stream_audio_codec || stream.audio_codec || "-", icon: "mdi:music-note-outline" },
+      { name: "RTSP URL", value: rtspUrl || "-", icon: "mdi:link-variant" },
+      { name: "Direct RTSP URL", value: directRtspUrl || "-", icon: "mdi:link-box-variant-outline" },
+    ];
+
+    const nvrRows = [
+      { name: "Entity", value: globalRefs.dvr || "Auto-detect pending", icon: "mdi:identifier" },
+      { name: "Name", value: this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], dvrEntity?.state || "-"), icon: "mdi:server" },
+      { name: "Model", value: this.pickValue([dvr], ["model", "device_model", "system_model"], "-"), icon: "mdi:cpu-64-bit" },
+      { name: "Vendor", value: this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision"), icon: "mdi:domain" },
+      { name: "Firmware", value: this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-"), icon: "mdi:chip" },
+      { name: "Serial", value: this.pickValue([dvr], ["serial_number", "serial"], "-"), icon: "mdi:barcode" },
+      { name: "Alarm stream", value: this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected", level: this.alarmOn(globalRefs.alarmStream) ? "good" : "warn", icon: "mdi:shield-bolt-outline" },
+      { name: "Active alarms", value: this.pickValue([dvr], ["active_alarm_count"], 0), icon: "mdi:bell-alert-outline" },
+      { name: "Work mode", value: this.pickValue([dvr], ["work_mode"], this.pickValue([storage], ["work_mode"], "-")), icon: "mdi:cog-outline" },
+    ];
+
+    const streamModeRows = [
+      { name: "Current mode", value: videoMethod || "-", icon: "mdi:television-play" },
+      { name: "Requested mode", value: streamMode || "-", icon: "mdi:transit-connection-variant" },
+      { name: "WebRTC path", value: ["webrtc", "webrtc_direct"].includes(streamMode) ? "Enabled" : "Disabled", level: ["webrtc", "webrtc_direct"].includes(streamMode) ? "good" : "neutral", icon: "mdi:access-point-network" },
+      { name: "RTSP source", value: streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? "Direct RTSP" : streamMode === "snapshot" ? "Camera snapshot" : "ISAPI RTSP", icon: "mdi:video-input-component" },
+      { name: "Live view", value: streamMode === "snapshot" ? "Snapshot" : "Live", icon: "mdi:camera-outline" },
+      { name: "Muted UI", value: streamMode === "snapshot" ? "Managed by HA card" : "Yes", icon: "mdi:volume-off" },
+      { name: "Card helper", value: streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera", icon: "mdi:cards-outline" },
+      { name: "Preferred URL", value: streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-"), icon: "mdi:link-variant" },
+    ];
+
+    return [
+      { key: "camera", title: "camera info", rows: cameraRows },
+      { key: "stream", title: "stream info", rows: streamRows },
+      { key: "nvr", title: "nvr system info", rows: nvrRows },
+      { key: "mode", title: "stream mode", rows: streamModeRows },
+    ];
+  }
+
+  renderSystemInfoOverlay(data = {}) {
+    const sections = this.buildSystemInfoSections(data);
+    const mode = String(data.streamMode || "").toLowerCase();
+    const profile = String(data.streamProfile || "main").toLowerCase();
+    return `
+      <div class="hik-system-terminal-overlay" role="dialog" aria-label="System information overlay">
+        <div class="hik-system-terminal-shell">
+          <div class="hik-system-terminal-head">
+            <div class="hik-system-terminal-title">
+              <span class="hik-system-terminal-dot is-red"></span>
+              <span class="hik-system-terminal-dot is-amber"></span>
+              <span class="hik-system-terminal-dot is-green"></span>
+              <span class="hik-system-terminal-heading">$ hikvision system_info --watch</span>
+            </div>
+            <div class="hik-system-terminal-actions">
+              <span class="hik-system-terminal-badge">${this.escapeHtml((data.entityName || "camera").toString())}</span>
+              <button type="button" class="hik-video-media-btn" id="hik-system-info-overlay-close" title="Close system information" aria-label="Close system information">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-system-terminal-body">
+            <div class="hik-system-terminal-controls">
+              <label class="hik-system-terminal-select">
+                <span>Stream mode</span>
+                <select id="streamMode" class="hik-select">
+                  <option value="webrtc_direct" ${mode === "webrtc_direct" ? "selected" : ""}>WebRTC (Direct RTSP)</option>
+                  <option value="webrtc" ${mode === "webrtc" ? "selected" : ""}>WebRTC (ISAPI RTSP)</option>
+                  <option value="rtsp_direct" ${mode === "rtsp_direct" ? "selected" : ""}>RTSP (Direct)</option>
+                  <option value="rtsp" ${mode === "rtsp" ? "selected" : ""}>RTSP (ISAPI)</option>
+                  <option value="snapshot" ${mode === "snapshot" ? "selected" : ""}>Snapshot</option>
+                </select>
+              </label>
+              <label class="hik-system-terminal-select">
+                <span>Channel stream</span>
+                <select id="streamProfile" class="hik-select">
+                  <option value="main" ${profile === "main" ? "selected" : ""}>Main-stream</option>
+                  <option value="sub" ${profile === "sub" ? "selected" : ""}>Sub-stream</option>
+                </select>
+              </label>
+            </div>
+            <div class="hik-system-terminal-grid">
+              ${sections.map((section) => `
+                <div class="hik-system-terminal-card">
+                  <div class="hik-system-terminal-kicker">${this.escapeHtml(section.title)}</div>
+                  ${this.renderAlarmTable(section.rows, "No data available")}
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+
   formatStorageSize(valueMb) {
     const value = Number(valueMb || 0);
     if (!Number.isFinite(value) || value < 0) return "-";
@@ -3975,122 +4112,12 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
+    const systemInfoOverlaySupported = this.config.show_system_info_overlay !== false;
 
-    if (this.config.show_camera_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:information-outline"></ha-icon>Camera Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", entityName],
-            ["Channel", String(cam.channel || this.pickValue([info, camAttrs], ["channel"], "-"))],
-            ["Model", this.pickValue([info, camAttrs], ["model"], "-")],
-            ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
-            ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
-            ["Control method", ptzMode || "-"],
-            ["PTZ capability", ptzCapabilityMode || "-"],
-            ["PTZ implementation", ptzImplementation || "-"],
-            ["PTZ unsupported reason", ptzUnsupportedReason || "-"],
-            ["Firmware", this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-")],
-            ["Serial", this.pickValue([info, camAttrs], ["serial_number", "serial"], "-")],
-          ])}
-        </div>
-      `);
-    }
-
-    if (this.config.show_stream_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>Stream Info</div>
-          <div class="hik-select-group" style="margin-bottom:12px;">
-            <div class="hik-select-wrap">
-              <ha-icon icon="mdi:camera-switch"></ha-icon>
-              <label for="streamProfile" style="font-size:12px; opacity:0.8;">Channel stream</label>
-            </div>
-            <div class="hik-select-wrap">
-              <select id="streamProfile" class="hik-select">
-                <option value="main" ${streamProfile === "main" ? "selected" : ""}>Main-stream</option>
-                <option value="sub" ${streamProfile === "sub" ? "selected" : ""}>Sub-stream</option>
-              </select>
-            </div>
-          </div>
-          ${this.buildMetaGrid([
-            ["Profile", streamProfileLabel],
-            ["Stream", streamEntity?.state || cameraEntity?.state || "-"],
-            ["Stream ID", camAttrs.stream_id || stream.stream_id || info.stream_id || "-"],
-            ["Transport", camAttrs.stream_transport || stream.transport || "-"],
-            ["Bitrate mode", camAttrs.stream_bitrate_mode || stream.bitrate_mode || "-"],
-            ["Bitrate", camAttrs.stream_bitrate || stream.constant_bitrate || stream.bitrate || "-"],
-            ["Max frame rate", camAttrs.stream_max_frame_rate || stream.max_frame_rate || stream.frame_rate || "-"],
-            ["Audio codec", camAttrs.stream_audio_codec || stream.audio_codec || "-"],
-          ])}
-          <div style="margin-top:12px;">
-            <b>RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(rtspUrl || "-")}</div>
-          </div>
-          <div style="margin-top:12px;">
-            <b>Direct RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(directRtspUrl || "-")}</div>
-          </div>
-        </div>
-      `);
-    }
-
-
-    if (this.config.show_dvr_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:server"></ha-icon>NVR System Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", globalRefs.dvr || "Auto-detect pending"],
-            ["Name", this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], dvrEntity?.state || "-")],
-            ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
-            ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
-            ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
-            ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
-            ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
-            ["Active alarms", this.pickValue([dvr], ["active_alarm_count"], nvrAlarmBadges.filter((badge) => badge.level === "warn").length || 0)],
-            ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
-          ])}
-          ${nvrAlarmBadges.length ? `<div class="hik-status-row">${nvrAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}</div>` : ""}
-        </div>
-      `);
-    }
-
-    if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
+    if (this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
-
-    const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
-      <div class="hik-panel hik-info-card hik-video-accessory-panel">
-        <div class="hik-sub"><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Stream Mode Info</div>
-        <div class="hik-select-group" style="margin-bottom:12px;">
-          <div class="hik-select-wrap">
-            <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
-            <label for="streamMode" style="font-size:12px; opacity:0.8;">Stream mode</label>
-          </div>
-          <div class="hik-select-wrap">
-            <select id="streamMode" class="hik-select">
-              <option value="webrtc_direct" ${streamMode === "webrtc_direct" ? "selected" : ""}>WebRTC (Direct RTSP)</option>
-              <option value="webrtc" ${streamMode === "webrtc" ? "selected" : ""}>WebRTC (ISAPI RTSP)</option>
-              <option value="rtsp_direct" ${streamMode === "rtsp_direct" ? "selected" : ""}>RTSP (Direct)</option>
-              <option value="rtsp" ${streamMode === "rtsp" ? "selected" : ""}>RTSP (ISAPI)</option>
-              <option value="snapshot" ${streamMode === "snapshot" ? "selected" : ""}>Snapshot</option>
-            </select>
-          </div>
-        </div>
-        ${this.buildMetaGrid([
-          ["Current mode", videoMethod],
-          ["Requested mode", streamMode || "-"],
-          ["WebRTC path", ["webrtc", "webrtc_direct"].includes(streamMode) ? "Enabled" : "Disabled"],
-          ["RTSP source", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? "Direct RTSP" : streamMode === "snapshot" ? "Camera snapshot" : "ISAPI RTSP"],
-          ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
-          ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
-          ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
-          ["Preferred URL", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-")],
-        ])}
-      </div>
-    ` : "";
 
     const storageAccessoryPanel = this.config.show_storage_info !== false ? `
       <div class="hik-panel hik-info-card hik-video-accessory-panel">
@@ -4116,11 +4143,33 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       </div>
     ` : "";
 
-    const videoAccessoryPanelContent = this._videoAccessoryPanel === "stream_mode"
-      ? streamModeAccessoryPanel
-      : this._videoAccessoryPanel === "storage"
-        ? storageAccessoryPanel
-        : "";
+    const systemInfoOverlayData = {
+      entityName,
+      cam,
+      info,
+      camAttrs,
+      stream,
+      streamEntity,
+      cameraEntity,
+      streamProfile,
+      streamProfileLabel,
+      rtspUrl,
+      directRtspUrl,
+      globalRefs,
+      dvr,
+      dvrEntity,
+      storage,
+      streamMode,
+      videoMethod,
+      ptzMode,
+      ptzCapabilityMode,
+      ptzImplementation,
+      ptzUnsupportedReason,
+    };
+
+    const videoAccessoryPanelContent = this._videoAccessoryPanel === "storage"
+      ? storageAccessoryPanel
+      : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -4291,7 +4340,35 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             .hik-video-ptz-quickbar { justify-content:flex-start; }
             .hik-video-ptz-bottom { justify-content:flex-start; }
           }
-          .hik-alarm-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
+          
+          .hik-system-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
+          .hik-system-terminal-shell { height:100%; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(2,10,6,0.94), rgba(4,12,8,0.90)); border:1px solid rgba(120,255,176,0.22); box-shadow:0 20px 42px rgba(0,0,0,0.36), inset 0 0 0 1px rgba(96,255,160,0.06); backdrop-filter:blur(14px) saturate(1.1); pointer-events:auto; }
+          .hik-system-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(120,255,176,0.16); background:linear-gradient(180deg, rgba(10,30,18,0.95), rgba(6,18,12,0.90)); }
+          .hik-system-terminal-title { display:flex; align-items:center; gap:10px; min-width:0; }
+          .hik-system-terminal-dot { width:10px; height:10px; border-radius:999px; box-shadow:0 0 10px currentColor; }
+          .hik-system-terminal-dot.is-red { color:#ff6b6b; background:currentColor; }
+          .hik-system-terminal-dot.is-amber { color:#ffd166; background:currentColor; }
+          .hik-system-terminal-dot.is-green { color:#6bff95; background:currentColor; }
+          .hik-system-terminal-heading { font:600 12px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.04em; color:#b8ffca; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 0 8px rgba(107,255,149,0.18); }
+          .hik-system-terminal-actions { display:flex; align-items:center; gap:10px; }
+          .hik-system-terminal-badge { min-height:28px; padding:0 10px; border-radius:999px; display:inline-flex; align-items:center; font:700 11px/1 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; border:1px solid rgba(120,255,176,0.18); background:rgba(12,28,18,0.72); color:#afffbe; max-width:32vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .hik-system-terminal-body { min-height:0; overflow:auto; padding:14px; display:grid; gap:14px; }
+          .hik-system-terminal-controls { display:flex; gap:12px; flex-wrap:wrap; }
+          .hik-system-terminal-select { min-width:220px; display:grid; gap:6px; font:600 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.06em; text-transform:uppercase; color:#86f7b5; }
+          .hik-system-terminal-select .hik-select { background:rgba(8,20,14,0.82); color:#dcffe6; border:1px solid rgba(120,255,176,0.14); }
+          .hik-system-terminal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+          .hik-system-terminal-card { min-width:0; border-radius:14px; padding:12px; background:linear-gradient(180deg, rgba(8,20,14,0.78), rgba(5,14,10,0.68)); border:1px solid rgba(120,255,176,0.12); box-shadow:inset 0 1px 0 rgba(120,255,176,0.04); }
+          .hik-system-terminal-kicker { margin-bottom:8px; font:700 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.14em; text-transform:uppercase; color:#74f7a3; opacity:0.94; }
+          .hik-system-terminal-card .hik-alarm-table-wrap { margin-top:0; }
+          .hik-system-terminal-card .hik-alarm-table { font:500 12px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#dcffe6; }
+          .hik-system-terminal-card .hik-alarm-table th, .hik-system-terminal-card .hik-alarm-table td { border-bottom:1px solid rgba(120,255,176,0.10); padding:9px 10px; }
+          .hik-system-terminal-card .hik-alarm-table th { color:rgba(160,255,196,0.72); }
+          .hik-system-terminal-card .hik-alarm-name { color:#d8ffe3; }
+          .hik-system-terminal-card .hik-alarm-name ha-icon { color:#74f7a3; }
+          .hik-system-terminal-card .hik-alarm-value.warn { color:#ffd6d6; }
+          .hik-system-terminal-card .hik-alarm-value.good { color:#b8ffca; }
+          .hik-system-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
+.hik-alarm-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
           .hik-alarm-terminal-shell { height:100%; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(2,10,6,0.92), rgba(4,12,8,0.88)); border:1px solid rgba(120,255,176,0.22); box-shadow:0 20px 42px rgba(0,0,0,0.36), inset 0 0 0 1px rgba(96,255,160,0.06); backdrop-filter:blur(14px) saturate(1.1); pointer-events:auto; }
           .hik-alarm-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(120,255,176,0.16); background:linear-gradient(180deg, rgba(10,30,18,0.95), rgba(6,18,12,0.90)); }
           .hik-alarm-terminal-title { display:flex; align-items:center; gap:10px; min-width:0; }
@@ -4834,9 +4911,9 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
                       ` : ""}
-                      ${this.config.show_stream_mode_info !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}" id="hik-overlay-stream-mode-toggle" title="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}" aria-label="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}">
-                          <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
+                      ${systemInfoOverlaySupported ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "system_info" ? "is-active" : ""}" id="hik-overlay-system-info-toggle" title="${this._videoAccessoryPanel === "system_info" ? "Hide system information" : "Show system information"}" aria-label="${this._videoAccessoryPanel === "system_info" ? "Hide system information" : "Show system information"}">
+                          <ha-icon icon="mdi:monitor-dashboard"></ha-icon>
                         </button>
                       ` : ""}
                       ${storagePanelSupported ? `
@@ -4861,6 +4938,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                       ` : ""}
                     </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
+                    ${this._videoAccessoryPanel === "system_info" ? this.renderSystemInfoOverlay(systemInfoOverlayData) : ""}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -5017,12 +5095,12 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       }
     }
 
-    const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
-    if (streamModeOverlayToggle) {
-      streamModeOverlayToggle.addEventListener("click", (e) => {
+    const systemInfoOverlayToggle = this.querySelector("#hik-overlay-system-info-toggle");
+    if (systemInfoOverlayToggle) {
+      systemInfoOverlayToggle.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this._toggleVideoAccessoryPanel("stream_mode");
+        this._toggleVideoAccessoryPanel("system_info");
       });
     }
 
@@ -5048,6 +5126,13 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "alarm") {
         this._toggleVideoAccessoryPanel("alarm");
+      }
+    });
+    this.querySelector("#hik-system-info-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "system_info") {
+        this._toggleVideoAccessoryPanel("system_info");
       }
     });
 
