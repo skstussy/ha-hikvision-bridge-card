@@ -169,12 +169,14 @@ _pushDebugEntry(entry) {
     this._debugOverlayRectLoaded = true;
     this._debugOverlayDrag = this._debugOverlayDrag || null;
     this._debugOverlayResize = this._debugOverlayResize || null;
+    this._debugOverlayInteraction = this._debugOverlayInteraction || { moved: false, suppressClickUntil: 0, pointerId: null };
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
     this._debugEntries = Array.isArray(this._debugEntries) ? this._debugEntries : [];
     this._debugSeq = Number.isFinite(this._debugSeq) ? this._debugSeq : 0;
     this._debugFilters = this._debugFilters || { categories: ["all"], levels: ["all"] };
+    this._debugExpandedKeys = this._debugExpandedKeys || {};
     this._debugDashboardOpen = this._debugDashboardOpen ?? (this.config?.debug?.default_open === true);
     this._debugFollowLatest = this._debugFollowLatest !== false;
     this._debugTraceSeq = Number.isFinite(this._debugTraceSeq) ? this._debugTraceSeq : 0;
@@ -644,8 +646,19 @@ _pushDebugEntry(entry) {
 
 
   _debugOverlayStorageKey() {
-    const cameraKey = this.selectedCamera?.entity || this.selectedCamera?.channel || this.selected || 'default';
-    return `ha_hikvision_bridge_card.debug_overlay_rect.${cameraKey}`;
+    const cameras = Array.isArray(this.config?.cameras) ? this.config.cameras : [];
+    const seed = [
+      this.config?.title || "ha-hikvision-bridge-card",
+      ...cameras.map((camera) => camera?.entity || camera?.name || camera?.channel || ""),
+    ]
+      .filter(Boolean)
+      .join("|") || "default";
+    const normalized = String(seed)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 96) || "default";
+    return `ha_hikvision_bridge_card.debug_overlay_rect.${normalized}`;
   }
 
   _debugOverlayMemoryStore() {
@@ -780,6 +793,12 @@ _pushDebugEntry(entry) {
         if (start.active !== true) {
           if (Math.hypot(deltaX, deltaY) < dragThreshold) return;
           start.active = true;
+          this._debugOverlayInteraction = {
+            ...(this._debugOverlayInteraction || {}),
+            moved: true,
+            suppressClickUntil: Date.now() + 250,
+            pointerId: event.pointerId,
+          };
           overlay.classList.add('is-moving');
         }
         const next = this._clampDebugOverlayRect({ ...start.rect, x: start.rect.x + deltaX, y: start.rect.y + deltaY });
@@ -806,6 +825,11 @@ _pushDebugEntry(entry) {
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
       this._cleanupDebugOverlayPointerState(start.pointerId);
+      this._debugOverlayInteraction = {
+        ...(this._debugOverlayInteraction || {}),
+        suppressClickUntil: Date.now() + ((start.active === true) ? 250 : 0),
+        pointerId: null,
+      };
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
@@ -816,6 +840,11 @@ _pushDebugEntry(entry) {
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
       this._cleanupDebugOverlayPointerState(start.pointerId);
+      this._debugOverlayInteraction = {
+        ...(this._debugOverlayInteraction || {}),
+        suppressClickUntil: Date.now() + 250,
+        pointerId: null,
+      };
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
@@ -849,10 +878,24 @@ _pushDebugEntry(entry) {
       event.preventDefault();
       event.stopPropagation();
       this._cleanupDebugOverlayPointerState();
+      this._debugOverlayInteraction = {
+        ...(this._debugOverlayInteraction || {}),
+        moved: false,
+        suppressClickUntil: 0,
+        pointerId: event.pointerId,
+      };
       const startRect = this._clampDebugOverlayRect(this._debugOverlayRect);
       this._debugOverlayDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, rect: startRect, active: false };
       try { handle.setPointerCapture(event.pointerId); } catch (err) {}
     });
+
+    handle.addEventListener('click', (event) => {
+      const suppressUntil = Number(this._debugOverlayInteraction?.suppressClickUntil || 0);
+      if (suppressUntil && Date.now() < suppressUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
 
     resizeHandle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
@@ -1308,6 +1351,9 @@ _toggleDebugFilter(kind, value) {
       entry?.camera != null ? String(entry.camera) : "",
       entry?.source || "",
     ].join("|");
+    const visibleKeys = new Set(visibleEntries.map((entry) => entryKey(entry)));
+    const expandedKeys = Object.fromEntries(Object.entries(this._debugExpandedKeys || {}).filter(([key, value]) => visibleKeys.has(key) && value === true));
+    this._debugExpandedKeys = expandedKeys;
     const validSelectedKey = visibleEntries.some((entry) => entryKey(entry) === this._debugSelectedKey) ? this._debugSelectedKey : "";
     const selectedKey = validSelectedKey || (visibleEntries[0] ? entryKey(visibleEntries[0]) : "");
     this._debugSelectedKey = selectedKey || "";
@@ -1382,15 +1428,30 @@ _toggleDebugFilter(kind, value) {
             ${visibleEntries.length ? visibleEntries.map((entry) => {
               const key = entryKey(entry);
               const selected = key === selectedKey;
+              const expanded = this._debugExpandedKeys?.[key] === true;
+              const detailsText = entry?.details ? this.escapeHtml(JSON.stringify(entry.details, null, 2)) : "";
               return `
-                <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" title="${this.escapeHtml(entry.message || entry.event || "")}">
-                  <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
-                  <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
-                  <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
-                  <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
-                  <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
-                  <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
-                </button>`;
+                <div class="hik-debug-feed-entry ${expanded ? "expanded" : ""}">
+                  <button type="button" class="hik-debug-row ${rowClass(entry)} ${selected ? "selected" : ""}" data-debug-select="${this.escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" title="${this.escapeHtml(entry.message || entry.event || "")}">
+                    <span class="hik-debug-cell hik-debug-level-cell"><span class="hik-debug-level-badge ${rowClass(entry)}">${this.escapeHtml(String(entry.level || "info").toUpperCase())}</span></span>
+                    <span class="hik-debug-cell hik-debug-time-cell">${this.escapeHtml((entry.time || "").split("T")[1] || entry.time || "")}</span>
+                    <span class="hik-debug-cell">${this.escapeHtml(entry.category || "general")}</span>
+                    <span class="hik-debug-cell hik-debug-event-cell">${this.escapeHtml(entry.event || "event")}</span>
+                    <span class="hik-debug-cell hik-debug-message-cell">${this.escapeHtml(entry.message || "")}</span>
+                    <span class="hik-debug-cell hik-debug-cam-cell">${entry.camera ? `CH ${this.escapeHtml(String(entry.camera))}` : "-"}</span>
+                  </button>
+                  ${expanded ? `
+                    <div class="hik-debug-row-inline-details ${terminalMode ? "is-terminal" : ""}">
+                      <div class="hik-debug-row-inline-meta">
+                        <span><b>Source:</b> ${this.escapeHtml(entry.source || "frontend")}</span>
+                        <span><b>Trace:</b> ${this.escapeHtml(String(entry?.details?.trace_id || "-"))}</span>
+                        <span><b>Seen:</b> ${this.escapeHtml(String(entry.count || 1))}</span>
+                      </div>
+                      <div class="hik-debug-row-inline-message">${this.escapeHtml(entry.message || "")}</div>
+                      ${detailsText ? `<pre class="hik-debug-row-inline-pre">${detailsText}</pre>` : ""}
+                    </div>
+                  ` : ""}
+                </div>`;
             }).join("") : `<div class="hik-empty-note">No debug events for the current filters.</div>`}
           </div>
         </div>
@@ -4614,9 +4675,16 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.06); }
           .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:12px 14px; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.02)); position:sticky; top:0; z-index:1; backdrop-filter:blur(8px); }
           .hik-debug-feed { max-height:460px; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
-          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
+          .hik-debug-feed-entry { display:grid; gap:0; border-bottom:1px solid rgba(255,255,255,0.05); }
+          .hik-debug-feed-entry:last-child { border-bottom:0; }
+          .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
           .hik-debug-row:hover { background:rgba(255,255,255,0.05); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
           .hik-debug-row.selected { background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.035)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hik-accent) 72%, #ffffff 8%), 0 0 0 1px rgba(255,255,255,0.04); }
+          .hik-debug-row-inline-details { display:grid; gap:10px; padding:12px 14px 14px; background:rgba(9,14,20,0.92); border-top:1px solid rgba(120,255,178,0.08); }
+          .hik-debug-row-inline-details.is-terminal { background:rgba(6,10,16,0.95); }
+          .hik-debug-row-inline-meta { display:flex; flex-wrap:wrap; gap:14px; color:rgba(214,231,224,0.78); font-size:12px; }
+          .hik-debug-row-inline-message { color:rgba(238,246,242,0.94); font-size:13px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+          .hik-debug-row-inline-pre { margin:0; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.08); background:rgba(3,6,10,0.92); color:#dff6eb; font-size:12px; line-height:1.4; overflow:auto; }
           .hik-debug-row.is-error { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--error-color) 60%, transparent); background:linear-gradient(180deg, rgba(255,70,70,0.05), rgba(255,255,255,0.01)); }
           .hik-debug-row.is-warn { box-shadow: inset 2px 0 0 rgba(245, 166, 35, 0.7); background:linear-gradient(180deg, rgba(245,166,35,0.05), rgba(255,255,255,0.01)); }
           .hik-debug-row.is-info { box-shadow: inset 2px 0 0 rgba(90, 169, 255, 0.55); }
@@ -5235,7 +5303,13 @@ renderAlarmDashboard(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       btn.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        this._debugSelectedKey = ev.currentTarget?.getAttribute("data-debug-select") || "";
+        const key = ev.currentTarget?.getAttribute("data-debug-select") || "";
+        const alreadySelected = this._debugSelectedKey === key;
+        this._debugSelectedKey = key;
+        this._debugExpandedKeys = {
+          ...(this._debugExpandedKeys || {}),
+          [key]: alreadySelected ? !(this._debugExpandedKeys?.[key] === true) : true,
+        };
         this.render();
       });
     });
