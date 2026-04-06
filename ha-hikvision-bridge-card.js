@@ -98,6 +98,7 @@ _pushDebugEntry(entry) {
       show_status_pills: true,
       show_alarm_dashboard: true,
       show_stream_mode_info: true,
+      show_feature_dashboard: true,
       show_title: true,
       show_position_info: true,
       speed_orientation: "vertical",
@@ -188,6 +189,14 @@ _pushDebugEntry(entry) {
     this._gridFocusTransitionTimer = this._gridFocusTransitionTimer || null;
     this._webRtcPtzCleanup = this._webRtcPtzCleanup || null;
     this._webRtcPtzBound = this._webRtcPtzBound || false;
+    this._isapiCatalog = this._isapiCatalog || null;
+    this._isapiProbeResults = this._isapiProbeResults || null;
+    this._isapiProbeLoading = this._isapiProbeLoading ?? false;
+    this._isapiProbeError = this._isapiProbeError || "";
+    this._isapiProbeFilter = this._isapiProbeFilter || "all";
+    this._isapiProbeHideUnsupported = this._isapiProbeHideUnsupported ?? false;
+    this._isapiProbeIncludeDangerous = this._isapiProbeIncludeDangerous ?? true;
+    this._isapiProbeMaxEndpoints = Number.isFinite(this._isapiProbeMaxEndpoints) ? this._isapiProbeMaxEndpoints : 250;
   }
 
   set hass(hass) {
@@ -195,6 +204,10 @@ _pushDebugEntry(entry) {
     if (this._videoCard) this._videoCard.hass = hass;
     this._syncDebugRuntime();
     this.render();
+    if (this._videoAccessoryPanel === "system_info") {
+      this._ensureIsapiCatalogLoaded();
+      this._refreshIsapiProbeResults();
+    }
   }
 
 
@@ -628,6 +641,10 @@ _pushDebugEntry(entry) {
     }
     this._syncDebugRuntime();
     this.render();
+    if (this._videoAccessoryPanel === "system_info") {
+      this._ensureIsapiCatalogLoaded();
+      this._refreshIsapiProbeResults();
+    }
   }
 
   _renderVideoAccessoryPanel(content = "") {
@@ -3009,6 +3026,244 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     ];
   }
 
+
+  _getIsapiProbeEntryId() {
+    return this.config?.entry_id || this.selectedCamera?.entry_id || null;
+  }
+
+  _getIsapiTotalsFromResults(results = null) {
+    const totals = results?.totals;
+    if (totals && typeof totals === "object" && Object.keys(totals).length) return totals;
+    const computed = {};
+    (results?.groups || []).forEach((group) => {
+      Object.entries(group?.summary || {}).forEach(([key, value]) => {
+        computed[key] = (computed[key] || 0) + (Number(value) || 0);
+      });
+    });
+    return computed;
+  }
+
+  _getIsapiCount(totals = {}, keys = []) {
+    return (Array.isArray(keys) ? keys : [keys]).reduce((sum, key) => sum + (Number(totals?.[key] || 0) || 0), 0);
+  }
+
+  _isapiClassMeta(classification = "") {
+    const key = String(classification || "unknown").toLowerCase();
+    if (["supported", "supported_via_capability"].includes(key)) return { label: key === "supported" ? "Supported" : "Capability-backed", tone: "good", icon: "mdi:check-circle-outline" };
+    if (["forbidden", "auth_failed", "method_not_allowed"].includes(key)) return { label: key.replaceAll("_", " "), tone: "warn", icon: "mdi:lock-outline" };
+    if (["dangerous_not_probed"].includes(key)) return { label: "Not auto-run", tone: "neutral", icon: "mdi:alert-octagon-outline" };
+    if (["unsupported", "advertised_but_unreachable"].includes(key)) return { label: key.replaceAll("_", " "), tone: "warn", icon: "mdi:close-circle-outline" };
+    if (["transport_error", "error", "unknown"].includes(key)) return { label: key.replaceAll("_", " "), tone: "warn", icon: "mdi:help-circle-outline" };
+    return { label: key.replaceAll("_", " "), tone: "neutral", icon: "mdi:help-circle-outline" };
+  }
+
+  _shouldShowIsapiEntry(entry = {}) {
+    const filter = String(this._isapiProbeFilter || "all").toLowerCase();
+    const cls = String(entry?.classification || "").toLowerCase();
+    if (this._isapiProbeHideUnsupported && ["unsupported", "forbidden", "auth_failed", "method_not_allowed"].includes(cls)) return false;
+    if (filter === "all") return true;
+    if (filter === "supported") return ["supported", "supported_via_capability"].includes(cls);
+    if (filter === "attention") return ["forbidden", "auth_failed", "method_not_allowed", "transport_error", "error", "unknown", "advertised_but_unreachable"].includes(cls);
+    if (filter === "actions") return String(entry?.probe || "").toLowerCase() !== "read";
+    return cls === filter;
+  }
+
+  async _ensureIsapiCatalogLoaded(force = false) {
+    if (!this._hass) return null;
+    if (this._isapiCatalog && !force) return this._isapiCatalog;
+    try {
+      const result = await this._hass.callWS({
+        type: "ha_hikvision_bridge/get_isapi_catalog",
+        ...(this._getIsapiProbeEntryId() ? { entry_id: this._getIsapiProbeEntryId() } : {}),
+      });
+      this._isapiCatalog = result || { groups: [], context: {}, generated_at: null };
+      this._isapiProbeError = "";
+      this.render();
+      return this._isapiCatalog;
+    } catch (err) {
+      this._isapiProbeError = String(err?.message || err || "Failed to load ISAPI catalog");
+      this.render();
+      return null;
+    }
+  }
+
+  async _refreshIsapiProbeResults() {
+    if (!this._hass) return null;
+    try {
+      const result = await this._hass.callWS({
+        type: "ha_hikvision_bridge/get_isapi_probe_results",
+        ...(this._getIsapiProbeEntryId() ? { entry_id: this._getIsapiProbeEntryId() } : {}),
+      });
+      this._isapiProbeResults = result || { groups: [], totals: {}, request_count: 0, generated_at: null };
+      this._isapiProbeError = "";
+      this.render();
+      return this._isapiProbeResults;
+    } catch (err) {
+      this._isapiProbeError = String(err?.message || err || "Failed to load probe results");
+      this.render();
+      return null;
+    }
+  }
+
+  async _runIsapiProbe() {
+    if (!this._hass || this._isapiProbeLoading) return;
+    this._isapiProbeLoading = true;
+    this._isapiProbeError = "";
+    this.render();
+    try {
+      const result = await this._hass.callWS({
+        type: "ha_hikvision_bridge/run_isapi_probe",
+        ...(this._getIsapiProbeEntryId() ? { entry_id: this._getIsapiProbeEntryId() } : {}),
+        include_dangerous: this._isapiProbeIncludeDangerous !== false,
+        max_endpoints: Math.max(25, Math.min(1000, Number(this._isapiProbeMaxEndpoints || 250) || 250)),
+      });
+      this._isapiProbeResults = result || { groups: [], totals: {}, request_count: 0, generated_at: null };
+      this._isapiProbeError = "";
+    } catch (err) {
+      this._isapiProbeError = String(err?.message || err || "ISAPI probe failed");
+    } finally {
+      this._isapiProbeLoading = false;
+      this.render();
+    }
+  }
+
+  _renderIsapiProbeDashboard() {
+    const catalog = this._isapiCatalog || { groups: [], context: {} };
+    const results = this._isapiProbeResults || { groups: [], totals: {}, request_count: 0, generated_at: null };
+    const totals = this._getIsapiTotalsFromResults(results);
+    const catalogGroups = Array.isArray(catalog?.groups) ? catalog.groups : [];
+    const resultGroups = Array.isArray(results?.groups) ? results.groups : [];
+    const mergedGroups = resultGroups.length
+      ? resultGroups
+      : catalogGroups.map((group) => ({
+          key: group.key,
+          label: group.label,
+          summary: {},
+          entries: (group.entries || []).map((entry) => ({
+            ...entry,
+            path: entry.path_template,
+            classification: "",
+            status: null,
+            content_type: "",
+            response_root: "",
+            body_type: "",
+            supported: false,
+          })),
+        }));
+    const filteredGroups = mergedGroups.map((group) => {
+      const entries = (group.entries || []).filter((entry) => this._shouldShowIsapiEntry(entry));
+      return { ...group, entries };
+    }).filter((group) => group.entries.length || !resultGroups.length);
+
+    const supportedCount = this._getIsapiCount(totals, ["supported", "supported_via_capability"]);
+    const attentionCount = this._getIsapiCount(totals, ["forbidden", "auth_failed", "method_not_allowed", "transport_error", "error", "unknown", "advertised_but_unreachable"]);
+    const actionCount = this._getIsapiCount(totals, ["dangerous_not_probed"]);
+    const discoveredContexts = [
+      `Channels ${Array.isArray(catalog?.context?.channel_ids) ? catalog.context.channel_ids.length : 0}`,
+      `InputProxy ${Array.isArray(catalog?.context?.input_proxy_ids) ? catalog.context.input_proxy_ids.length : 0}`,
+    ].join(" · ");
+
+    return `
+      <div class="hik-system-terminal-card hik-isapi-card">
+        <div class="hik-system-terminal-kicker">feature dashboard · isapi endpoint probe</div>
+        <div class="hik-isapi-toolbar">
+          <div class="hik-isapi-summary">
+            <span class="hik-pill good"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${supportedCount} supported</span>
+            <span class="hik-pill ${attentionCount ? "warn" : ""}"><ha-icon icon="mdi:alert-outline"></ha-icon>${attentionCount} attention</span>
+            <span class="hik-pill"><ha-icon icon="mdi:shield-alert-outline"></ha-icon>${actionCount} actions not auto-run</span>
+            <span class="hik-pill"><ha-icon icon="mdi:counter"></ha-icon>${Number(results?.request_count || 0)} requests</span>
+          </div>
+          <div class="hik-isapi-actions">
+            <label class="hik-system-terminal-select compact">
+              <span>Filter</span>
+              <select id="hik-isapi-filter" class="hik-select">
+                <option value="all" ${String(this._isapiProbeFilter || "all") === "all" ? "selected" : ""}>All</option>
+                <option value="supported" ${String(this._isapiProbeFilter || "") === "supported" ? "selected" : ""}>Supported</option>
+                <option value="attention" ${String(this._isapiProbeFilter || "") === "attention" ? "selected" : ""}>Attention</option>
+                <option value="actions" ${String(this._isapiProbeFilter || "") === "actions" ? "selected" : ""}>Actions</option>
+              </select>
+            </label>
+            <label class="hik-isapi-checkbox">
+              <input type="checkbox" id="hik-isapi-hide-unsupported" ${this._isapiProbeHideUnsupported ? "checked" : ""}>
+              <span>Hide unsupported</span>
+            </label>
+            <label class="hik-isapi-checkbox">
+              <input type="checkbox" id="hik-isapi-include-dangerous" ${this._isapiProbeIncludeDangerous ? "checked" : ""}>
+              <span>List action endpoints</span>
+            </label>
+            <label class="hik-system-terminal-select compact">
+              <span>Max</span>
+              <select id="hik-isapi-max-endpoints" class="hik-select">
+                ${[100, 250, 500, 1000].map((value) => `<option value="${value}" ${Number(this._isapiProbeMaxEndpoints || 250) === value ? "selected" : ""}>${value}</option>`).join("")}
+              </select>
+            </label>
+            <button type="button" class="hik-video-media-btn" id="hik-isapi-refresh-results" title="Refresh cached results">
+              <ha-icon icon="mdi:refresh"></ha-icon>
+            </button>
+            <button type="button" class="hik-video-media-btn" id="hik-isapi-run-probe" title="Run ISAPI endpoint probe" ${this._isapiProbeLoading ? "disabled" : ""}>
+              <ha-icon icon="${this._isapiProbeLoading ? "mdi:progress-clock" : "mdi:radar"}"></ha-icon>
+            </button>
+          </div>
+        </div>
+        <div class="hik-isapi-meta">
+          <span>Catalog groups ${(catalogGroups || []).length}</span>
+          <span>${this.escapeHtml(discoveredContexts)}</span>
+          <span>Last scan ${this.escapeHtml(results?.generated_at ? this.formatDateTimeLocal(results.generated_at) : "Not run yet")}</span>
+        </div>
+        ${this._isapiProbeError ? `<div class="hik-empty-note">${this.escapeHtml(this._isapiProbeError)}</div>` : ""}
+        ${filteredGroups.length ? `
+          <div class="hik-isapi-groups">
+            ${filteredGroups.map((group) => `
+              <details class="hik-isapi-group" ${resultGroups.length ? "" : "open"}>
+                <summary>
+                  <span class="hik-isapi-group-title">${this.escapeHtml(group.label || group.key || "Group")}</span>
+                  <span class="hik-isapi-group-summary">
+                    ${Object.entries(group.summary || {}).map(([key, value]) => {
+                      const meta = this._isapiClassMeta(key);
+                      return `<span class="hik-health-chip ${this.escapeHtml(meta.tone)}"><span class="hik-health-dot"></span>${this.escapeHtml(`${meta.label} ${value}`)}</span>`;
+                    }).join("") || `<span class="hik-health-chip"><span class="hik-health-dot"></span>Catalog only</span>`}
+                  </span>
+                </summary>
+                <div class="hik-isapi-table-wrap">
+                  <table class="hik-alarm-table hik-isapi-table">
+                    <thead>
+                      <tr>
+                        <th>Endpoint</th>
+                        <th>Method</th>
+                        <th>Classification</th>
+                        <th>HTTP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${(group.entries || []).map((entry) => {
+                        const meta = this._isapiClassMeta(entry.classification || "");
+                        const contextBits = [];
+                        if (entry?.context?.channel_id) contextBits.push(`channel ${entry.context.channel_id}`);
+                        if (entry?.context?.input_proxy_id) contextBits.push(`input ${entry.context.input_proxy_id}`);
+                        return `
+                          <tr>
+                            <td>
+                              <div class="hik-isapi-endpoint-name">${this.escapeHtml(entry.label || entry.id || "-")}</div>
+                              <div class="hik-isapi-endpoint-path">${this.escapeHtml(entry.path || entry.path_template || "-")}</div>
+                              <div class="hik-isapi-endpoint-sub">${this.escapeHtml([entry.probe || "read", ...contextBits].join(" · ") || "-")}</div>
+                            </td>
+                            <td>${this.escapeHtml(entry.method || "-")}</td>
+                            <td><span class="hik-health-chip ${this.escapeHtml(meta.tone)}"><span class="hik-health-dot"></span>${this.escapeHtml(meta.label)}</span></td>
+                            <td>${this.escapeHtml(entry.status != null ? String(entry.status) : "—")}${entry.response_root ? `<div class="hik-isapi-endpoint-sub">${this.escapeHtml(entry.response_root)}</div>` : ""}</td>
+                          </tr>
+                        `;
+                      }).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            `).join("")}
+          </div>
+        ` : `<div class="hik-empty-note">No endpoints match the current filter.</div>`}
+      </div>
+    `;
+  }
+
   renderSystemInfoOverlay(data = {}) {
     const sections = this.buildSystemInfoSections(data);
     const mode = String(data.streamMode || "").toLowerCase();
@@ -3058,6 +3313,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 </div>
               `).join("")}
             </div>
+            ${this.config.show_feature_dashboard !== false ? this._renderIsapiProbeDashboard() : ""}
+
           </div>
         </div>
       </div>
@@ -4373,6 +4630,28 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-system-terminal-card .hik-alarm-value.warn { color:#ffd6d6; }
           .hik-system-terminal-card .hik-alarm-value.good { color:#b8ffca; }
           .hik-system-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
+
+          .hik-isapi-card { grid-column:1 / -1; display:grid; gap:12px; }
+          .hik-isapi-toolbar { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+          .hik-isapi-summary { display:flex; flex-wrap:wrap; gap:8px; }
+          .hik-isapi-actions { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
+          .hik-system-terminal-select.compact { min-width:104px; }
+          .hik-isapi-checkbox { display:inline-flex; align-items:center; gap:8px; min-height:38px; padding:0 10px; border-radius:12px; border:1px solid rgba(120,255,176,0.12); background:rgba(8,20,14,0.56); font:600 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#cffff0; }
+          .hik-isapi-checkbox input { margin:0; accent-color: var(--hik-accent); }
+          .hik-isapi-meta { display:flex; gap:10px; flex-wrap:wrap; font:500 11px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.74); }
+          .hik-isapi-groups { display:grid; gap:12px; }
+          .hik-isapi-group { border-radius:14px; background:rgba(8,20,14,0.48); border:1px solid rgba(120,255,176,0.10); overflow:hidden; }
+          .hik-isapi-group summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; }
+          .hik-isapi-group summary::-webkit-details-marker { display:none; }
+          .hik-isapi-group-title { font:700 12px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; color:#b8ffca; }
+          .hik-isapi-group-summary { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+          .hik-isapi-table-wrap { padding:0 12px 12px; overflow:auto; }
+          .hik-isapi-table th:nth-child(2), .hik-isapi-table td:nth-child(2) { width:84px; }
+          .hik-isapi-table th:nth-child(3), .hik-isapi-table td:nth-child(3) { width:190px; }
+          .hik-isapi-table th:nth-child(4), .hik-isapi-table td:nth-child(4) { width:90px; }
+          .hik-isapi-endpoint-name { font-weight:700; color:#dcffe6; }
+          .hik-isapi-endpoint-path { margin-top:3px; font:500 11px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#9ff2b8; word-break:break-all; }
+          .hik-isapi-endpoint-sub { margin-top:3px; font:500 10px/1.3 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.64); }
 .hik-alarm-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
           .hik-alarm-terminal-shell { height:100%; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(2,10,6,0.92), rgba(4,12,8,0.88)); border:1px solid rgba(120,255,176,0.22); box-shadow:0 20px 42px rgba(0,0,0,0.36), inset 0 0 0 1px rgba(96,255,160,0.06); backdrop-filter:blur(14px) saturate(1.1); pointer-events:auto; }
           .hik-alarm-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(120,255,176,0.16); background:linear-gradient(180deg, rgba(10,30,18,0.95), rgba(6,18,12,0.90)); }
@@ -5227,6 +5506,33 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       if (this._videoAccessoryPanel === "system_info") {
         this._toggleVideoAccessoryPanel("system_info");
       }
+    });
+
+    this.querySelector("#hik-isapi-run-probe")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._runIsapiProbe();
+    });
+    this.querySelector("#hik-isapi-refresh-results")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._refreshIsapiProbeResults();
+    });
+    this.querySelector("#hik-isapi-filter")?.addEventListener("change", (e) => {
+      this._isapiProbeFilter = String(e.target?.value || "all");
+      this.render();
+    });
+    this.querySelector("#hik-isapi-hide-unsupported")?.addEventListener("change", (e) => {
+      this._isapiProbeHideUnsupported = Boolean(e.target?.checked);
+      this.render();
+    });
+    this.querySelector("#hik-isapi-include-dangerous")?.addEventListener("change", (e) => {
+      this._isapiProbeIncludeDangerous = Boolean(e.target?.checked);
+      this.render();
+    });
+    this.querySelector("#hik-isapi-max-endpoints")?.addEventListener("change", (e) => {
+      this._isapiProbeMaxEndpoints = Number(e.target?.value || 250) || 250;
+      this.render();
     });
 
     const streamModeSelect = this.querySelector("#streamMode");
