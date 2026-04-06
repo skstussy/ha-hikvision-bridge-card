@@ -115,6 +115,7 @@ _pushDebugEntry(entry) {
       talk_mode: "hold",
       mute_during_talk: true,
       show_audio_controls: true,
+      show_audio_sentinel: true,
       debug: {
         enabled: false,
         default_open: false,
@@ -1966,6 +1967,17 @@ _toggleDebugFilter(kind, value) {
       if (kind === "intrusion" && entityId.startsWith("binary_sensor.") && entityId.includes("_intrusion_alarm")) return entityId;
       if (kind === "line_crossing" && entityId.startsWith("binary_sensor.") && entityId.includes("_line_crossing_alarm")) return entityId;
       if (kind === "tamper" && entityId.startsWith("binary_sensor.") && entityId.includes("_tamper_alarm")) return entityId;
+      if (kind === "audio_enabled" && entityId.startsWith("binary_sensor.") && entityId.includes("_enabled")) return entityId;
+      if (kind === "audio_classifier_enabled" && entityId.startsWith("binary_sensor.") && entityId.includes("_classifier_enabled")) return entityId;
+      if (kind === "audio_gunshot" && entityId.startsWith("binary_sensor.") && entityId.includes("_gunshot_detected")) return entityId;
+      if (kind === "audio_level" && entityId.startsWith("sensor.") && entityId.includes("_audio_level")) return entityId;
+      if (kind === "audio_peak" && entityId.startsWith("sensor.") && entityId.includes("_audio_peak")) return entityId;
+      if (kind === "audio_classifier_label" && entityId.startsWith("sensor.") && entityId.includes("_classifier_label")) return entityId;
+      if (kind === "audio_classifier_confidence" && entityId.startsWith("sensor.") && entityId.includes("_classifier_confidence")) return entityId;
+      if (kind === "audio_classifier_threshold" && entityId.startsWith("sensor.") && entityId.includes("_classifier_threshold")) return entityId;
+      if (kind === "audio_last_event" && entityId.startsWith("sensor.") && entityId.includes("_audio_last_event")) return entityId;
+      if (kind === "audio_stream_status" && entityId.startsWith("sensor.") && entityId.includes("_audio_stream_status")) return entityId;
+      if (kind === "audio_last_gunshot" && entityId.startsWith("sensor.") && entityId.includes("_audio_last_gunshot")) return entityId;
     }
     return null;
   }
@@ -2103,6 +2115,17 @@ _toggleDebugFilter(kind, value) {
       intrusion: this.findEntityForChannel(channel, "intrusion"),
       lineCrossing: this.findEntityForChannel(channel, "line_crossing"),
       tamper: this.findEntityForChannel(channel, "tamper"),
+      audioEnabled: this.findEntityForChannel(channel, "audio_enabled"),
+      audioClassifierEnabled: this.findEntityForChannel(channel, "audio_classifier_enabled"),
+      audioGunshot: this.findEntityForChannel(channel, "audio_gunshot"),
+      audioLevel: this.findEntityForChannel(channel, "audio_level"),
+      audioPeak: this.findEntityForChannel(channel, "audio_peak"),
+      audioClassifierLabel: this.findEntityForChannel(channel, "audio_classifier_label"),
+      audioClassifierConfidence: this.findEntityForChannel(channel, "audio_classifier_confidence"),
+      audioClassifierThreshold: this.findEntityForChannel(channel, "audio_classifier_threshold"),
+      audioLastEvent: this.findEntityForChannel(channel, "audio_last_event"),
+      audioStreamStatus: this.findEntityForChannel(channel, "audio_stream_status"),
+      audioLastGunshot: this.findEntityForChannel(channel, "audio_last_gunshot"),
       camera: this.findEntityForChannel(channel, "camera"),
     };
   }
@@ -3810,6 +3833,135 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this._setTalkActive(this._talkLatched).catch(() => {});
   }
 
+
+  _getAudioSentinelState(refs = {}) {
+    const streamStatusEntity = refs.audioStreamStatus ? this.getEntity(refs.audioStreamStatus) : null;
+    const labelEntity = refs.audioClassifierLabel ? this.getEntity(refs.audioClassifierLabel) : null;
+    const confEntity = refs.audioClassifierConfidence ? this.getEntity(refs.audioClassifierConfidence) : null;
+    const thresholdEntity = refs.audioClassifierThreshold ? this.getEntity(refs.audioClassifierThreshold) : null;
+    const levelEntity = refs.audioLevel ? this.getEntity(refs.audioLevel) : null;
+    const peakEntity = refs.audioPeak ? this.getEntity(refs.audioPeak) : null;
+    const lastEventEntity = refs.audioLastEvent ? this.getEntity(refs.audioLastEvent) : null;
+    const gunshotEntity = refs.audioGunshot ? this.getEntity(refs.audioGunshot) : null;
+    const lastGunshotEntity = refs.audioLastGunshot ? this.getEntity(refs.audioLastGunshot) : null;
+    const enabledEntity = refs.audioEnabled ? this.getEntity(refs.audioEnabled) : null;
+    const classifierEnabledEntity = refs.audioClassifierEnabled ? this.getEntity(refs.audioClassifierEnabled) : null;
+    const attrs = streamStatusEntity?.attributes || {};
+    return {
+      streamStatus: String(streamStatusEntity?.state || attrs.native_stream_status || "idle"),
+      streamError: attrs.native_stream_error || "",
+      streamProfile: attrs.native_stream_profile || "active",
+      streamSource: attrs.native_stream_source || "-",
+      framesIngested: Number(attrs.frames_ingested || 0),
+      sampleCount: Number(attrs.sample_count || 0),
+      lastAudio: attrs.native_stream_last_audio || "",
+      label: labelEntity?.state && labelEntity.state !== "unknown" ? labelEntity.state : "-",
+      confidence: Number(confEntity?.state || 0),
+      threshold: Number(thresholdEntity?.state || attrs.classifier_threshold || 0),
+      level: Number(levelEntity?.state || 0),
+      peak: Number(peakEntity?.state || 0),
+      lastEvent: lastEventEntity?.state && lastEventEntity.state !== "unknown" ? lastEventEntity.state : "-",
+      gunshotActive: gunshotEntity?.state === "on",
+      lastGunshot: lastGunshotEntity?.state && lastGunshotEntity.state !== "unknown" ? lastGunshotEntity.state : "",
+      enabled: enabledEntity?.state === "on",
+      classifierEnabled: classifierEnabledEntity?.state === "on",
+      calibrationProfile: attrs.calibration_profile || "balanced",
+      calibrationScore: Number(attrs.calibration_score || 0),
+      classifierAccepted: attrs.last_classifier_accepted === true,
+    };
+  }
+
+  _sentinelStatusTone(status = "") {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "running") return "good";
+    if (normalized === "starting") return "primary";
+    if (normalized === "error") return "warn";
+    return "neutral";
+  }
+
+  async _callAudioSentinelService(service, data = {}) {
+    if (!this._hass) return;
+    const cam = this.selectedCamera;
+    if (!cam) return;
+    await this._hass.callService("ha_hikvision_bridge", service, {
+      channel: String(cam.channel),
+      ...data,
+    });
+  }
+
+  _renderAudioSentinelPanel(refs = {}) {
+    if (this.config.show_audio_sentinel === false) return "";
+    const state = this._getAudioSentinelState(refs);
+    const confidencePct = Math.round(Math.max(0, Math.min(1, state.confidence || 0)) * 100);
+    const thresholdPct = Math.round(Math.max(0, Math.min(1, state.threshold || 0)) * 100);
+    const levelPct = Math.round(Math.max(0, Math.min(100, Number(state.level || 0))));
+    const peakPct = Math.round(Math.max(0, Math.min(100, Number(state.peak || 0))));
+    return `
+      <div class="hik-audio-panel">
+        <div class="hik-audio-head">
+          <div class="hik-sub" style="margin:0;"><ha-icon icon="mdi:shield-wave"></ha-icon>NVR Audio Sentinel</div>
+          <div class="hik-audio-pills">
+            <span class="hik-pill ${this._sentinelStatusTone(state.streamStatus)}"><ha-icon icon="mdi:waveform"></ha-icon>${this.escapeHtml(state.streamStatus || "idle")}</span>
+            <span class="hik-pill ${state.classifierEnabled ? "primary" : "neutral"}"><ha-icon icon="mdi:brain"></ha-icon>${state.classifierEnabled ? "Classifier on" : "Classifier off"}</span>
+            <span class="hik-pill ${state.gunshotActive ? "warn" : "neutral"}"><ha-icon icon="mdi:bullseye"></ha-icon>${state.gunshotActive ? "Gunshot active" : "No gunshot"}</span>
+          </div>
+        </div>
+        <div class="hik-info-grid">
+          <div class="hik-panel hik-info-card">
+            <div class="hik-sub"><ha-icon icon="mdi:connection"></ha-icon>Ingestion</div>
+            ${this.buildMetaGrid([
+              ["Native stream", state.streamStatus || "idle"],
+              ["Profile", state.streamProfile || "active"],
+              ["Source", state.streamSource || "-"],
+              ["Frames", String(state.framesIngested || 0)],
+              ["Samples", String(state.sampleCount || 0)],
+              ["Last audio", state.lastAudio ? this.formatDateTimeLocal(state.lastAudio) : "-"],
+            ])}
+            ${state.streamError ? `<div class="hik-audio-note fill"><ha-icon icon="mdi:alert"></ha-icon><span>${this.escapeHtml(state.streamError)}</span></div>` : ""}
+          </div>
+          <div class="hik-panel hik-info-card">
+            <div class="hik-sub"><ha-icon icon="mdi:radar"></ha-icon>Classifier</div>
+            ${this.buildMetaGrid([
+              ["Label", state.label || "-"],
+              ["Confidence", `${confidencePct}%`],
+              ["Threshold", `${thresholdPct}%`],
+              ["Last event", state.lastEvent || "-"],
+              ["Last gunshot", state.lastGunshot ? this.formatDateTimeLocal(state.lastGunshot) : "-"],
+              ["Calibration", `${state.calibrationProfile || "balanced"} (${Math.round((state.calibrationScore || 0) * 100)}%)`],
+            ])}
+          </div>
+          <div class="hik-panel hik-info-card">
+            <div class="hik-sub"><ha-icon icon="mdi:tune-vertical"></ha-icon>Live Tuning</div>
+            <div class="hik-select-group" style="margin-bottom:12px;">
+              <div class="hik-select-wrap">
+                <ha-icon icon="mdi:camera-switch"></ha-icon>
+                <label for="hik-sentinel-profile" style="font-size:12px; opacity:0.8;">Tap stream</label>
+              </div>
+              <div class="hik-select-wrap">
+                <select id="hik-sentinel-profile" class="hik-select">
+                  <option value="active" ${String(state.streamProfile || "active") === "active" ? "selected" : ""}>Active stream</option>
+                  <option value="main" ${String(state.streamProfile || "") === "main" ? "selected" : ""}>Main-stream</option>
+                  <option value="sub" ${String(state.streamProfile || "") === "sub" ? "selected" : ""}>Sub-stream</option>
+                </select>
+              </div>
+            </div>
+            <label class="hik-audio-slider">
+              <span>Classifier threshold <b class="hik-volume-value">${thresholdPct}%</b></span>
+              <input id="hik-sentinel-threshold" type="range" min="10" max="99" step="1" value="${thresholdPct}">
+            </label>
+            <div class="hik-audio-meter-caption">Level ${levelPct}% · Peak ${peakPct}%</div>
+            <div class="hik-status-row" style="margin-top:12px;">
+              <button type="button" class="hik-btn ${state.streamStatus === "running" ? "warn" : ""}" id="hik-sentinel-stream-toggle">${state.streamStatus === "running" ? "Stop native tap" : "Start native tap"}</button>
+              <button type="button" class="hik-btn" id="hik-sentinel-classifier-toggle">${state.classifierEnabled ? "Disable classifier" : "Enable classifier"}</button>
+              <button type="button" class="hik-btn" id="hik-sentinel-recalibrate">Recalibrate</button>
+              <button type="button" class="hik-btn" id="hik-sentinel-calibration-preset">${state.calibrationProfile === "quiet" ? "Quiet preset" : state.calibrationProfile === "noisy" ? "Noisy preset" : "Balanced preset"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   _renderAudioControls(streamMode, playbackActive = false) {
     if (this.config.show_audio_controls === false) return "";
     const isWebRtc = this._isWebRtcMode(streamMode, playbackActive ? "playback" : "");
@@ -5138,6 +5290,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
+                ${this._renderAudioSentinelPanel(refs)}
                 ${this.renderDebugOverlay(camAttrs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
@@ -5305,6 +5458,43 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     const holdTalkBtn = this.querySelector("#hik-talk-hold");
     if (holdTalkBtn) this._bindHoldTalkButton(holdTalkBtn);
+
+    this.querySelector("#hik-sentinel-stream-toggle")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const refs = this.selectedCamera ? this.refsForChannel(this.selectedCamera.channel) : {};
+      const state = this._getAudioSentinelState(refs);
+      if (state.streamStatus === "running" || state.streamStatus === "starting") {
+        await this._callAudioSentinelService("audio_stop_stream");
+      } else {
+        const profile = this.querySelector("#hik-sentinel-profile")?.value || "active";
+        await this._callAudioSentinelService("audio_start_stream", { profile, classifier: true });
+      }
+    });
+    this.querySelector("#hik-sentinel-classifier-toggle")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const refs = this.selectedCamera ? this.refsForChannel(this.selectedCamera.channel) : {};
+      const state = this._getAudioSentinelState(refs);
+      await this._callAudioSentinelService(state.classifierEnabled ? "audio_disable_classifier" : "audio_enable_classifier");
+    });
+    this.querySelector("#hik-sentinel-recalibrate")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      await this._callAudioSentinelService("audio_recalibrate");
+    });
+    this.querySelector("#hik-sentinel-calibration-preset")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const refs = this.selectedCamera ? this.refsForChannel(this.selectedCamera.channel) : {};
+      const state = this._getAudioSentinelState(refs);
+      const nextPreset = state.calibrationProfile === "balanced" ? "quiet" : (state.calibrationProfile === "quiet" ? "noisy" : "balanced");
+      await this._callAudioSentinelService("audio_apply_calibration", { preset: nextPreset });
+    });
+    this.querySelector("#hik-sentinel-threshold")?.addEventListener("change", async (ev) => {
+      const value = Math.max(0.1, Math.min(0.99, Number(ev.target?.value || 70) / 100));
+      await this._callAudioSentinelService("audio_set_threshold", { classifier_threshold: value });
+    });
     this.querySelector("#hik-talk-toggle")?.addEventListener("click", (ev) => this._handleTalkToggle(ev));
     const holdTalkOverlayBtn = this.querySelector("#hik-talk-hold-overlay");
     if (holdTalkOverlayBtn) this._bindHoldTalkButton(holdTalkOverlayBtn);
