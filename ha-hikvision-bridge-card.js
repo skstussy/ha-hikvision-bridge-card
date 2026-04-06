@@ -3026,7 +3026,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     ];
   }
 
-
   _getIsapiProbeEntryId() {
     return this.config?.entry_id || this.selectedCamera?.entry_id || null;
   }
@@ -4630,7 +4629,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-system-terminal-card .hik-alarm-value.warn { color:#ffd6d6; }
           .hik-system-terminal-card .hik-alarm-value.good { color:#b8ffca; }
           .hik-system-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
-
           .hik-isapi-card { grid-column:1 / -1; display:grid; gap:12px; }
           .hik-isapi-toolbar { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
           .hik-isapi-summary { display:flex; flex-wrap:wrap; gap:8px; }
