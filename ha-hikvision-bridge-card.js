@@ -204,9 +204,11 @@ _pushDebugEntry(entry) {
     if (this._videoCard) this._videoCard.hass = hass;
     this._syncDebugRuntime();
     this.render();
-    if (this._videoAccessoryPanel === "system_info") {
-      this._ensureIsapiCatalogLoaded();
-      this._refreshIsapiProbeResults();
+    if (["system_info", "isapi_dashboard"].includes(this._videoAccessoryPanel)) {
+      if (this._videoAccessoryPanel === "isapi_dashboard") {
+        this._ensureIsapiCatalogLoaded();
+        this._refreshIsapiProbeResults();
+      }
     }
   }
 
@@ -641,9 +643,11 @@ _pushDebugEntry(entry) {
     }
     this._syncDebugRuntime();
     this.render();
-    if (this._videoAccessoryPanel === "system_info") {
-      this._ensureIsapiCatalogLoaded();
-      this._refreshIsapiProbeResults();
+    if (["system_info", "isapi_dashboard"].includes(this._videoAccessoryPanel)) {
+      if (this._videoAccessoryPanel === "isapi_dashboard") {
+        this._ensureIsapiCatalogLoaded();
+        this._refreshIsapiProbeResults();
+      }
     }
   }
 
@@ -3312,8 +3316,33 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 </div>
               `).join("")}
             </div>
-            ${this.config.show_feature_dashboard !== false ? this._renderIsapiProbeDashboard() : ""}
 
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderIsapiDashboardOverlay() {
+    return `
+      <div class="hik-system-terminal-overlay hik-isapi-overlay" role="dialog" aria-label="ISAPI feature dashboard">
+        <div class="hik-system-terminal-shell hik-isapi-shell">
+          <div class="hik-system-terminal-head">
+            <div class="hik-system-terminal-title">
+              <span class="hik-system-terminal-dot is-red"></span>
+              <span class="hik-system-terminal-dot is-amber"></span>
+              <span class="hik-system-terminal-dot is-green"></span>
+              <span class="hik-system-terminal-heading">$ hikvision isapi_dashboard --expand</span>
+            </div>
+            <div class="hik-system-terminal-actions">
+              <span class="hik-system-terminal-badge">ISAPI probe</span>
+              <button type="button" class="hik-video-media-btn" id="hik-isapi-overlay-close" title="Close ISAPI dashboard" aria-label="Close ISAPI dashboard">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-system-terminal-body">
+            ${this._renderIsapiProbeDashboard()}
           </div>
         </div>
       </div>
@@ -5279,6 +5308,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                               <ha-icon icon="mdi:monitor-dashboard"></ha-icon>
                             </button>
                           ` : ""}
+                          ${this.config.show_feature_dashboard !== false ? `
+                            <button type="button" class="hik-video-media-btn hik-video-media-btn-sm ${this._videoAccessoryPanel === "isapi_dashboard" ? "is-active" : ""}" id="hik-overlay-isapi-dashboard-toggle" title="${this._videoAccessoryPanel === "isapi_dashboard" ? "Hide ISAPI feature dashboard" : "Show ISAPI feature dashboard"}" aria-label="${this._videoAccessoryPanel === "isapi_dashboard" ? "Hide ISAPI feature dashboard" : "Show ISAPI feature dashboard"}">
+                              <ha-icon icon="mdi:api"></ha-icon>
+                            </button>
+                          ` : ""}
                           ${storagePanelSupported ? `
                             <button type="button" class="hik-video-media-btn hik-video-media-btn-sm ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
                               <ha-icon icon="mdi:harddisk"></ha-icon>
@@ -5309,6 +5343,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "system_info" ? this.renderSystemInfoOverlay(systemInfoOverlayData) : ""}
+                    ${this._videoAccessoryPanel === "isapi_dashboard" ? this.renderIsapiDashboardOverlay() : ""}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -5503,6 +5538,18 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "system_info") {
         this._toggleVideoAccessoryPanel("system_info");
+      }
+    });
+    this.querySelector("#hik-overlay-isapi-dashboard-toggle")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._toggleVideoAccessoryPanel("isapi_dashboard");
+    });
+    this.querySelector("#hik-isapi-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "isapi_dashboard") {
+        this._toggleVideoAccessoryPanel("isapi_dashboard");
       }
     });
 
@@ -5875,6 +5922,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
             ${this.rowCheckbox("show_stream_info", "Show Stream Info", this.config.show_stream_info !== false)}
             ${this.rowCheckbox("show_stream_mode_info", "Show Stream Mode Info", this.config.show_stream_mode_info !== false)}
             ${this.rowCheckbox("show_alarm_dashboard", "Show Alarm Dashboard", this.config.show_alarm_dashboard !== false)}
+            ${this.rowCheckbox("show_feature_dashboard", "Show ISAPI feature dashboard", this.config.show_feature_dashboard !== false)}
             ${this.rowCheckbox("show_dvr_info", "Show NVR System Info", this.config.show_dvr_info !== false)}
             ${this.rowCheckbox("show_storage_info", "Show NVR Storage Info", this.config.show_storage_info !== false)}
             ${this.rowCheckbox("show_position_info", "Show PTZ position tracker", this.config.show_position_info !== false)}
