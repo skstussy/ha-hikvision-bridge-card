@@ -1982,13 +1982,116 @@ _toggleDebugFilter(kind, value) {
     const matcher = exactMatchers[kind];
     if (!matcher) return null;
 
-    for (const [entityId, stateObj] of Object.entries(states)) {
-      const attrs = stateObj.attributes || {};
-      if (String(attrs.channel) !== wanted) continue;
+    const entries = Object.entries(states).filter(([entityId, stateObj]) => {
+      const attrs = stateObj?.attributes || {};
+      return String(attrs.channel) === wanted;
+    });
+
+    for (const [entityId] of entries) {
       if (matcher(entityId)) return entityId;
     }
 
-    return null;
+    const textOf = (entityId, stateObj) => {
+      const attrs = stateObj?.attributes || {};
+      return [
+        entityId,
+        attrs.friendly_name,
+        attrs.name,
+        attrs.icon,
+      ].filter(Boolean).join(" ").toLowerCase();
+    };
+
+    const choose = (predicate, score = null) => {
+      const matches = entries.filter(([entityId, stateObj]) => predicate(entityId, stateObj));
+      if (!matches.length) return null;
+      if (typeof score !== "function") return matches[0][0];
+      matches.sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]));
+      return matches[0][0];
+    };
+
+    if (kind === "camera") {
+      return choose((entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        return entityId.startsWith("camera.") && attrs.card_visible !== false;
+      });
+    }
+
+    if (kind === "info") {
+      return choose((entityId, stateObj) => {
+        if (!entityId.startsWith("sensor.")) return false;
+        const attrs = stateObj?.attributes || {};
+        const text = textOf(entityId, stateObj);
+        if (text.includes("audio")) return false;
+        return entityId.endsWith("_info")
+          || text.endsWith(" info")
+          || "ptz_control_method" in attrs
+          || "ptz_capability_mode" in attrs
+          || "serial_number" in attrs
+          || "manage_port" in attrs
+          || "ip_address" in attrs
+          || "ip" in attrs;
+      }, (entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        let total = 0;
+        if (entityId.endsWith("_info")) total += 10;
+        if ("ptz_control_method" in attrs) total += 5;
+        if ("serial_number" in attrs) total += 4;
+        if ("manage_port" in attrs) total += 3;
+        if ("ip_address" in attrs || "ip" in attrs) total += 2;
+        return total;
+      });
+    }
+
+    if (kind === "stream") {
+      return choose((entityId, stateObj) => {
+        if (!entityId.startsWith("sensor.")) return false;
+        const attrs = stateObj?.attributes || {};
+        const text = textOf(entityId, stateObj);
+        if (text.includes("audio stream")) return false;
+        if (entityId.endsWith("_audio_stream_status") || entityId.endsWith("_native_stream_status")) return false;
+        return entityId.endsWith("_stream")
+          || text.endsWith(" stream")
+          || "rtsp_url" in attrs
+          || "rtsp_direct_url" in attrs
+          || "stream_id" in attrs
+          || "stream_profile" in attrs;
+      }, (entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        let total = 0;
+        if (entityId.endsWith("_stream")) total += 10;
+        if ("rtsp_url" in attrs || "rtsp_direct_url" in attrs) total += 5;
+        if ("stream_id" in attrs) total += 4;
+        if ("stream_profile" in attrs) total += 3;
+        return total;
+      });
+    }
+
+    const friendlyMatchers = {
+      online: [" online"],
+      ptz_supported: ["ptz supported"],
+      motion: ["motion alarm"],
+      video_loss: ["video loss alarm"],
+      intrusion: ["intrusion alarm"],
+      line_crossing: ["line crossing alarm"],
+      tamper: ["tamper alarm"],
+      audio_enabled: ["audio enabled"],
+      audio_classifier_enabled: ["audio classifier enabled"],
+      audio_gunshot: ["gunshot detected", "audio gunshot detected"],
+      audio_level: ["audio level"],
+      audio_peak: ["audio peak"],
+      audio_classifier_label: ["classifier label"],
+      audio_classifier_confidence: ["classifier confidence"],
+      audio_classifier_threshold: ["classifier threshold"],
+      audio_last_event: ["audio last event"],
+      audio_stream_status: ["audio stream status", "native stream status"],
+      audio_last_gunshot: ["last gunshot"],
+    };
+
+    const tokens = friendlyMatchers[kind] || [];
+    return choose((entityId, stateObj) => {
+      const text = textOf(entityId, stateObj);
+      return tokens.some((token) => text.includes(token));
+    });
   }
 
   findGlobalEntities() {
