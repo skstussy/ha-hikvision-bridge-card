@@ -1954,30 +1954,34 @@ _toggleDebugFilter(kind, value) {
   findEntityForChannel(channel, kind) {
     const states = this._hass?.states || {};
     const wanted = String(channel);
+    const matchesByKind = {
+      info: [{ domain: "sensor.", suffix: "_info" }],
+      stream: [{ domain: "sensor.", suffix: "_stream" }],
+      online: [{ domain: "binary_sensor.", suffix: "_online" }],
+      ptz_supported: [{ domain: "binary_sensor.", suffix: "_ptz_supported" }],
+      motion: [{ domain: "binary_sensor.", suffix: "_motion_alarm" }],
+      video_loss: [{ domain: "binary_sensor.", suffix: "_video_loss_alarm" }],
+      intrusion: [{ domain: "binary_sensor.", suffix: "_intrusion_alarm" }],
+      line_crossing: [{ domain: "binary_sensor.", suffix: "_line_crossing_alarm" }],
+      tamper: [{ domain: "binary_sensor.", suffix: "_tamper_alarm" }],
+      audio_enabled: [{ domain: "binary_sensor.", suffix: "_audio_enabled" }],
+      audio_classifier_enabled: [{ domain: "binary_sensor.", suffix: "_audio_classifier_enabled" }],
+      audio_gunshot: [{ domain: "binary_sensor.", suffix: "_gunshot_detected" }],
+      audio_level: [{ domain: "sensor.", suffix: "_audio_level" }],
+      audio_peak: [{ domain: "sensor.", suffix: "_audio_peak" }],
+      audio_classifier_label: [{ domain: "sensor.", suffix: "_audio_classifier_label" }],
+      audio_classifier_confidence: [{ domain: "sensor.", suffix: "_audio_classifier_confidence" }],
+      audio_classifier_threshold: [{ domain: "sensor.", suffix: "_audio_classifier_threshold" }],
+      audio_last_event: [{ domain: "sensor.", suffix: "_audio_last_event" }],
+      audio_stream_status: [{ domain: "sensor.", suffix: "_audio_stream_status" }],
+      audio_last_gunshot: [{ domain: "sensor.", suffix: "_audio_last_gunshot" }],
+    };
     for (const [entityId, stateObj] of Object.entries(states)) {
       const attrs = stateObj.attributes || {};
       if (String(attrs.channel) !== wanted) continue;
       if (kind === "camera" && entityId.startsWith("camera.")) return entityId;
-      if (kind === "info" && entityId.startsWith("sensor.") && !entityId.includes("_stream")) return entityId;
-      if (kind === "stream" && entityId.startsWith("sensor.") && entityId.includes("_stream")) return entityId;
-      if (kind === "online" && entityId.startsWith("binary_sensor.") && entityId.includes("_online")) return entityId;
-      if (kind === "ptz_supported" && entityId.startsWith("binary_sensor.") && entityId.includes("_ptz_supported")) return entityId;
-      if (kind === "motion" && entityId.startsWith("binary_sensor.") && entityId.includes("_motion_alarm")) return entityId;
-      if (kind === "video_loss" && entityId.startsWith("binary_sensor.") && entityId.includes("_video_loss_alarm")) return entityId;
-      if (kind === "intrusion" && entityId.startsWith("binary_sensor.") && entityId.includes("_intrusion_alarm")) return entityId;
-      if (kind === "line_crossing" && entityId.startsWith("binary_sensor.") && entityId.includes("_line_crossing_alarm")) return entityId;
-      if (kind === "tamper" && entityId.startsWith("binary_sensor.") && entityId.includes("_tamper_alarm")) return entityId;
-      if (kind === "audio_enabled" && entityId.startsWith("binary_sensor.") && entityId.includes("_enabled")) return entityId;
-      if (kind === "audio_classifier_enabled" && entityId.startsWith("binary_sensor.") && entityId.includes("_classifier_enabled")) return entityId;
-      if (kind === "audio_gunshot" && entityId.startsWith("binary_sensor.") && entityId.includes("_gunshot_detected")) return entityId;
-      if (kind === "audio_level" && entityId.startsWith("sensor.") && entityId.includes("_audio_level")) return entityId;
-      if (kind === "audio_peak" && entityId.startsWith("sensor.") && entityId.includes("_audio_peak")) return entityId;
-      if (kind === "audio_classifier_label" && entityId.startsWith("sensor.") && entityId.includes("_classifier_label")) return entityId;
-      if (kind === "audio_classifier_confidence" && entityId.startsWith("sensor.") && entityId.includes("_classifier_confidence")) return entityId;
-      if (kind === "audio_classifier_threshold" && entityId.startsWith("sensor.") && entityId.includes("_classifier_threshold")) return entityId;
-      if (kind === "audio_last_event" && entityId.startsWith("sensor.") && entityId.includes("_audio_last_event")) return entityId;
-      if (kind === "audio_stream_status" && entityId.startsWith("sensor.") && entityId.includes("_audio_stream_status")) return entityId;
-      if (kind === "audio_last_gunshot" && entityId.startsWith("sensor.") && entityId.includes("_audio_last_gunshot")) return entityId;
+      const rules = matchesByKind[kind] || [];
+      if (rules.some((rule) => entityId.startsWith(rule.domain) && entityId.endsWith(rule.suffix))) return entityId;
     }
     return null;
   }
