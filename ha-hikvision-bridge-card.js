@@ -644,6 +644,14 @@ _pushDebugEntry(entry) {
     return text;
   }
 
+  _redactRtspUrl(value) {
+    let text = value == null ? "" : String(value);
+    if (!text) return "";
+    text = text.replace(/(rtsp:\/\/)([^:@\/\s]+)(?::([^@\/\s]*))?@/gi, (match, scheme) => `${scheme}<redacted>@`);
+    text = text.replace(/([?&](?:user|username|password|pass|pwd)=)[^&\s]+/gi, "$1<redacted>");
+    return text;
+  }
+
   _sanitizeDebugObject(value) {
     if (value == null) return value;
     if (Array.isArray(value)) return value.map((item) => this._sanitizeDebugObject(item));
@@ -4467,6 +4475,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const streamProfileLabel = streamProfile === "sub" ? "Sub-stream" : "Main-stream";
     const rtspUrl = camAttrs.rtsp_url || stream.rtsp_url || info.rtsp_url || "";
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
+    const redactedRtspUrl = this._redactRtspUrl(rtspUrl || "-");
+    const redactedDirectRtspUrl = this._redactRtspUrl(directRtspUrl || "-");
+    const preferredUrl = streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-");
+    const redactedPreferredUrl = this._redactRtspUrl(preferredUrl || "-");
     const entityName = refs.camera || "-";
     const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_proxy_supported ? "proxy" : (camAttrs.ptz_direct_supported ? "direct" : "none"));
     const ptzCapabilityMode = camAttrs.ptz_capability_mode || info.ptz_capability_mode || "-";
@@ -4539,11 +4551,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           ])}
           <div style="margin-top:12px;">
             <b>RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(rtspUrl || "-")}</div>
+            <div class="hik-code">${this.escapeHtml(redactedRtspUrl || "-")}</div>
           </div>
           <div style="margin-top:12px;">
             <b>Direct RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(directRtspUrl || "-")}</div>
+            <div class="hik-code">${this.escapeHtml(redactedDirectRtspUrl || "-")}</div>
           </div>
         </div>
       `);
@@ -4601,7 +4613,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
           ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
           ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
-          ["Preferred URL", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-")],
+          ["Preferred URL", redactedPreferredUrl || "-"],
         ])}
       </div>
     ` : "";
