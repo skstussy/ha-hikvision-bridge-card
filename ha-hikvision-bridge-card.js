@@ -1979,119 +1979,48 @@ _toggleDebugFilter(kind, value) {
       audio_last_gunshot: (entityId) => entityId.startsWith("sensor.") && (entityId.endsWith(`_camera_${wanted}_audio_last_gunshot`) || entityId.endsWith(`_camera_${wanted}_last_gunshot_ts`)),
     };
 
+    const fallbackMatchers = {
+      camera: (entityId, attrs) => entityId.startsWith("camera.") && String(attrs.channel ?? attrs.video_input_channel_id ?? "") === wanted,
+      info: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && ("ip_address" in attrs || "manage_port" in attrs || "serial_number" in attrs),
+      stream: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? attrs.video_input_channel_id ?? "") === wanted && ("rtsp_url" in attrs || "rtsp_direct_url" in attrs || "stream_id" in attrs),
+      online: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (attrs.device_class === "connectivity" || entityId.includes("_online")),
+      ptz_supported: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && ("ptz_supported" in attrs || entityId.includes("_ptz_supported")),
+      motion: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("motion") || attrs.device_class === "motion"),
+      video_loss: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("video_loss"),
+      intrusion: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("intrusion"),
+      line_crossing: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("line_crossing"),
+      tamper: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("tamper"),
+      audio_enabled: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio") && entityId.includes("enabled")),
+      audio_classifier_enabled: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_enabled"),
+      audio_gunshot: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("gunshot"),
+      audio_level: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_level"),
+      audio_peak: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_peak"),
+      audio_classifier_label: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_label"),
+      audio_classifier_confidence: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_confidence"),
+      audio_classifier_threshold: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_threshold"),
+      audio_last_event: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_last_event"),
+      audio_stream_status: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio_stream_status") || entityId.includes("native_stream_status")),
+      audio_last_gunshot: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio_last_gunshot") || entityId.includes("last_gunshot")),
+    };
+
     const matcher = exactMatchers[kind];
     if (!matcher) return null;
 
-    const entries = Object.entries(states).filter(([entityId, stateObj]) => {
-      const attrs = stateObj?.attributes || {};
-      return String(attrs.channel) === wanted;
-    });
-
-    for (const [entityId] of entries) {
+    for (const [entityId, stateObj] of Object.entries(states)) {
+      const attrs = stateObj.attributes || {};
+      if (String(attrs.channel ?? attrs.video_input_channel_id ?? "") !== wanted) continue;
       if (matcher(entityId)) return entityId;
     }
 
-    const textOf = (entityId, stateObj) => {
-      const attrs = stateObj?.attributes || {};
-      return [
-        entityId,
-        attrs.friendly_name,
-        attrs.name,
-        attrs.icon,
-      ].filter(Boolean).join(" ").toLowerCase();
-    };
-
-    const choose = (predicate, score = null) => {
-      const matches = entries.filter(([entityId, stateObj]) => predicate(entityId, stateObj));
-      if (!matches.length) return null;
-      if (typeof score !== "function") return matches[0][0];
-      matches.sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]));
-      return matches[0][0];
-    };
-
-    if (kind === "camera") {
-      return choose((entityId, stateObj) => {
-        const attrs = stateObj?.attributes || {};
-        return entityId.startsWith("camera.") && attrs.card_visible !== false;
-      });
+    const fallback = fallbackMatchers[kind];
+    if (fallback) {
+      for (const [entityId, stateObj] of Object.entries(states)) {
+        const attrs = stateObj.attributes || {};
+        if (fallback(entityId, attrs)) return entityId;
+      }
     }
 
-    if (kind === "info") {
-      return choose((entityId, stateObj) => {
-        if (!entityId.startsWith("sensor.")) return false;
-        const attrs = stateObj?.attributes || {};
-        const text = textOf(entityId, stateObj);
-        if (text.includes("audio")) return false;
-        return entityId.endsWith("_info")
-          || text.endsWith(" info")
-          || "ptz_control_method" in attrs
-          || "ptz_capability_mode" in attrs
-          || "serial_number" in attrs
-          || "manage_port" in attrs
-          || "ip_address" in attrs
-          || "ip" in attrs;
-      }, (entityId, stateObj) => {
-        const attrs = stateObj?.attributes || {};
-        let total = 0;
-        if (entityId.endsWith("_info")) total += 10;
-        if ("ptz_control_method" in attrs) total += 5;
-        if ("serial_number" in attrs) total += 4;
-        if ("manage_port" in attrs) total += 3;
-        if ("ip_address" in attrs || "ip" in attrs) total += 2;
-        return total;
-      });
-    }
-
-    if (kind === "stream") {
-      return choose((entityId, stateObj) => {
-        if (!entityId.startsWith("sensor.")) return false;
-        const attrs = stateObj?.attributes || {};
-        const text = textOf(entityId, stateObj);
-        if (text.includes("audio stream")) return false;
-        if (entityId.endsWith("_audio_stream_status") || entityId.endsWith("_native_stream_status")) return false;
-        return entityId.endsWith("_stream")
-          || text.endsWith(" stream")
-          || "rtsp_url" in attrs
-          || "rtsp_direct_url" in attrs
-          || "stream_id" in attrs
-          || "stream_profile" in attrs;
-      }, (entityId, stateObj) => {
-        const attrs = stateObj?.attributes || {};
-        let total = 0;
-        if (entityId.endsWith("_stream")) total += 10;
-        if ("rtsp_url" in attrs || "rtsp_direct_url" in attrs) total += 5;
-        if ("stream_id" in attrs) total += 4;
-        if ("stream_profile" in attrs) total += 3;
-        return total;
-      });
-    }
-
-    const friendlyMatchers = {
-      online: [" online"],
-      ptz_supported: ["ptz supported"],
-      motion: ["motion alarm"],
-      video_loss: ["video loss alarm"],
-      intrusion: ["intrusion alarm"],
-      line_crossing: ["line crossing alarm"],
-      tamper: ["tamper alarm"],
-      audio_enabled: ["audio enabled"],
-      audio_classifier_enabled: ["audio classifier enabled"],
-      audio_gunshot: ["gunshot detected", "audio gunshot detected"],
-      audio_level: ["audio level"],
-      audio_peak: ["audio peak"],
-      audio_classifier_label: ["classifier label"],
-      audio_classifier_confidence: ["classifier confidence"],
-      audio_classifier_threshold: ["classifier threshold"],
-      audio_last_event: ["audio last event"],
-      audio_stream_status: ["audio stream status", "native stream status"],
-      audio_last_gunshot: ["last gunshot"],
-    };
-
-    const tokens = friendlyMatchers[kind] || [];
-    return choose((entityId, stateObj) => {
-      const text = textOf(entityId, stateObj);
-      return tokens.some((token) => text.includes(token));
-    });
+    return null;
   }
 
   findGlobalEntities() {
