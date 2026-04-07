@@ -2654,7 +2654,7 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                       <span class="hik-speed-value">${speed}</span>
                     </div>
                     <div class="hik-speed-track">
-                      <input id="hik-speed" type="range" min="1" max="100" step="1" value="${speed}">
+                      <input id="hik-speed-panel" data-ptz-speed type="range" min="1" max="100" step="1" value="${speed}">
                     </div>
                   </div>
                 </div>
@@ -4461,6 +4461,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
     const speed = Number(this.config.speed || 50);
+    const directionInfo = this.getDirectionInfo();
+    const ptzTrackerState = this.getPTZState();
     const streamProfile = String(camAttrs.stream_profile || stream.stream_profile || info.stream_profile || "main").toLowerCase();
     const streamProfileLabel = streamProfile === "sub" ? "Sub-stream" : "Main-stream";
     const rtspUrl = camAttrs.rtsp_url || stream.rtsp_url || info.rtsp_url || "";
@@ -4797,11 +4799,16 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-alarm-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
 
           .hik-video-ptz-surface { position:absolute; inset:14px; pointer-events:none; }
-          .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; gap:8px; }
+          .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; flex-wrap:wrap; gap:8px; max-width:min(78%, 780px); }
           .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
           .hik-video-ptz-chip.subtle { opacity:0.9; }
           .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
-          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
+          .hik-video-ptz-cluster { position:absolute; left:16px; bottom:16px; display:grid; gap:12px; pointer-events:auto; }
+          .hik-video-ptz-speed { min-width:clamp(180px, 24vw, 260px); padding:10px 12px; border-radius:18px; display:grid; gap:8px; background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-ptz-speed-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:700; color:var(--primary-text-color); }
+          .hik-video-ptz-speed-input { width:100%; accent-color:var(--hik-accent); cursor:pointer; }
+          .hik-video-ptz-speed-input:disabled { opacity:0.42; cursor:not-allowed; }
+          .hik-video-ptz-pad { display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); }
           .hik-video-ptz-btn { position:relative; min-height:var(--hik-ov-btn); min-width:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
           .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
           .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
@@ -5122,32 +5129,45 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                             <ha-icon icon="mdi:axis-arrow"></ha-icon>
                             <span>Live PTZ</span>
                           </div>
+                          <div class="hik-video-ptz-chip">
+                            <ha-icon icon="${directionInfo.icon}"></ha-icon>
+                            <span>${directionInfo.label}</span>
+                          </div>
                           <div class="hik-video-ptz-chip subtle">
-                            <ha-icon icon="mdi:speedometer"></ha-icon>
-                            <span>${speed}</span>
+                            <ha-icon icon="mdi:crosshairs-question"></ha-icon>
+                            <span>P ${ptzTrackerState.pan} · T ${ptzTrackerState.tilt}</span>
                           </div>
                         </div>
-                        <div class="hik-video-ptz-pad">
-                          <div></div>
-                          <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
-                            <ha-icon icon="mdi:chevron-up"></ha-icon>
-                          </button>
-                          <div></div>
-                          <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move left" title="Move left">
-                            <ha-icon icon="mdi:chevron-left"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-ptz-btn center" id="hik-center-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Return home" title="Return home">
-                            <span class="hik-video-ptz-center-core"></span>
-                            <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
-                          </button>
-                          <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move right" title="Move right">
-                            <ha-icon icon="mdi:chevron-right"></ha-icon>
-                          </button>
-                          <div></div>
-                          <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move down" title="Move down">
-                            <ha-icon icon="mdi:chevron-down"></ha-icon>
-                          </button>
-                          <div></div>
+                        <div class="hik-video-ptz-cluster">
+                          <div class="hik-video-ptz-speed">
+                            <div class="hik-video-ptz-speed-head">
+                              <span>PTZ speed</span>
+                              <span>${speed}</span>
+                            </div>
+                            <input id="hik-speed-overlay" data-ptz-speed type="range" class="hik-video-ptz-speed-input" min="1" max="100" step="1" value="${speed}" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="PTZ speed">
+                          </div>
+                          <div class="hik-video-ptz-pad">
+                            <div></div>
+                            <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
+                              <ha-icon icon="mdi:chevron-up"></ha-icon>
+                            </button>
+                            <div></div>
+                            <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move left" title="Move left">
+                              <ha-icon icon="mdi:chevron-left"></ha-icon>
+                            </button>
+                            <button type="button" class="hik-video-ptz-btn center" id="hik-center-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Return home" title="Return home">
+                              <span class="hik-video-ptz-center-core"></span>
+                              <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
+                            </button>
+                            <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move right" title="Move right">
+                              <ha-icon icon="mdi:chevron-right"></ha-icon>
+                            </button>
+                            <div></div>
+                            <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move down" title="Move down">
+                              <ha-icon icon="mdi:chevron-down"></ha-icon>
+                            </button>
+                            <div></div>
+                          </div>
                         </div>
                         <div class="hik-video-zoom-rail">
                           <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Zoom in" title="Zoom in">
@@ -5729,10 +5749,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this.querySelector("#hik-playback-rate-overlay")?.addEventListener("change", (ev) => {
       this._setPlaybackRate(ev.target.value);
     });
-    this.querySelector("#hik-speed")?.addEventListener("input", (ev) => {
+    this.querySelectorAll("[data-ptz-speed]").forEach((input) => input.addEventListener("input", (ev) => {
       this.config = { ...this.config, speed: Number(ev.target.value) };
       this.render();
-    });
+    }));
     this.querySelector('[data-debug-follow-toggle]')?.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
