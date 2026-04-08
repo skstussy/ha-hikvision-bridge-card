@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.10 */
+/* UI Split Patch 2.6.11 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.17";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.18";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -4761,34 +4761,76 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
 
-    const streamModeAccessoryPanel = this.config.show_stream_mode_info !== false ? `
-      <div class="hik-panel hik-info-card hik-video-accessory-panel">
-        <div class="hik-sub"><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Stream Mode Info</div>
-        <div class="hik-select-group" style="margin-bottom:12px;">
-          <div class="hik-select-wrap">
-            <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
-            <label for="streamMode" style="font-size:12px; opacity:0.8;">Stream mode</label>
+    const streamModeOverlayContent = this.config.show_stream_mode_info !== false && this._videoAccessoryPanel === "stream_mode" ? `
+      <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream mode info overlay">
+        <div class="hik-storage-terminal-shell">
+          <div class="hik-storage-terminal-head">
+            <div class="hik-storage-terminal-title">
+              <span class="hik-storage-terminal-dot is-red"></span>
+              <span class="hik-storage-terminal-dot is-amber"></span>
+              <span class="hik-storage-terminal-dot is-green"></span>
+              <span class="hik-storage-terminal-heading">$ hikvision stream_mode --inspect --follow</span>
+            </div>
+            <div class="hik-storage-terminal-actions">
+              <span class="hik-storage-terminal-badge">${this.escapeHtml(videoMethod || "-")}</span>
+              <button type="button" class="hik-video-media-btn" id="hik-stream-mode-overlay-close" title="Close stream mode info" aria-label="Close stream mode info">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
           </div>
-          <div class="hik-select-wrap">
-            <select id="streamMode" class="hik-select">
-              <option value="webrtc_direct" ${streamMode === "webrtc_direct" ? "selected" : ""}>WebRTC (Direct RTSP)</option>
-              <option value="webrtc" ${streamMode === "webrtc" ? "selected" : ""}>WebRTC (ISAPI RTSP)</option>
-              <option value="rtsp_direct" ${streamMode === "rtsp_direct" ? "selected" : ""}>RTSP (Direct)</option>
-              <option value="rtsp" ${streamMode === "rtsp" ? "selected" : ""}>RTSP (ISAPI)</option>
-              <option value="snapshot" ${streamMode === "snapshot" ? "selected" : ""}>Snapshot</option>
-            </select>
+          <div class="hik-storage-terminal-body">
+            <div class="hik-storage-terminal-grid">
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">stream mode</div>
+                <div class="hik-select-group" style="margin-bottom:12px;">
+                  <div class="hik-select-wrap">
+                    <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
+                    <label for="streamMode-terminal" style="font-size:12px; opacity:0.8;">Stream mode</label>
+                  </div>
+                  <div class="hik-select-wrap">
+                    <select id="streamMode-terminal" class="hik-select">
+                      <option value="webrtc_direct" ${streamMode === "webrtc_direct" ? "selected" : ""}>WebRTC (Direct RTSP)</option>
+                      <option value="webrtc" ${streamMode === "webrtc" ? "selected" : ""}>WebRTC (ISAPI RTSP)</option>
+                      <option value="rtsp_direct" ${streamMode === "rtsp_direct" ? "selected" : ""}>RTSP (Direct)</option>
+                      <option value="rtsp" ${streamMode === "rtsp" ? "selected" : ""}>RTSP (ISAPI)</option>
+                      <option value="snapshot" ${streamMode === "snapshot" ? "selected" : ""}>Snapshot</option>
+                    </select>
+                  </div>
+                </div>
+                ${this.buildMetaGrid([
+                  ["Current mode", videoMethod],
+                  ["Requested mode", streamMode || "-"],
+                  ["WebRTC path", ["webrtc", "webrtc_direct"].includes(streamMode) ? "Enabled" : "Disabled"],
+                  ["RTSP source", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? "Direct RTSP" : streamMode === "snapshot" ? "Camera snapshot" : "ISAPI RTSP"],
+                  ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
+                  ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
+                  ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
+                  ["Preferred URL", this._redactUrl(streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-"))],
+                ])}
+              </div>
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">stream routing</div>
+                ${this.buildMetaGrid([
+                  ["Profile", streamProfileLabel],
+                  ["Stream state", streamEntity?.state || cameraEntity?.state || "-"],
+                  ["Stream ID", camAttrs.stream_id || stream.stream_id || info.stream_id || "-"],
+                  ["Transport", camAttrs.stream_transport || stream.transport || "-"],
+                  ["Audio codec", camAttrs.stream_audio_codec || stream.audio_codec || "-"],
+                ])}
+                <div style="display:grid; gap:12px; margin-top:12px;">
+                  <div>
+                    <b>RTSP URL</b>
+                    <div class="hik-code">${this.escapeHtml(rtspUrl || "-")}</div>
+                  </div>
+                  <div>
+                    <b>Direct RTSP URL</b>
+                    <div class="hik-code">${this.escapeHtml(directRtspUrl || "-")}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        ${this.buildMetaGrid([
-          ["Current mode", videoMethod],
-          ["Requested mode", streamMode || "-"],
-          ["WebRTC path", ["webrtc", "webrtc_direct"].includes(streamMode) ? "Enabled" : "Disabled"],
-          ["RTSP source", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? "Direct RTSP" : streamMode === "snapshot" ? "Camera snapshot" : "ISAPI RTSP"],
-          ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
-          ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
-          ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
-          ["Preferred URL", this._redactUrl(streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-"))],
-        ])}
       </div>
     ` : "";
 
@@ -4858,9 +4900,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     const videoAccessoryPanelContent = this._debugOverlayOpen
       ? this.renderDebugDashboard(camAttrs)
-      : this._videoAccessoryPanel === "stream_mode"
-        ? streamModeAccessoryPanel
-        : "";
+      : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -5520,6 +5560,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${storageOverlayContent}
+                    ${streamModeOverlayContent}
                     ${streamInfoOverlayContent}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
@@ -5685,6 +5726,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       }
     });
 
+    this.querySelector("#hik-stream-mode-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "stream_mode") {
+        this._toggleVideoAccessoryPanel("stream_mode");
+      }
+    });
+
     this.querySelector("#hik-stream-info-overlay-close")?.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -5694,6 +5743,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     });
 
     const streamModeSelect = this.querySelector("#streamMode");
+    const streamModeTerminal = this.querySelector("#streamMode-terminal");
     const streamModeOverlay = this.querySelector("#streamMode-overlay");
     const applyStreamMode = (value) => {
       this._hass.callService("ha_hikvision_bridge", "set_stream_mode", {
@@ -5703,6 +5753,9 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     };
     if (streamModeSelect && refs.camera) {
       streamModeSelect.addEventListener("change", (e) => applyStreamMode(e.target.value));
+    }
+    if (streamModeTerminal && refs.camera) {
+      streamModeTerminal.addEventListener("change", (e) => applyStreamMode(e.target.value));
     }
     if (streamModeOverlay && refs.camera) {
       streamModeOverlay.addEventListener("change", (e) => applyStreamMode(e.target.value));
