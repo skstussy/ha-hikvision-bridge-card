@@ -1652,50 +1652,19 @@ _toggleDebugFilter(kind, value) {
   }
 
   renderDebugDashboard(camAttrs = {}) {
-    if (!this.isDebugEnabled()) return "";
-    const openAttr = this._debugDashboardOpen ? "open" : "";
+    if (!this.isDebugEnabled() || !this._debugOverlayOpen) return "";
     return `
-      <div class="hik-panel hik-info-card hik-debug-dashboard hik-expandable-panel">
-        <details id="hik-debug-dashboard-details" class="hik-expandable-details" data-expandable-key="debug-dashboard" ${openAttr}>
-          <summary class="hik-debug-summary hik-expandable-summary">
-            <span class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</span>
-            <span class="hik-mini-note">Live diagnostics and trace events</span>
-          </summary>
-          <div class="hik-expandable-body hik-debug-dashboard-body">
-            ${this._renderDebugDashboardBody(camAttrs, { terminal: false })}
-          </div>
-        </details>
+      <div class="hik-panel hik-info-card hik-debug-dashboard">
+        <div class="hik-sub"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug Dashboard</div>
+        <div class="hik-mini-note" style="margin-bottom:12px;">Live diagnostics and trace events</div>
+        <div class="hik-debug-dashboard-body">
+          ${this._renderDebugDashboardBody(camAttrs, { terminal: false })}
+        </div>
       </div>`;
   }
 
   renderDebugOverlay(camAttrs = {}) {
-    if (!this._isDebugPanelActive()) return "";
-    return `
-      <div class="hik-debug-terminal-overlay" role="dialog" aria-modal="false" aria-label="Debug console overlay">
-        <div class="hik-debug-terminal-window" style="${this._getDebugOverlayStyle()}">
-          <div class="hik-debug-terminal-head">
-            <div class="hik-debug-terminal-title">
-              <span class="hik-debug-terminal-dot red"></span>
-              <span class="hik-debug-terminal-dot amber"></span>
-              <span class="hik-debug-terminal-dot green"></span>
-              <ha-icon icon="mdi:console-line"></ha-icon>
-              <span>Debug Console</span>
-            </div>
-            <div class="hik-debug-terminal-actions">
-              <button type="button" class="hik-video-media-btn" id="hik-debug-overlay-reset" title="Reset debug console size and position" aria-label="Reset debug console size and position">
-                <ha-icon icon="mdi:fit-to-screen-outline"></ha-icon>
-              </button>
-              <button type="button" class="hik-video-media-btn" id="hik-debug-overlay-minimize" title="Close debug console" aria-label="Close debug console">
-                <ha-icon icon="mdi:close"></ha-icon>
-              </button>
-            </div>
-          </div>
-          <div class="hik-debug-terminal-body">
-            ${this._renderDebugDashboardBody(camAttrs, { terminal: true })}
-          </div>
-          <button type="button" class="hik-debug-resize-handle" aria-label="Resize debug console" title="Resize debug console"></button>
-        </div>
-      </div>`;
+    return "";
   }
 
 
@@ -4884,9 +4853,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
     const storageOverlayContent = this.renderStorageSystemOverlay(globalRefs, dvr, storage, storageSummary, nvrAlarmBadges);
 
-    const videoAccessoryPanelContent = this._videoAccessoryPanel === "stream_mode"
-      ? streamModeAccessoryPanel
-      : "";
+    const videoAccessoryPanelContent = this._debugOverlayOpen
+      ? this.renderDebugDashboard(camAttrs)
+      : this._videoAccessoryPanel === "stream_mode"
+        ? streamModeAccessoryPanel
+        : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -5621,7 +5592,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 </div>` : ""}
                 ${this._renderAudioControls(streamMode, playbackActive)}
                 ${this._renderAudioSentinelPanel(refs)}
-                ${this.renderDebugOverlay(camAttrs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
             </div>
@@ -5657,35 +5627,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._toggleVideoAccessoryPanel("debug");
       });
     }
-    this.querySelector("#hik-debug-overlay-minimize")?.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (this._debugOverlayOpen) {
-        this._toggleVideoAccessoryPanel("debug");
-      }
-    });
-    this.querySelector("#hik-debug-overlay-reset")?.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this._resetDebugOverlayRect();
-    });
-    if (this._debugOverlayOpen) {
-      this._bindDebugOverlayInteractions();
-      if (!this._debugOverlayDrag && !this._debugOverlayResize) {
-        const clamped = this._clampDebugOverlayRect(this._debugOverlayRect);
-        if (JSON.stringify(clamped) !== JSON.stringify(this._debugOverlayRect)) {
-          this._setDebugOverlayRect(clamped, { persist: true, rerender: false });
-          const overlay = this.querySelector('.hik-debug-terminal-window');
-          if (overlay) {
-            overlay.style.setProperty('--hik-debug-overlay-x', `${Math.round(clamped.x)}px`);
-            overlay.style.setProperty('--hik-debug-overlay-y', `${Math.round(clamped.y)}px`);
-            overlay.style.setProperty('--hik-debug-overlay-width', `${Math.round(clamped.width)}px`);
-            overlay.style.setProperty('--hik-debug-overlay-height', `${Math.round(clamped.height)}px`);
-          }
-        }
-      }
-    }
-
     const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
     if (streamModeOverlayToggle) {
       streamModeOverlayToggle.addEventListener("click", (e) => {
