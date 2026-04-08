@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.15 */
+/* UI Split Patch 2.6.16 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.22";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.23";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -4792,6 +4792,10 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       stream_mode: "Stream Mode Panel",
       storage: "NVR System Info Panel",
       alarm: "Alarm Dashboard Panel",
+      audio_console: "Audio Console Panel",
+      stream_info: "Stream Info Panel",
+      camera_info: "Camera Info Panel",
+      debug: "Debug Dashboard Panel",
     };
     const panelName = panelNames[String(panelKey || "")] || "Panel";
     return `${isOpen ? "Hide" : "Show"} ${panelName}`;
@@ -4801,6 +4805,10 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const streamModeEnabled = options.streamModeEnabled !== false;
     const storageEnabled = options.storageEnabled === true;
     const alarmEnabled = options.alarmEnabled !== false;
+    const audioConsoleEnabled = options.audioConsoleEnabled === true;
+    const streamInfoEnabled = options.streamInfoEnabled === true;
+    const cameraInfoEnabled = options.cameraInfoEnabled === true;
+    const debugEnabled = options.debugEnabled === true;
     return `
       <div class="hik-status-pills-overlay" aria-label="Status pills">
         <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
@@ -4839,6 +4847,54 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           >
             <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
             <span>Alarm</span>
+          </button>
+        ` : ""}
+        ${audioConsoleEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "audio_console" ? "is-active" : ""}"
+            id="hik-overlay-audio-console-toggle"
+            title="${this._panelToggleLabel("audio_console", this._videoAccessoryPanel === "audio_console")}"
+            aria-label="${this._panelToggleLabel("audio_console", this._videoAccessoryPanel === "audio_console")}"
+          >
+            <ha-icon icon="mdi:volume-source"></ha-icon>
+            <span>Audio</span>
+          </button>
+        ` : ""}
+        ${streamInfoEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "stream_info" ? "is-active" : ""}"
+            id="hik-overlay-stream-info-toggle"
+            title="${this._panelToggleLabel("stream_info", this._videoAccessoryPanel === "stream_info")}"
+            aria-label="${this._panelToggleLabel("stream_info", this._videoAccessoryPanel === "stream_info")}"
+          >
+            <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
+            <span>Stream Info</span>
+          </button>
+        ` : ""}
+        ${cameraInfoEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "camera_info" ? "is-active" : ""}"
+            id="hik-overlay-camera-info-toggle"
+            title="${this._panelToggleLabel("camera_info", this._videoAccessoryPanel === "camera_info")}"
+            aria-label="${this._panelToggleLabel("camera_info", this._videoAccessoryPanel === "camera_info")}"
+          >
+            <ha-icon icon="mdi:information-outline"></ha-icon>
+            <span>Camera</span>
+          </button>
+        ` : ""}
+        ${debugEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._debugOverlayOpen ? "is-active" : ""}"
+            id="hik-overlay-debug-toggle"
+            title="${this._panelToggleLabel("debug", this._debugOverlayOpen)}"
+            aria-label="${this._panelToggleLabel("debug", this._debugOverlayOpen)}"
+          >
+            <ha-icon icon="mdi:bug-outline"></ha-icon>
+            <span>Debug</span>
           </button>
         ` : ""}
       </div>
@@ -5724,7 +5780,15 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
-                    ${this._renderStatusPillsOverlay(versionInfo, { streamModeEnabled: this.config.show_stream_mode_info !== false, storageEnabled: storagePanelSupported, alarmEnabled: this.config.show_alarm_dashboard !== false })}
+                    ${this._renderStatusPillsOverlay(versionInfo, {
+                      streamModeEnabled: this.config.show_stream_mode_info !== false,
+                      storageEnabled: storagePanelSupported,
+                      alarmEnabled: this.config.show_alarm_dashboard !== false,
+                      audioConsoleEnabled: (this.config.show_audio_controls !== false || this.config.show_audio_sentinel !== false),
+                      streamInfoEnabled: this.config.show_stream_info !== false,
+                      cameraInfoEnabled: this.config.show_camera_info !== false,
+                      debugEnabled: this.config.debug?.enabled === true,
+                    })}
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -5779,26 +5843,6 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                         ` : ""}
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${(this.config.show_audio_controls !== false || this.config.show_audio_sentinel !== false) ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "audio_console" ? "is-active" : ""}" id="hik-overlay-audio-console-toggle" title="${this._videoAccessoryPanel === "audio_console" ? "Hide audio console" : "Show audio console"}" aria-label="${this._videoAccessoryPanel === "audio_console" ? "Hide audio console" : "Show audio console"}">
-                          <ha-icon icon="mdi:volume-source"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${this.config.show_stream_info !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_info" ? "is-active" : ""}" id="hik-overlay-stream-info-toggle" title="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}" aria-label="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}">
-                          <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${this.config.show_camera_info !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "camera_info" ? "is-active" : ""}" id="hik-overlay-camera-info-toggle" title="${this._videoAccessoryPanel === "camera_info" ? "Hide camera info" : "Show camera info"}" aria-label="${this._videoAccessoryPanel === "camera_info" ? "Hide camera info" : "Show camera info"}">
-                          <ha-icon icon="mdi:information-outline"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${this.config.debug?.enabled === true ? `
-                        <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
-                          <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
                       ${playbackPanelSupported ? `
