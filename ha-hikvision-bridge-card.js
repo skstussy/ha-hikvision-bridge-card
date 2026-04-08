@@ -4751,32 +4751,9 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 
 
 
-    if (this.config.show_dvr_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:server"></ha-icon>NVR System Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", globalRefs.dvr || "Auto-detect pending"],
-            ["Name", this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], dvrEntity?.state || "-")],
-            ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
-            ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
-            ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
-            ["Build", this.pickValue([dvr], ["build_number", "build"], "-")],
-            ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
-            ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
-            ["Active alarms", this.pickValue([dvr], ["active_alarm_count"], nvrAlarmBadges.filter((badge) => badge.level === "warn").length || 0)],
-            ["Disk mode", this.pickValue([dvr, storage], ["disk_mode"], "-")],
-            ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
-            ["Disks", this.pickValue([dvr, storage], ["disk_count"], storageSummary.disks || 0)],
-            ["Healthy", this.pickValue([dvr, storage], ["healthy_disks"], "-")],
-            ["Failed", this.pickValue([dvr, storage], ["failed_disks"], "-")],
-            ["Total capacity", this.pickValue([dvr, storage], ["total_capacity_mb", "storage_total"], storageSummary.total)],
-            ["Free capacity", this.pickValue([dvr, storage], ["free_capacity_mb", "storage_free"], storageSummary.free)],
-          ])}
-          ${nvrAlarmBadges.length ? `<div class="hik-status-row">${nvrAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}</div>` : ""}
-        </div>
-      `);
-    }
+
+
+
 
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
     if (this.config.show_stream_info === false && this._videoAccessoryPanel === "stream_info") this._videoAccessoryPanel = "";
