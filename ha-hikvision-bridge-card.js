@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.11 */
+/* UI Split Patch 2.6.12 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.18";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.19";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -4725,36 +4725,33 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
+    const cameraInfoName = this.pickValue([info, camAttrs], ["device_name", "name", "friendly_name"], cameraEntity?.attributes?.friendly_name || "-");
+    const cameraInfoChannel = String(cam.channel || this.pickValue([info, camAttrs], ["channel"], "-"));
+    const cameraInfoIdentityRows = [
+      ["Entity", entityName],
+      ["Name", cameraInfoName],
+      ["Channel", cameraInfoChannel],
+      ["Model", this.pickValue([info, camAttrs], ["model"], "-")],
+      ["Vendor", this.pickValue([info, camAttrs], ["manufacturer", "vendor", "brand"], "Hikvision")],
+      ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
+      ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
+      ["Firmware", this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-")],
+      ["Serial", this.pickValue([info, camAttrs], ["serial_number", "serial"], "-")],
+    ];
+    const cameraInfoControlRows = [
+      ["Stream state", streamEntity?.state || cameraEntity?.state || "-"],
+      ["Online", online ? "Connected" : "Offline"],
+      ["Current mode", videoMethod || "-"],
+      ["Profile", streamProfileLabel],
+      ["Control method", ptzMode || "-"],
+      ["PTZ capability", ptzCapabilityMode || "-"],
+      ["PTZ implementation", ptzImplementation || "-"],
+      ["PTZ unsupported reason", ptzUnsupportedReason || "-"],
+    ];
+    const cameraInfoBadgeClass = online ? "is-clear" : "is-alert";
+    const cameraInfoBadgeLabel = online ? "connected" : "offline";
 
-    if (this.config.show_camera_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:information-outline"></ha-icon>Camera Info</div>
-          ${this.buildMetaGrid([
-            ["Entity", entityName],
-            ["Name", this.pickValue([info, camAttrs], ["device_name", "name", "friendly_name"], cameraEntity?.attributes?.friendly_name || "-")],
-            ["Channel", String(cam.channel || this.pickValue([info, camAttrs], ["channel"], "-"))],
-            ["Model", this.pickValue([info, camAttrs], ["model"], "-")],
-            ["Vendor", this.pickValue([info, camAttrs], ["manufacturer", "vendor", "brand"], "Hikvision")],
-            ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
-            ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
-            ["Control method", ptzMode || "-"],
-            ["PTZ capability", ptzCapabilityMode || "-"],
-            ["PTZ implementation", ptzImplementation || "-"],
-            ["PTZ unsupported reason", ptzUnsupportedReason || "-"],
-            ["Firmware", this.pickValue([info, camAttrs], ["firmware_version", "firmware"], "-")],
-            ["Serial", this.pickValue([info, camAttrs], ["serial_number", "serial"], "-")],
-          ])}
-        </div>
-      `);
-    }
-
-
-
-
-
-
-
+    if (this.config.show_camera_info === false && this._videoAccessoryPanel === "camera_info") this._videoAccessoryPanel = "";
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
     if (this.config.show_stream_info === false && this._videoAccessoryPanel === "stream_info") this._videoAccessoryPanel = "";
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
@@ -4835,6 +4832,39 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     ` : "";
 
     const storageOverlayContent = this.renderStorageSystemOverlay(globalRefs, dvr, storage, storageSummary, nvrAlarmBadges);
+    const cameraInfoOverlayContent = this.config.show_camera_info !== false && this._videoAccessoryPanel === "camera_info" ? `
+      <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Camera info overlay">
+        <div class="hik-storage-terminal-shell">
+          <div class="hik-storage-terminal-head">
+            <div class="hik-storage-terminal-title">
+              <span class="hik-storage-terminal-dot is-red"></span>
+              <span class="hik-storage-terminal-dot is-amber"></span>
+              <span class="hik-storage-terminal-dot is-green"></span>
+              <span class="hik-storage-terminal-heading">$ hikvision camera_info --channel ${this.escapeHtml(cameraInfoChannel)} --follow</span>
+            </div>
+            <div class="hik-storage-terminal-actions">
+              <span class="hik-storage-terminal-badge ${cameraInfoBadgeClass}">${this.escapeHtml(cameraInfoBadgeLabel)}</span>
+              <button type="button" class="hik-video-media-btn" id="hik-camera-info-overlay-close" title="Close camera info" aria-label="Close camera info">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-storage-terminal-body">
+            <div class="hik-storage-terminal-grid">
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">camera identity</div>
+                ${this.buildMetaGrid(cameraInfoIdentityRows)}
+              </div>
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">camera control</div>
+                ${this.buildMetaGrid(cameraInfoControlRows)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : "";
+
     const streamInfoOverlayContent = this.config.show_stream_info !== false && this._videoAccessoryPanel === "stream_info" ? `
       <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream info overlay">
         <div class="hik-storage-terminal-shell">
@@ -5546,6 +5576,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
                         </button>
                       ` : ""}
+                      ${this.config.show_camera_info !== false ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "camera_info" ? "is-active" : ""}" id="hik-overlay-camera-info-toggle" title="${this._videoAccessoryPanel === "camera_info" ? "Hide camera info" : "Show camera info"}" aria-label="${this._videoAccessoryPanel === "camera_info" ? "Hide camera info" : "Show camera info"}">
+                          <ha-icon icon="mdi:information-outline"></ha-icon>
+                        </button>
+                      ` : ""}
                       ${this.config.debug?.enabled === true ? `
                         <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
@@ -5562,6 +5597,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     ${storageOverlayContent}
                     ${streamModeOverlayContent}
                     ${streamInfoOverlayContent}
+                    ${cameraInfoOverlayContent}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
@@ -5693,6 +5729,15 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       });
     }
 
+    const cameraInfoOverlayToggle = this.querySelector("#hik-overlay-camera-info-toggle");
+    if (cameraInfoOverlayToggle) {
+      cameraInfoOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("camera_info");
+      });
+    }
+
     const storageOverlayToggle = this.querySelector("#hik-overlay-storage-toggle");
     if (storageOverlayToggle) {
       storageOverlayToggle.addEventListener("click", (e) => {
@@ -5739,6 +5784,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "stream_info") {
         this._toggleVideoAccessoryPanel("stream_info");
+      }
+    });
+
+    this.querySelector("#hik-camera-info-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "camera_info") {
+        this._toggleVideoAccessoryPanel("camera_info");
       }
     });
 
