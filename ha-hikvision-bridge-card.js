@@ -9,12 +9,27 @@ _toggleDebugExpand(entry) {
 }
 
 _queueRender() {
+  if (this._debugOverlayDrag || this._debugOverlayResize) {
+    this._debugOverlayPendingRender = true;
+    return;
+  }
   if (this._renderQueued === true) return;
   this._renderQueued = true;
   window.requestAnimationFrame(() => {
     this._renderQueued = false;
+    if (this._debugOverlayDrag || this._debugOverlayResize) {
+      this._debugOverlayPendingRender = true;
+      return;
+    }
     this.render();
   });
+}
+
+_flushDeferredDebugOverlayRender() {
+  if (this._debugOverlayDrag || this._debugOverlayResize) return;
+  if (this._debugOverlayPendingRender !== true) return;
+  this._debugOverlayPendingRender = false;
+  this._queueRender();
 }
 
 _renderWebRtcPtzStatus() {
@@ -179,6 +194,8 @@ _pushDebugEntry(entry) {
     this._debugOverlayRectLoaded = true;
     this._debugOverlayDrag = this._debugOverlayDrag || null;
     this._debugOverlayResize = this._debugOverlayResize || null;
+    this._debugOverlayPendingRender = this._debugOverlayPendingRender === true;
+    this._backendDebugAttributeSignature = this._backendDebugAttributeSignature || "";
     this._audioDebugLog = Array.isArray(this._audioDebugLog) ? this._audioDebugLog : [];
     this._audioDebugSeq = Number.isFinite(this._audioDebugSeq) ? this._audioDebugSeq : 0;
     this._audioDebugStatus = this._audioDebugStatus || { requested: false, active: false, ws: "idle", pc: "idle", ice: "idle", signaling: "stable", mic: "idle", last_error: "" };
@@ -845,6 +862,7 @@ _pushDebugEntry(entry) {
     const handle = this.querySelector('.hik-debug-terminal-head');
     const resizeHandle = this.querySelector('.hik-debug-resize-handle');
     const matchesPointer = (state) => state && (pointerId == null || state.pointerId === pointerId);
+    const hadInteraction = !!(matchesPointer(this._debugOverlayDrag) || matchesPointer(this._debugOverlayResize));
 
     if (matchesPointer(this._debugOverlayDrag)) {
       try { if (handle && this._debugOverlayDrag?.pointerId != null) handle.releasePointerCapture(this._debugOverlayDrag.pointerId); } catch (err) {}
@@ -858,6 +876,7 @@ _pushDebugEntry(entry) {
       overlay.classList.remove('is-moving');
       overlay.classList.remove('is-resizing');
     }
+    if (hadInteraction) this._flushDeferredDebugOverlayRender();
   }
 
   _bindDebugOverlayInteractions() {
@@ -914,6 +933,7 @@ _pushDebugEntry(entry) {
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
+      this._flushDeferredDebugOverlayRender();
     };
 
     const finishResize = () => {
@@ -924,6 +944,7 @@ _pushDebugEntry(entry) {
       this._setDebugOverlayRect(next, { persist: true, rerender: false });
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
+      this._flushDeferredDebugOverlayRender();
     };
 
     const onWindowPointerEnd = (event) => {
@@ -1072,9 +1093,21 @@ _buildBackendDebugEntries(debugEntries = []) {
 _syncBackendDebugEntries(debugEntries = []) {
   const normalized = this._buildBackendDebugEntries(debugEntries);
   const signature = JSON.stringify(normalized.map((entry) => [entry.idx, entry.time, entry.message, entry.details?.response?.status || "", entry.details?.requested_time || ""]));
+  if (signature === this._backendDebugAttributeSignature) return;
+  this._backendDebugAttributeSignature = signature;
   const frontend = (this._debugEntries || []).filter((entry) => entry.source !== "backend");
+  const existingBackend = (this._debugEntries || []).filter((entry) => entry.source === "backend");
+  const mergedBackend = new Map();
+  [...existingBackend, ...normalized].forEach((entry, index) => {
+    mergedBackend.set(this._debugEntryKey(entry, `backend-${index}`), entry);
+  });
+  const backendEntries = Array.from(mergedBackend.values()).sort((left, right) => {
+    const leftTime = Date.parse(left?.time || "") || 0;
+    const rightTime = Date.parse(right?.time || "") || 0;
+    return leftTime - rightTime;
+  });
   const maxEntries = Number(this.config?.debug?.max_entries ?? 150) || 150;
-  this._debugEntries = [...frontend, ...normalized].slice(-maxEntries);
+  this._debugEntries = [...frontend, ...backendEntries].slice(-maxEntries);
 }
 
 
@@ -1119,6 +1152,10 @@ _toggleDebugFilter(kind, value) {
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     }).slice().reverse();
+  }
+
+  _debugEntryKey(entry = {}, fallback = "") {
+    return String(entry?.id || entry?.idx || entry?.details?.trace_id || `${entry?.time || ""}|${entry?.source || ""}|${entry?.category || ""}|${entry?.event || ""}|${entry?.message || ""}|${entry?.camera || ""}` || fallback);
   }
 
   formatDebugEntryText(entry) {
@@ -1432,7 +1469,7 @@ _toggleDebugFilter(kind, value) {
       entry?.source || "",
     ].join("|");
     const validSelectedKey = visibleEntries.some((entry) => entryKey(entry) === this._debugSelectedKey) ? this._debugSelectedKey : "";
-    const selectedKey = validSelectedKey || (visibleEntries[0] ? entryKey(visibleEntries[0]) : "");
+    const selectedKey = validSelectedKey || (!terminalMode && visibleEntries[0] ? entryKey(visibleEntries[0]) : "");
     this._debugSelectedKey = selectedKey || "";
     const selectedEntry = visibleEntries.find((entry) => entryKey(entry) === selectedKey) || null;
     const selectedDebugText = selectedEntry ? this.formatDebugEntryText(selectedEntry) : "";
@@ -5094,15 +5131,16 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-terminal-dot.amber { background:#ffbd2e; }
           .hik-debug-terminal-dot.green { background:#28c840; }
           .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; }
-          .hik-debug-terminal-body { min-height:0; overflow:auto; padding:12px; display:grid; gap:12px; background:rgba(5,8,12,0.22); }
+          .hik-debug-terminal-body { min-height:0; overflow:hidden; padding:12px; display:grid; grid-template-rows:auto auto minmax(0, 1fr); gap:12px; background:rgba(5,8,12,0.22); }
           .hik-debug-resize-handle { position:absolute; right:0; bottom:0; width:24px; height:24px; border:none; background:transparent; cursor:nwse-resize; pointer-events:auto; touch-action:none; }
           .hik-debug-resize-handle::before { content:""; position:absolute; right:6px; bottom:6px; width:12px; height:12px; border-right:2px solid rgba(135,247,185,0.68); border-bottom:2px solid rgba(135,247,185,0.68); opacity:0.9; }
           .hik-debug-warning-banner.is-terminal { background:rgba(80,180,120,0.06); border-color:rgba(120,255,178,0.12); }
-          .hik-debug-overview.is-terminal { background:rgba(10,14,20,0.72); border:1px solid rgba(120,255,178,0.08); border-radius:14px; padding:12px; }
-          .hik-debug-console-shell.is-terminal { background:rgba(6,10,14,0.74); border:1px solid rgba(120,255,178,0.1); box-shadow:none; }
+          .hik-debug-overview.is-terminal { background:rgba(10,14,20,0.72); border:1px solid rgba(120,255,178,0.08); border-radius:14px; padding:12px; min-height:0; overflow:auto; }
+          .hik-debug-console-shell.is-terminal { background:rgba(6,10,14,0.74); border:1px solid rgba(120,255,178,0.1); box-shadow:none; min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr) auto; }
           .hik-debug-toolbar.is-terminal { background:rgba(12,18,24,0.88); border-bottom:1px solid rgba(120,255,178,0.1); }
-          .hik-debug-list-shell.is-terminal { min-height:260px; max-height:42vh; }
-          .hik-debug-detail-pane.is-terminal { background:rgba(9,13,18,0.86); border-color:rgba(120,255,178,0.1); }
+          .hik-debug-list-shell.is-terminal { min-height:0; max-height:none; display:grid; grid-template-rows:auto minmax(0, 1fr); }
+          .hik-debug-detail-pane.is-terminal { background:rgba(9,13,18,0.86); border-color:rgba(120,255,178,0.1); max-height:min(34vh, 280px); overflow:auto; }
+          .hik-debug-list-shell.is-terminal .hik-debug-feed { max-height:none; }
           .hik-video-volume-rail ha-icon { --mdc-icon-size:16px; color:var(--hik-accent); }
           .hik-video-volume-rail input { width:110px; }          .hik-video-volume-rail.compact input { width:86px; }
           .hik-debug-warning-banner { margin:12px 12px 0; padding:12px 14px; display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border-radius:14px; border:1px solid rgba(245,166,35,0.32); background:rgba(245,166,35,0.10); color:var(--primary-text-color); }
@@ -5182,7 +5220,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-search { width:100%; border:0; outline:none; background:transparent; color:inherit; font-size:13px; }
           .hik-debug-list-shell { border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.06); }
           .hik-debug-list-head { display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; padding:12px 14px; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.7; border-bottom:1px solid rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.02)); position:sticky; top:0; z-index:1; backdrop-filter:blur(8px); }
-          .hik-debug-feed { max-height:460px; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
+          .hik-debug-feed { max-height:460px; min-height:0; overflow:auto; display:grid; gap:0; overscroll-behavior:contain; }
           .hik-debug-row { appearance:none; border:0; width:100%; margin:0; padding:11px 14px; display:grid; grid-template-columns: 108px 110px 110px 1.2fr 2fr 84px; gap:10px; text-align:left; color:inherit; background:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01)); border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; transition:background 140ms ease, box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease; }
           .hik-debug-row:hover { background:rgba(255,255,255,0.05); box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
           .hik-debug-row.selected { background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.035)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hik-accent) 72%, #ffffff 8%), 0 0 0 1px rgba(255,255,255,0.04); }
