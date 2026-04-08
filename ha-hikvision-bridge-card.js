@@ -32,6 +32,19 @@ _flushDeferredDebugOverlayRender() {
   this._queueRender();
 }
 
+_commitDebugOverlayInteraction(pointerId = null) {
+  const hasDrag = this._debugOverlayDrag && (pointerId == null || this._debugOverlayDrag.pointerId === pointerId);
+  const hasResize = this._debugOverlayResize && (pointerId == null || this._debugOverlayResize.pointerId === pointerId);
+  if (!hasDrag && !hasResize) return;
+  const state = hasResize ? this._debugOverlayResize : this._debugOverlayDrag;
+  const next = this._clampDebugOverlayRect(this._debugOverlayRect || state?.rect || null);
+  const overlay = this.querySelector('.hik-debug-terminal-window');
+  this._cleanupDebugOverlayPointerState(pointerId);
+  this._setDebugOverlayRect(next, { persist: true, rerender: false });
+  this._applyDebugOverlayRectToElement(overlay, next);
+  this._flushDeferredDebugOverlayRender();
+}
+
 _renderWebRtcPtzStatus() {
   const s = this._debugSnapshot || {};
   return html`
@@ -929,22 +942,18 @@ _pushDebugEntry(entry) {
       const start = this._debugOverlayDrag;
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
-      this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      this._commitDebugOverlayInteraction(start.pointerId);
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
-      this._flushDeferredDebugOverlayRender();
     };
 
     const finishResize = () => {
       const start = this._debugOverlayResize;
       if (!start) return;
       const next = this._clampDebugOverlayRect(this._debugOverlayRect || start.rect);
-      this._cleanupDebugOverlayPointerState(start.pointerId);
-      this._setDebugOverlayRect(next, { persist: true, rerender: false });
+      this._commitDebugOverlayInteraction(start.pointerId);
       this._applyDebugOverlayRectToElement(overlay, next);
       updateOverlaySizeVars(next);
-      this._flushDeferredDebugOverlayRender();
     };
 
     const onWindowPointerEnd = (event) => {
@@ -962,7 +971,7 @@ _pushDebugEntry(entry) {
         pointermove: (event) => onWindowPointerMove(event),
         pointerup: (event) => onWindowPointerEnd(event),
         pointercancel: (event) => onWindowPointerEnd(event),
-        blur: () => this._cleanupDebugOverlayPointerState(),
+        blur: () => this._commitDebugOverlayInteraction(),
       };
       window.addEventListener('pointermove', this._boundDebugOverlayWindowHandlers.pointermove, true);
       window.addEventListener('pointerup', this._boundDebugOverlayWindowHandlers.pointerup, true);
@@ -982,7 +991,7 @@ _pushDebugEntry(entry) {
       overlay.classList.remove('is-resizing');
       try { handle.setPointerCapture(event.pointerId); } catch (err) {}
     });
-    handle.addEventListener('lostpointercapture', () => this._cleanupDebugOverlayPointerState());
+    handle.addEventListener('lostpointercapture', () => this._commitDebugOverlayInteraction());
 
     resizeHandle.addEventListener('pointerdown', (event) => {
       if (event.button !== undefined && event.button !== 0) return;
@@ -995,7 +1004,7 @@ _pushDebugEntry(entry) {
       overlay.classList.add('is-resizing');
       try { resizeHandle.setPointerCapture(event.pointerId); } catch (err) {}
     });
-    resizeHandle.addEventListener('lostpointercapture', () => this._cleanupDebugOverlayPointerState());
+    resizeHandle.addEventListener('lostpointercapture', () => this._commitDebugOverlayInteraction());
 
     resizeHandle.addEventListener('dblclick', (event) => {
       event.preventDefault();
@@ -4633,6 +4642,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   render() {
+    if (this._debugOverlayDrag || this._debugOverlayResize) {
+      this._debugOverlayPendingRender = true;
+      return;
+    }
     this._captureDebugViewState?.();
     if (!this._hass) return;
     const cameras = this.cameras || [];
@@ -5130,10 +5143,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-debug-terminal-dot.red { background:#ff5f57; }
           .hik-debug-terminal-dot.amber { background:#ffbd2e; }
           .hik-debug-terminal-dot.green { background:#28c840; }
-          .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; }
+          .hik-debug-terminal-actions { display:flex; align-items:center; gap:8px; position:relative; z-index:2; }
           .hik-debug-terminal-body { min-height:0; overflow:hidden; padding:12px; display:grid; grid-template-rows:auto auto minmax(0, 1fr); gap:12px; background:rgba(5,8,12,0.22); }
-          .hik-debug-resize-handle { position:absolute; right:0; bottom:0; width:24px; height:24px; border:none; background:transparent; cursor:nwse-resize; pointer-events:auto; touch-action:none; }
-          .hik-debug-resize-handle::before { content:""; position:absolute; right:6px; bottom:6px; width:12px; height:12px; border-right:2px solid rgba(135,247,185,0.68); border-bottom:2px solid rgba(135,247,185,0.68); opacity:0.9; }
+          .hik-debug-resize-handle { position:absolute; right:0; bottom:0; width:34px; height:34px; border:none; background:transparent; cursor:nwse-resize; pointer-events:auto; touch-action:none; z-index:2; }
+          .hik-debug-resize-handle::before { content:""; position:absolute; right:8px; bottom:8px; width:14px; height:14px; border-right:2px solid rgba(135,247,185,0.68); border-bottom:2px solid rgba(135,247,185,0.68); opacity:0.9; }
           .hik-debug-warning-banner.is-terminal { background:rgba(80,180,120,0.06); border-color:rgba(120,255,178,0.12); }
           .hik-debug-overview.is-terminal { background:rgba(10,14,20,0.72); border:1px solid rgba(120,255,178,0.08); border-radius:14px; padding:12px; min-height:0; overflow:auto; }
           .hik-debug-console-shell.is-terminal { background:rgba(6,10,14,0.74); border:1px solid rgba(120,255,178,0.1); box-shadow:none; min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr) auto; }
