@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.16 */
+/* UI Split Patch 2.6.17 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.23";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.24";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -5197,11 +5197,41 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-expandable-details:not([open]) .hik-expandable-body { display:none; }
           .hik-sub { font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
           .hik-sub ha-icon { --mdc-icon-size: 18px; color: var(--hik-accent); }
-          .hik-status-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-          .hik-pill { border-radius:999px; padding:6px 10px; background: var(--secondary-background-color); font-size: 12px; display:flex; align-items:center; gap:6px; }
+          .hik-status-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center; }
+          .hik-pill { border-radius:999px; padding:6px 10px; background: var(--secondary-background-color); font-size: 12px; display:flex; align-items:center; gap:6px; border:1px solid transparent; transform-origin:center; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease, opacity 160ms ease; }
+          .hik-pill.hik-pill-static { pointer-events:auto; }
+          .hik-pill.hik-pill-animate { animation: hikStatusPillIn 240ms ease both; }
+          .hik-pill.hik-pill-animate:nth-child(2n) { animation-duration: 300ms; }
+          .hik-pill.hik-pill-animate:nth-child(3n) { animation-duration: 360ms; }
+          .hik-pill ha-icon { transition: transform 180ms ease, filter 180ms ease; }
+          .hik-pill:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0,0,0,0.16); border-color: color-mix(in srgb, var(--hik-accent) 18%, transparent); }
           .hik-pill.good { background: color-mix(in srgb, var(--success-color, #2e7d32) 18%, var(--secondary-background-color)); }
           .hik-pill.warn { background: color-mix(in srgb, var(--warning-color, #ed6c02) 18%, var(--secondary-background-color)); }
           .hik-pill.primary { background: color-mix(in srgb, var(--hik-accent) 18%, var(--secondary-background-color)); }
+          .hik-pill.is-live { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent); animation: hikStatusPillIn 240ms ease both, hikStatusPulse 2.2s ease-in-out infinite; }
+          .hik-pill.is-alert { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent); animation: hikStatusPillIn 240ms ease both, hikStatusAlertPulse 1.6s ease-in-out infinite; }
+          .hik-pill.is-live ha-icon { animation: hikStatusIconFloat 2.1s ease-in-out infinite; }
+          .hik-pill.is-alert ha-icon { animation: hikStatusIconAlert 1.2s ease-in-out infinite; }
+          @keyframes hikStatusPillIn {
+            0% { opacity: 0; transform: translateY(4px) scale(0.98); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+          }
+          @keyframes hikStatusPulse {
+            0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent), 0 0 0 0 rgba(0,0,0,0); }
+            50% { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent), 0 0 0 6px color-mix(in srgb, currentColor 10%, transparent); }
+          }
+          @keyframes hikStatusAlertPulse {
+            0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent), 0 0 0 0 rgba(0,0,0,0); }
+            50% { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent), 0 0 0 7px color-mix(in srgb, currentColor 12%, transparent); }
+          }
+          @keyframes hikStatusIconFloat {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-1px); }
+          }
+          @keyframes hikStatusIconAlert {
+            0%, 100% { transform: scale(1); filter: brightness(1); }
+            50% { transform: scale(1.08); filter: brightness(1.08); }
+          }
 .hik-health-chip { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:700; letter-spacing:0.04em; }
           .hik-health-chip.green { background: color-mix(in srgb, var(--success-color, #2e7d32) 18%, var(--secondary-background-color)); }
           .hik-health-chip.yellow { background: color-mix(in srgb, var(--warning-color, #ed6c02) 18%, var(--secondary-background-color)); }
@@ -5703,13 +5733,6 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
               <div class="hik-title">${this.escapeHtml(this.config.title)}</div>
               <div class="hik-subtitle">Elite PTZ console with configurable sections, NVR overview, and storage summary</div>
             </div>
-            <div class="hik-row">
-              <div class="hik-pill ${online ? "good" : "warn"}">
-                <ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>
-                ${online ? "Online" : "Offline"}
-              </div>
-              ${this.isDebugEnabled() ? `<div class="hik-pill warn"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</div>` : ""}
-            </div>
           </div>` : ""}
 
           ${this.config.show_camera_chips !== false ? `
@@ -5930,11 +5953,13 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                 </div>
                 ${this.config.show_status_pills !== false ? `
                 <div class="hik-status-row">
-                  <span class="hik-pill"><ha-icon icon="mdi:numeric-${cam.channel}-circle-outline"></ha-icon>Channel ${cam.channel}</span>
-                  <span class="hik-pill ${online ? "good" : "warn"}"><ha-icon icon="${online ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>${online ? "Connected" : "Offline"}</span>
-                  <span class="hik-pill ${ptz ? "good" : "warn"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>${ptz ? `PTZ ${this.escapeHtml(ptzMode)}` : "No PTZ"}</span>
-                  <span class="hik-pill primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
-                  ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
+                  <span class="hik-pill hik-pill-static hik-pill-animate"><ha-icon icon="mdi:numeric-${cam.channel}-circle-outline"></ha-icon>Channel ${cam.channel}</span>
+                  <span class="hik-pill hik-pill-static hik-pill-animate ${online ? "good is-live" : "warn is-alert"}"><ha-icon icon="${online ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>${online ? "Connected" : "Offline"}</span>
+                  <span class="hik-pill hik-pill-static hik-pill-animate ${online ? "good is-live" : "warn is-alert"}"><ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>${online ? "Online" : "Offline"}</span>
+                  <span class="hik-pill hik-pill-static hik-pill-animate ${ptz ? "good is-live" : "warn is-alert"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>${ptz ? `PTZ ${this.escapeHtml(ptzMode)}` : "No PTZ"}</span>
+                  <span class="hik-pill hik-pill-static hik-pill-animate primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
+                  ${this.isDebugEnabled() ? `<span class="hik-pill hik-pill-static hik-pill-animate warn is-alert" title="Debug mode is enabled and may reduce browser performance"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</span>` : ""}
+                  ${cameraAlarmBadges.map((badge) => `<span class="hik-pill hik-pill-static hik-pill-animate ${badge.level || "warn"} ${badge.level === "warn" ? "is-alert" : "is-live"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
