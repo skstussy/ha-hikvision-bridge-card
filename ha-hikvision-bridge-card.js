@@ -3293,6 +3293,37 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       </div>
     </div>
   `;
+
+  renderDvrOverlay(globalRefs, dvr = {}) {
+    return `
+      <div class="hik-dvr-terminal-overlay" role="dialog" aria-label="NVR system info overlay">
+        <div class="hik-dvr-terminal-shell">
+          <div class="hik-dvr-terminal-head">
+            <div class="hik-dvr-terminal-title">
+              <span class="hik-dvr-terminal-dot is-green"></span>
+              <span class="hik-dvr-terminal-heading">$ hikvision nvr_sysinfo --watch</span>
+            </div>
+            <div class="hik-dvr-terminal-actions">
+              <button type="button" class="hik-video-media-btn subtle" id="hik-dvr-overlay-close" title="Close NVR info" aria-label="Close NVR info">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-dvr-terminal-body">
+            ${this.buildMetaGrid([
+              ["Name", this.pickValue([dvr], ["device_name","nvr_name","dvr_name"], "-")],
+              ["Model", this.pickValue([dvr], ["model","device_model","system_model"], "-")],
+              ["Serial", this.pickValue([dvr], ["serial_number","serial"], "-")],
+              ["Build", this.pickValue([dvr], ["build_number","build"], "-")],
+              ["Firmware", this.pickValue([dvr], ["firmware_version","firmware","software_version"], "-")],
+              ["IP", dvr?.host || "-"],
+            ])}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
 }
 
 
@@ -4881,6 +4912,31 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-alarm-terminal-card .hik-alarm-name { color:#d8ffe3; }
           .hik-alarm-terminal-card .hik-alarm-name ha-icon { color:#74f7a3; }
           .hik-alarm-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
+          .hik-dvr-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:6; display:block; pointer-events:none; }
+          .hik-dvr-terminal-shell { height:100%; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(2,10,6,0.92), rgba(4,12,8,0.88)); border:1px solid rgba(120,255,176,0.22); box-shadow:0 20px 42px rgba(0,0,0,0.36), inset 0 0 0 1px rgba(96,255,160,0.06); backdrop-filter:blur(14px) saturate(1.1); pointer-events:auto; }
+          .hik-dvr-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(120,255,176,0.16); background:linear-gradient(180deg, rgba(10,30,18,0.95), rgba(6,18,12,0.90)); }
+          .hik-dvr-terminal-title { display:flex; align-items:center; gap:10px; min-width:0; }
+          .hik-dvr-terminal-dot { width:10px; height:10px; border-radius:999px; box-shadow:0 0 10px currentColor; }
+          .hik-dvr-terminal-dot.is-red { color:#ff6b6b; background:currentColor; }
+          .hik-dvr-terminal-dot.is-amber { color:#ffd166; background:currentColor; }
+          .hik-dvr-terminal-dot.is-green { color:#6bff95; background:currentColor; }
+          .hik-dvr-terminal-heading { font:600 12px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.04em; color:#b8ffca; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 0 8px rgba(107,255,149,0.18); }
+          .hik-dvr-terminal-actions { display:flex; align-items:center; gap:10px; }
+          .hik-dvr-terminal-badge { min-height:28px; padding:0 10px; border-radius:999px; display:inline-flex; align-items:center; font:700 11px/1 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; border:1px solid rgba(120,255,176,0.18); background:rgba(12,28,18,0.72); color:#afffbe; }
+          .hik-dvr-terminal-badge.is-alert { color:#ffd6d6; border-color:rgba(255,107,107,0.34); background:rgba(62,10,10,0.72); }
+          .hik-dvr-terminal-badge.is-clear { color:#b8ffca; }
+          .hik-dvr-terminal-body { min-height:0; overflow:auto; padding:14px; }
+          .hik-dvr-terminal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+          .hik-dvr-terminal-card { min-width:0; border-radius:14px; padding:12px; background:linear-gradient(180deg, rgba(8,20,14,0.78), rgba(5,14,10,0.68)); border:1px solid rgba(120,255,176,0.12); box-shadow:inset 0 1px 0 rgba(120,255,176,0.04); }
+          .hik-dvr-terminal-kicker { margin-bottom:8px; font:700 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.14em; text-transform:uppercase; color:#74f7a3; opacity:0.94; }
+          .hik-dvr-terminal-card .hik-dvr-table-wrap { margin-top:0; }
+          .hik-dvr-terminal-card .hik-dvr-table { font:500 12px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#dcffe6; }
+          .hik-dvr-terminal-card .hik-dvr-table th, .hik-dvr-terminal-card .hik-dvr-table td { border-bottom:1px solid rgba(120,255,176,0.10); padding:9px 10px; }
+          .hik-dvr-terminal-card .hik-dvr-table th { color:rgba(160,255,196,0.72); }
+          .hik-dvr-terminal-card .hik-dvr-name { color:#d8ffe3; }
+          .hik-dvr-terminal-card .hik-dvr-name ha-icon { color:#74f7a3; }
+          .hik-dvr-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
+
 
           .hik-video-ptz-surface { position:absolute; inset:14px; pointer-events:none; }
           .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; gap:8px; }
@@ -5321,6 +5377,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         </button>
                       ` : ""}
                       ${this.config.show_alarm_dashboard !== false ? `
+                      ${this.config.show_dvr_info !== false ? `
+                        <button type="button" class="hik-video-toolbar-btn ${this._videoAccessoryPanel === "dvr" ? "is-active" : ""}" id="hik-overlay-dvr-toggle" title="${this._videoAccessoryPanel === "dvr" ? "Hide NVR system info" : "Show NVR system info"}">
+                          <ha-icon icon="mdi:server"></ha-icon>
+                        </button>
+                      ` : ""}
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "alarm" ? "is-active" : ""}" id="hik-overlay-alarm-toggle" title="${this._videoAccessoryPanel === "alarm" ? "Hide alarm dashboard" : "Show alarm dashboard"}" aria-label="${this._videoAccessoryPanel === "alarm" ? "Hide alarm dashboard" : "Show alarm dashboard"}">
                           <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
                         </button>
@@ -5338,6 +5399,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
+                    ${this._videoAccessoryPanel === "dvr" ? this.renderDvrOverlay(globalRefs, dvr) : ""}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
@@ -5514,6 +5576,22 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._toggleVideoAccessoryPanel("storage");
       });
     }
+
+    const dvrOverlayToggle = this.querySelector("#hik-overlay-dvr-toggle");
+    if (dvrOverlayToggle) {
+      dvrOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("dvr");
+      });
+    }
+    this.querySelector("#hik-dvr-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "dvr") {
+        this._toggleVideoAccessoryPanel("dvr");
+      }
+    });
 
     const alarmOverlayToggle = this.querySelector("#hik-overlay-alarm-toggle");
     if (alarmOverlayToggle) {
