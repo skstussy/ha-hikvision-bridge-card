@@ -81,8 +81,8 @@ _pushDebugEntry(entry) {
       title: "ha-hikvision-bridge-card",
       speed: 50,
       lens_step: 60,
-      repeat_ms: 140,
-      ptz_duration: 160,
+      repeat_ms: 350,
+      ptz_duration: 300,
       lens_duration: 180,
       lens_stop_safeguard: false,
       refocus_step: 40,
@@ -639,9 +639,15 @@ _pushDebugEntry(entry) {
   _sanitizeDebugValue(value) {
     let text = value == null ? "" : String(value);
     text = text.replace(/(rtsp:\/\/)([^\s@]+)@/gi, "$1<redacted>@");
+    text = text.replace(/([?&](?:username|user|password|pass|pwd)=)[^&\s]+/gi, "$1<redacted>");
     text = text.replace(/(authSig=)[^&\s]+/gi, "$1<redacted>");
     text = text.replace(/(authorization["']?\s*[:=]\s*["']?)[^\s"']+/gi, "$1<redacted>");
     return text;
+  }
+
+  _redactUrl(value) {
+    const text = this._sanitizeDebugValue(value);
+    return text || "-";
   }
 
   _sanitizeDebugObject(value) {
@@ -1979,48 +1985,119 @@ _toggleDebugFilter(kind, value) {
       audio_last_gunshot: (entityId) => entityId.startsWith("sensor.") && (entityId.endsWith(`_camera_${wanted}_audio_last_gunshot`) || entityId.endsWith(`_camera_${wanted}_last_gunshot_ts`)),
     };
 
-    const fallbackMatchers = {
-      camera: (entityId, attrs) => entityId.startsWith("camera.") && String(attrs.channel ?? attrs.video_input_channel_id ?? "") === wanted,
-      info: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && ("ip_address" in attrs || "manage_port" in attrs || "serial_number" in attrs),
-      stream: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? attrs.video_input_channel_id ?? "") === wanted && ("rtsp_url" in attrs || "rtsp_direct_url" in attrs || "stream_id" in attrs),
-      online: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (attrs.device_class === "connectivity" || entityId.includes("_online")),
-      ptz_supported: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && ("ptz_supported" in attrs || entityId.includes("_ptz_supported")),
-      motion: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("motion") || attrs.device_class === "motion"),
-      video_loss: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("video_loss"),
-      intrusion: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("intrusion"),
-      line_crossing: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("line_crossing"),
-      tamper: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("tamper"),
-      audio_enabled: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio") && entityId.includes("enabled")),
-      audio_classifier_enabled: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_enabled"),
-      audio_gunshot: (entityId, attrs) => entityId.startsWith("binary_sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("gunshot"),
-      audio_level: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_level"),
-      audio_peak: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_peak"),
-      audio_classifier_label: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_label"),
-      audio_classifier_confidence: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_confidence"),
-      audio_classifier_threshold: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("classifier_threshold"),
-      audio_last_event: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && entityId.includes("audio_last_event"),
-      audio_stream_status: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio_stream_status") || entityId.includes("native_stream_status")),
-      audio_last_gunshot: (entityId, attrs) => entityId.startsWith("sensor.") && String(attrs.channel ?? "") === wanted && (entityId.includes("audio_last_gunshot") || entityId.includes("last_gunshot")),
-    };
-
     const matcher = exactMatchers[kind];
     if (!matcher) return null;
 
-    for (const [entityId, stateObj] of Object.entries(states)) {
-      const attrs = stateObj.attributes || {};
-      if (String(attrs.channel ?? attrs.video_input_channel_id ?? "") !== wanted) continue;
+    const entries = Object.entries(states).filter(([entityId, stateObj]) => {
+      const attrs = stateObj?.attributes || {};
+      return String(attrs.channel) === wanted;
+    });
+
+    for (const [entityId] of entries) {
       if (matcher(entityId)) return entityId;
     }
 
-    const fallback = fallbackMatchers[kind];
-    if (fallback) {
-      for (const [entityId, stateObj] of Object.entries(states)) {
-        const attrs = stateObj.attributes || {};
-        if (fallback(entityId, attrs)) return entityId;
-      }
+    const textOf = (entityId, stateObj) => {
+      const attrs = stateObj?.attributes || {};
+      return [
+        entityId,
+        attrs.friendly_name,
+        attrs.name,
+        attrs.icon,
+      ].filter(Boolean).join(" ").toLowerCase();
+    };
+
+    const choose = (predicate, score = null) => {
+      const matches = entries.filter(([entityId, stateObj]) => predicate(entityId, stateObj));
+      if (!matches.length) return null;
+      if (typeof score !== "function") return matches[0][0];
+      matches.sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]));
+      return matches[0][0];
+    };
+
+    if (kind === "camera") {
+      return choose((entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        return entityId.startsWith("camera.") && attrs.card_visible !== false;
+      });
     }
 
-    return null;
+    if (kind === "info") {
+      return choose((entityId, stateObj) => {
+        if (!entityId.startsWith("sensor.")) return false;
+        const attrs = stateObj?.attributes || {};
+        const text = textOf(entityId, stateObj);
+        if (text.includes("audio")) return false;
+        return entityId.endsWith("_info")
+          || text.endsWith(" info")
+          || "ptz_control_method" in attrs
+          || "ptz_capability_mode" in attrs
+          || "serial_number" in attrs
+          || "manage_port" in attrs
+          || "ip_address" in attrs
+          || "ip" in attrs;
+      }, (entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        let total = 0;
+        if (entityId.endsWith("_info")) total += 10;
+        if ("ptz_control_method" in attrs) total += 5;
+        if ("serial_number" in attrs) total += 4;
+        if ("manage_port" in attrs) total += 3;
+        if ("ip_address" in attrs || "ip" in attrs) total += 2;
+        return total;
+      });
+    }
+
+    if (kind === "stream") {
+      return choose((entityId, stateObj) => {
+        if (!entityId.startsWith("sensor.")) return false;
+        const attrs = stateObj?.attributes || {};
+        const text = textOf(entityId, stateObj);
+        if (text.includes("audio stream")) return false;
+        if (entityId.endsWith("_audio_stream_status") || entityId.endsWith("_native_stream_status")) return false;
+        return entityId.endsWith("_stream")
+          || text.endsWith(" stream")
+          || "rtsp_url" in attrs
+          || "rtsp_direct_url" in attrs
+          || "stream_id" in attrs
+          || "stream_profile" in attrs;
+      }, (entityId, stateObj) => {
+        const attrs = stateObj?.attributes || {};
+        let total = 0;
+        if (entityId.endsWith("_stream")) total += 10;
+        if ("rtsp_url" in attrs || "rtsp_direct_url" in attrs) total += 5;
+        if ("stream_id" in attrs) total += 4;
+        if ("stream_profile" in attrs) total += 3;
+        return total;
+      });
+    }
+
+    const friendlyMatchers = {
+      online: [" online"],
+      ptz_supported: ["ptz supported"],
+      motion: ["motion alarm"],
+      video_loss: ["video loss alarm"],
+      intrusion: ["intrusion alarm"],
+      line_crossing: ["line crossing alarm"],
+      tamper: ["tamper alarm"],
+      audio_enabled: ["audio enabled"],
+      audio_classifier_enabled: ["audio classifier enabled"],
+      audio_gunshot: ["gunshot detected", "audio gunshot detected"],
+      audio_level: ["audio level"],
+      audio_peak: ["audio peak"],
+      audio_classifier_label: ["classifier label"],
+      audio_classifier_confidence: ["classifier confidence"],
+      audio_classifier_threshold: ["classifier threshold"],
+      audio_last_event: ["audio last event"],
+      audio_stream_status: ["audio stream status", "native stream status"],
+      audio_last_gunshot: ["last gunshot"],
+    };
+
+    const tokens = friendlyMatchers[kind] || [];
+    return choose((entityId, stateObj) => {
+      const text = textOf(entityId, stateObj);
+      return tokens.some((token) => text.includes(token));
+    });
   }
 
   findGlobalEntities() {
@@ -2320,13 +2397,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   getPTZDuration() {
-    return Math.max(120, Number(this.config.ptz_duration ?? 160));
-  }
-
-  getPTZRepeatMs() {
-    const configured = Number(this.config.repeat_ms ?? 140);
-    const duration = this.getPTZDuration();
-    return Math.max(90, Math.min(duration, configured));
+    return Math.max(100, Number(this.config.ptz_duration ?? this.config.repeat_ms ?? 350));
   }
 
   getLensDuration() {
@@ -2402,7 +2473,7 @@ _toggleDebugFilter(kind, value) {
   startMove(pan, tilt, context = {}) {
     const traceId = context?.trace_id || this._nextDebugTraceId("ptz");
     this.stopMove({ ...context, trace_id: traceId, action: context?.action || "pre_start" });
-    this._pushTraceDebug("ptz", "info", "ptz_move_requested", "Starting PTZ move", { pan, tilt, duration: this.getPTZDuration(), repeat_ms: this.getPTZRepeatMs(), source: context?.source || "panel" }, traceId, "frontend");
+    this._pushTraceDebug("ptz", "info", "ptz_move_requested", "Starting PTZ move", { pan, tilt, duration: this.getPTZDuration(), repeat_ms: this.config.repeat_ms, source: context?.source || "panel" }, traceId, "frontend");
     const run = () => {
       const cam = this.selectedCamera;
       if (!cam || !this._hass || !this.canPtz() || this._returningHome) {
@@ -2423,8 +2494,8 @@ _toggleDebugFilter(kind, value) {
       this.render();
     };
     run();
-    this._repeatHandle = setInterval(run, this.getPTZRepeatMs());
-    this._pushTraceDebug("ptz", "debug", "ptz_repeat_armed", "Armed PTZ repeat loop", { repeat_ms: this.getPTZRepeatMs() }, traceId, "frontend");
+    this._repeatHandle = setInterval(run, this.config.repeat_ms);
+    this._pushTraceDebug("ptz", "debug", "ptz_repeat_armed", "Armed PTZ repeat loop", { repeat_ms: this.config.repeat_ms }, traceId, "frontend");
   }
 
   callLens(service, direction = 0, context = {}) {
@@ -2660,7 +2731,7 @@ renderControlsPanel({ online = false, ptz = false, speed = 50, cameraAlarmBadges
                       <span class="hik-speed-value">${speed}</span>
                     </div>
                     <div class="hik-speed-track">
-                      <input id="hik-speed-panel" data-ptz-speed type="range" min="1" max="100" step="1" value="${speed}">
+                      <input id="hik-speed" type="range" min="1" max="100" step="1" value="${speed}">
                     </div>
                   </div>
                 </div>
@@ -3302,7 +3373,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       else if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) reason = 'Recording playback is hidden because the NVR does not expose supported storage capability endpoints.';
       notices.push({
         icon: 'mdi:play-box-multiple-outline',
-        title: 'Playback unavailable',
+        title: 'Playback hidden',
         text: reason,
       });
     }
@@ -3312,7 +3383,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       if (caps.storagePresent === false) reason = 'Storage details are hidden because no HDD or recording media is detected on this device.';
       notices.push({
         icon: 'mdi:harddisk-remove',
-        title: 'Storage panel hidden',
+        title: 'Storage hidden',
         text: reason,
       });
     }
@@ -4467,8 +4538,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
     const speed = Number(this.config.speed || 50);
-    const directionInfo = this.getDirectionInfo();
-    const ptzTrackerState = this.getPTZState();
     const streamProfile = String(camAttrs.stream_profile || stream.stream_profile || info.stream_profile || "main").toLowerCase();
     const streamProfileLabel = streamProfile === "sub" ? "Sub-stream" : "Main-stream";
     const rtspUrl = camAttrs.rtsp_url || stream.rtsp_url || info.rtsp_url || "";
@@ -4502,8 +4571,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           <div class="hik-sub"><ha-icon icon="mdi:information-outline"></ha-icon>Camera Info</div>
           ${this.buildMetaGrid([
             ["Entity", entityName],
+            ["Name", this.pickValue([info, camAttrs], ["device_name", "name", "friendly_name"], cameraEntity?.attributes?.friendly_name || "-")],
             ["Channel", String(cam.channel || this.pickValue([info, camAttrs], ["channel"], "-"))],
             ["Model", this.pickValue([info, camAttrs], ["model"], "-")],
+            ["Vendor", this.pickValue([info, camAttrs], ["manufacturer", "vendor", "brand"], "Hikvision")],
             ["IP", this.pickValue([info, camAttrs], ["ip_address", "ip"], "-")],
             ["Manage port", this.pickValue([info, camAttrs], ["manage_port"], "-")],
             ["Control method", ptzMode || "-"],
@@ -4566,10 +4637,17 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
             ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
             ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
             ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
+            ["Build", this.pickValue([dvr], ["build_number", "build"], "-")],
             ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
             ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
             ["Active alarms", this.pickValue([dvr], ["active_alarm_count"], nvrAlarmBadges.filter((badge) => badge.level === "warn").length || 0)],
+            ["Disk mode", this.pickValue([dvr, storage], ["disk_mode"], "-")],
             ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
+            ["Disks", this.pickValue([dvr, storage], ["disk_count"], storageSummary.disks || 0)],
+            ["Healthy", this.pickValue([dvr, storage], ["healthy_disks"], "-")],
+            ["Failed", this.pickValue([dvr, storage], ["failed_disks"], "-")],
+            ["Total capacity", this.pickValue([dvr, storage], ["total_capacity_mb", "storage_total"], storageSummary.total)],
+            ["Free capacity", this.pickValue([dvr, storage], ["free_capacity_mb", "storage_free"], storageSummary.free)],
           ])}
           ${nvrAlarmBadges.length ? `<div class="hik-status-row">${nvrAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}</div>` : ""}
         </div>
@@ -4607,7 +4685,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           ["Live view", streamMode === "snapshot" ? "Snapshot" : "Live"],
           ["Muted UI", streamMode === "snapshot" ? "Managed by HA card" : "Yes"],
           ["Card helper", streamMode === "snapshot" ? "picture-entity" : "custom:webrtc-camera"],
-          ["Preferred URL", streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-")],
+          ["Preferred URL", this._redactUrl(streamMode === "webrtc_direct" || streamMode === "rtsp_direct" ? (directRtspUrl || "-") : (rtspUrl || directRtspUrl || "-"))],
         ])}
       </div>
     ` : "";
@@ -4805,16 +4883,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-alarm-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
 
           .hik-video-ptz-surface { position:absolute; inset:14px; pointer-events:none; }
-          .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; flex-wrap:wrap; gap:8px; max-width:min(78%, 780px); }
+          .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; gap:8px; }
           .hik-video-ptz-chip { min-height:30px; padding:0 12px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:#fff; background:rgba(12,16,22,0.42); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
           .hik-video-ptz-chip.subtle { opacity:0.9; }
           .hik-video-ptz-chip ha-icon { --mdc-icon-size:14px; color:var(--hik-accent); }
-          .hik-video-ptz-cluster { position:absolute; left:16px; bottom:16px; display:grid; gap:12px; pointer-events:auto; }
-          .hik-video-ptz-speed { min-width:clamp(180px, 24vw, 260px); padding:10px 12px; border-radius:18px; display:grid; gap:8px; background:rgba(10,14,20,0.36); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); }
-          .hik-video-ptz-speed-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:700; color:var(--primary-text-color); }
-          .hik-video-ptz-speed-input { width:100%; accent-color:var(--hik-accent); cursor:pointer; }
-          .hik-video-ptz-speed-input:disabled { opacity:0.42; cursor:not-allowed; }
-          .hik-video-ptz-pad { display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); }
+          .hik-video-ptz-pad { position:absolute; left:16px; bottom:16px; display:grid; grid-template-columns:repeat(3,var(--hik-ov-btn)); gap:var(--hik-ov-gap); pointer-events:auto; }
           .hik-video-ptz-btn { position:relative; min-height:var(--hik-ov-btn); min-width:var(--hik-ov-btn); border:none; border-radius:var(--hik-ov-radius); cursor:pointer; display:grid; place-items:center; color:var(--primary-text-color); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08); transition:transform 120ms ease, box-shadow 150ms ease, background 150ms ease, border-color 150ms ease; }
           .hik-video-ptz-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); box-shadow:0 16px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 1px rgba(255,255,255,0.05); }
           .hik-video-ptz-btn:active:not(:disabled) { transform:scale(0.94); background:rgba(255,255,255,0.14); }
@@ -5135,45 +5208,32 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                             <ha-icon icon="mdi:axis-arrow"></ha-icon>
                             <span>Live PTZ</span>
                           </div>
-                          <div class="hik-video-ptz-chip">
-                            <ha-icon icon="${directionInfo.icon}"></ha-icon>
-                            <span>${directionInfo.label}</span>
-                          </div>
                           <div class="hik-video-ptz-chip subtle">
-                            <ha-icon icon="mdi:crosshairs-question"></ha-icon>
-                            <span>P ${ptzTrackerState.pan} · T ${ptzTrackerState.tilt}</span>
+                            <ha-icon icon="mdi:speedometer"></ha-icon>
+                            <span>${speed}</span>
                           </div>
                         </div>
-                        <div class="hik-video-ptz-cluster">
-                          <div class="hik-video-ptz-speed">
-                            <div class="hik-video-ptz-speed-head">
-                              <span>PTZ speed</span>
-                              <span>${speed}</span>
-                            </div>
-                            <input id="hik-speed-overlay" data-ptz-speed type="range" class="hik-video-ptz-speed-input" min="1" max="100" step="1" value="${speed}" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="PTZ speed">
-                          </div>
-                          <div class="hik-video-ptz-pad">
-                            <div></div>
-                            <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
-                              <ha-icon icon="mdi:chevron-up"></ha-icon>
-                            </button>
-                            <div></div>
-                            <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move left" title="Move left">
-                              <ha-icon icon="mdi:chevron-left"></ha-icon>
-                            </button>
-                            <button type="button" class="hik-video-ptz-btn center" id="hik-center-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Return home" title="Return home">
-                              <span class="hik-video-ptz-center-core"></span>
-                              <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
-                            </button>
-                            <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move right" title="Move right">
-                              <ha-icon icon="mdi:chevron-right"></ha-icon>
-                            </button>
-                            <div></div>
-                            <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move down" title="Move down">
-                              <ha-icon icon="mdi:chevron-down"></ha-icon>
-                            </button>
-                            <div></div>
-                          </div>
+                        <div class="hik-video-ptz-pad">
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
+                            <ha-icon icon="mdi:chevron-up"></ha-icon>
+                          </button>
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn left" data-pan="-1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move left" title="Move left">
+                            <ha-icon icon="mdi:chevron-left"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-ptz-btn center" id="hik-center-overlay" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Return home" title="Return home">
+                            <span class="hik-video-ptz-center-core"></span>
+                            <ha-icon icon="mdi:crosshairs-gps"></ha-icon>
+                          </button>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn right" data-pan="1" data-tilt="0" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move right" title="Move right">
+                            <ha-icon icon="mdi:chevron-right"></ha-icon>
+                          </button>
+                          <div></div>
+                          <button type="button" class="hik-video-ptz-btn ptz-btn down" data-pan="0" data-tilt="-1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move down" title="Move down">
+                            <ha-icon icon="mdi:chevron-down"></ha-icon>
+                          </button>
+                          <div></div>
                         </div>
                         <div class="hik-video-zoom-rail">
                           <button type="button" class="hik-video-zoom-btn lens-btn" data-service="zoom" data-direction="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Zoom in" title="Zoom in">
@@ -5755,10 +5815,10 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     this.querySelector("#hik-playback-rate-overlay")?.addEventListener("change", (ev) => {
       this._setPlaybackRate(ev.target.value);
     });
-    this.querySelectorAll("[data-ptz-speed]").forEach((input) => input.addEventListener("input", (ev) => {
+    this.querySelector("#hik-speed")?.addEventListener("input", (ev) => {
       this.config = { ...this.config, speed: Number(ev.target.value) };
       this.render();
-    }));
+    });
     this.querySelector('[data-debug-follow-toggle]')?.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
