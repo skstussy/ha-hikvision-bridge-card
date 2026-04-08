@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.1 */
+/* UI Split Patch 2.6.10 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.16";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.17";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -4749,43 +4749,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       `);
     }
 
-    if (this.config.show_stream_info !== false) {
-      infoCards.push(`
-        <div class="hik-panel hik-info-card">
-          <div class="hik-sub"><ha-icon icon="mdi:video-wireless-outline"></ha-icon>Stream Info</div>
-          <div class="hik-select-group" style="margin-bottom:12px;">
-            <div class="hik-select-wrap">
-              <ha-icon icon="mdi:camera-switch"></ha-icon>
-              <label for="streamProfile" style="font-size:12px; opacity:0.8;">Channel stream</label>
-            </div>
-            <div class="hik-select-wrap">
-              <select id="streamProfile" class="hik-select">
-                <option value="main" ${streamProfile === "main" ? "selected" : ""}>Main-stream</option>
-                <option value="sub" ${streamProfile === "sub" ? "selected" : ""}>Sub-stream</option>
-              </select>
-            </div>
-          </div>
-          ${this.buildMetaGrid([
-            ["Profile", streamProfileLabel],
-            ["Stream", streamEntity?.state || cameraEntity?.state || "-"],
-            ["Stream ID", camAttrs.stream_id || stream.stream_id || info.stream_id || "-"],
-            ["Transport", camAttrs.stream_transport || stream.transport || "-"],
-            ["Bitrate mode", camAttrs.stream_bitrate_mode || stream.bitrate_mode || "-"],
-            ["Bitrate", camAttrs.stream_bitrate || stream.constant_bitrate || stream.bitrate || "-"],
-            ["Max frame rate", camAttrs.stream_max_frame_rate || stream.max_frame_rate || stream.frame_rate || "-"],
-            ["Audio codec", camAttrs.stream_audio_codec || stream.audio_codec || "-"],
-          ])}
-          <div style="margin-top:12px;">
-            <b>RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(rtspUrl || "-")}</div>
-          </div>
-          <div style="margin-top:12px;">
-            <b>Direct RTSP URL</b>
-            <div class="hik-code">${this.escapeHtml(directRtspUrl || "-")}</div>
-          </div>
-        </div>
-      `);
-    }
 
 
     if (this.config.show_dvr_info !== false) {
@@ -4816,6 +4779,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     }
 
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
+    if (this.config.show_stream_info === false && this._videoAccessoryPanel === "stream_info") this._videoAccessoryPanel = "";
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
@@ -4852,6 +4816,68 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     ` : "";
 
     const storageOverlayContent = this.renderStorageSystemOverlay(globalRefs, dvr, storage, storageSummary, nvrAlarmBadges);
+    const streamInfoOverlayContent = this.config.show_stream_info !== false && this._videoAccessoryPanel === "stream_info" ? `
+      <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream info overlay">
+        <div class="hik-storage-terminal-shell">
+          <div class="hik-storage-terminal-head">
+            <div class="hik-storage-terminal-title">
+              <span class="hik-storage-terminal-dot is-red"></span>
+              <span class="hik-storage-terminal-dot is-amber"></span>
+              <span class="hik-storage-terminal-dot is-green"></span>
+              <span class="hik-storage-terminal-heading">$ hikvision stream_info --profile ${this.escapeHtml(streamProfile)} --follow</span>
+            </div>
+            <div class="hik-storage-terminal-actions">
+              <span class="hik-storage-terminal-badge">${this.escapeHtml(streamProfileLabel)}</span>
+              <button type="button" class="hik-video-media-btn" id="hik-stream-info-overlay-close" title="Close stream info" aria-label="Close stream info">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-storage-terminal-body">
+            <div class="hik-storage-terminal-grid">
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">channel stream</div>
+                <div class="hik-select-group" style="margin-bottom:12px;">
+                  <div class="hik-select-wrap">
+                    <ha-icon icon="mdi:camera-switch"></ha-icon>
+                    <label for="streamProfile" style="font-size:12px; opacity:0.8;">Channel stream</label>
+                  </div>
+                  <div class="hik-select-wrap">
+                    <select id="streamProfile" class="hik-select">
+                      <option value="main" ${streamProfile === "main" ? "selected" : ""}>Main-stream</option>
+                      <option value="sub" ${streamProfile === "sub" ? "selected" : ""}>Sub-stream</option>
+                    </select>
+                  </div>
+                </div>
+                ${this.buildMetaGrid([
+                  ["Profile", streamProfileLabel],
+                  ["Stream", streamEntity?.state || cameraEntity?.state || "-"],
+                  ["Stream ID", camAttrs.stream_id || stream.stream_id || info.stream_id || "-"],
+                  ["Transport", camAttrs.stream_transport || stream.transport || "-"],
+                  ["Bitrate mode", camAttrs.stream_bitrate_mode || stream.bitrate_mode || "-"],
+                  ["Bitrate", camAttrs.stream_bitrate || stream.constant_bitrate || stream.bitrate || "-"],
+                  ["Max frame rate", camAttrs.stream_max_frame_rate || stream.max_frame_rate || stream.frame_rate || "-"],
+                  ["Audio codec", camAttrs.stream_audio_codec || stream.audio_codec || "-"],
+                ])}
+              </div>
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">rtsp endpoints</div>
+                <div style="display:grid; gap:12px;">
+                  <div>
+                    <b>RTSP URL</b>
+                    <div class="hik-code">${this.escapeHtml(rtspUrl || "-")}</div>
+                  </div>
+                  <div>
+                    <b>Direct RTSP URL</b>
+                    <div class="hik-code">${this.escapeHtml(directRtspUrl || "-")}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : "";
 
     const videoAccessoryPanelContent = this._debugOverlayOpen
       ? this.renderDebugDashboard(camAttrs)
@@ -5498,6 +5524,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
                       ` : ""}
+                      ${this.config.show_stream_info !== false ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_info" ? "is-active" : ""}" id="hik-overlay-stream-info-toggle" title="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}" aria-label="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}">
+                          <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
+                        </button>
+                      ` : ""}
                       ${this.config.debug?.enabled === true ? `
                         <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
                           <ha-icon icon="mdi:bug-outline"></ha-icon>
@@ -5512,6 +5543,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${storageOverlayContent}
+                    ${streamInfoOverlayContent}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
@@ -5627,6 +5659,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         this._toggleVideoAccessoryPanel("debug");
       });
     }
+    const streamInfoOverlayToggle = this.querySelector("#hik-overlay-stream-info-toggle");
+    if (streamInfoOverlayToggle) {
+      streamInfoOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("stream_info");
+      });
+    }
     const streamModeOverlayToggle = this.querySelector("#hik-overlay-stream-mode-toggle");
     if (streamModeOverlayToggle) {
       streamModeOverlayToggle.addEventListener("click", (e) => {
@@ -5666,6 +5706,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "storage") {
         this._toggleVideoAccessoryPanel("storage");
+      }
+    });
+
+    this.querySelector("#hik-stream-info-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "stream_info") {
+        this._toggleVideoAccessoryPanel("stream_info");
       }
     });
 
