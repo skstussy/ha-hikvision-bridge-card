@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.13 */
+/* UI Split Patch 2.6.15 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.21";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.22";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -4189,6 +4189,187 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     `;
   }
 
+
+_renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
+  if (this.config.show_audio_controls === false && this.config.show_audio_sentinel === false) return "";
+  if (this._videoAccessoryPanel !== "audio_console") return "";
+  const isWebRtc = this._isWebRtcMode(streamMode, playbackActive ? "playback" : "");
+  const muteDuringTalk = this.config.mute_during_talk !== false;
+  const talkMode = this._getTalkMode();
+  const speakerActive = this._speakerEnabled && !(this._talkRequested && muteDuringTalk);
+  const speakerIcon = speakerActive ? "mdi:volume-high" : "mdi:volume-off";
+  const speakerLabel = !this._speakerEnabled ? "speaker off" : (this._talkRequested && muteDuringTalk ? "speaker muted during talk" : "speaker on");
+  const talkLabel = talkMode === "toggle"
+    ? (this._talkRequested ? "end talk" : "start talk")
+    : (this._talkRequested ? "talking…" : "hold to talk");
+  const talkAttrs = talkMode === "toggle"
+    ? 'id="hik-talk-toggle"'
+    : 'id="hik-talk-hold"';
+  const talkHandlers = talkMode === "toggle" ? "" : 'data-hold-talk="true"';
+  const micState = !isWebRtc ? "unavailable" : (this._talkRequested ? "live" : "ready");
+  const speakerPercent = Math.round((this._audioMeterLevel || 0) * 100);
+  const speakerPeak = Math.round((this._audioMeterPeak || 0) * 100);
+  const micPercent = Math.round((this._micMeterLevel || 0) * 100);
+  const micPeak = Math.round((this._micMeterPeak || 0) * 100);
+  const sentinel = this._getAudioSentinelState(refs);
+  const confidencePct = Math.round(Math.max(0, Math.min(1, sentinel.confidence || 0)) * 100);
+  const thresholdPct = Math.round(Math.max(0, Math.min(1, sentinel.threshold || 0)) * 100);
+  const levelPct = Math.round(Math.max(0, Math.min(100, Number(sentinel.level || 0))));
+  const peakPct = Math.round(Math.max(0, Math.min(100, Number(sentinel.peak || 0))));
+  const classifierBadgeClass = sentinel.classifierAccepted ? "is-clear" : "is-alert";
+  const classifierBadgeLabel = sentinel.classifierAccepted ? "accepted" : "monitoring";
+  return `
+    <div class="hik-storage-terminal-overlay hik-audio-console-overlay" role="dialog" aria-modal="false" aria-label="Audio console overlay">
+      <div class="hik-storage-terminal-shell hik-audio-terminal-shell">
+        <div class="hik-storage-terminal-head">
+          <div class="hik-storage-terminal-title">
+            <span class="hik-storage-terminal-dot is-red"></span>
+            <span class="hik-storage-terminal-dot is-amber"></span>
+            <span class="hik-storage-terminal-dot is-green"></span>
+            <span class="hik-storage-terminal-heading">$ hikvision audio_console --channel ${this.escapeHtml(String(this.selectedCamera?.channel || "-"))} --follow</span>
+          </div>
+          <div class="hik-storage-terminal-actions">
+            <span class="hik-storage-terminal-badge ${speakerActive ? "is-clear" : ""}">${this.escapeHtml(speakerLabel)}</span>
+            <span class="hik-storage-terminal-badge ${this._sentinelStatusTone(sentinel.streamStatus)}">${this.escapeHtml(sentinel.streamStatus || "idle")}</span>
+            <button type="button" class="hik-video-media-btn" id="hik-audio-console-overlay-close" title="Close audio console" aria-label="Close audio console">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>
+        </div>
+        <div class="hik-storage-terminal-body hik-audio-terminal-body">
+          <div class="hik-storage-terminal-grid hik-audio-terminal-grid">
+            <div class="hik-storage-terminal-card hik-audio-terminal-card is-live">
+              <div class="hik-storage-terminal-kicker">speaker output</div>
+              <div class="hik-audio-meter-shell" title="Speaker level meter">
+                <div class="hik-audio-meter-fill" data-meter="speaker" style="--hik-audio-level:${speakerPercent}%;"></div>
+                <div class="hik-audio-meter-peak" data-meter="speaker" style="--hik-audio-peak:${speakerPeak}%;"></div>
+              </div>
+              ${this.buildMetaGrid([
+                ["State", speakerLabel],
+                ["Level", `${speakerPercent}%`],
+                ["Peak", `${speakerPeak}%`],
+                ["Volume", `${Math.round(this._volume)}%`],
+                ["Boost", `${(this._audioBoost / 100).toFixed(1)}×`],
+              ])}
+              <div class="hik-audio-terminal-actions-row">
+                <button type="button" class="hik-btn hik-audio-btn ${speakerActive ? "is-on" : ""}" id="hik-speaker-toggle">
+                  <ha-icon icon="${speakerIcon}"></ha-icon>
+                  <span>${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}</span>
+                </button>
+              </div>
+              <label class="hik-audio-slider">
+                <span>Volume <b class="hik-volume-value">${Math.round(this._volume)}%</b></span>
+                <input id="hik-volume" type="range" min="0" max="100" step="1" value="${Math.round(this._volume)}">
+              </label>
+              <label class="hik-audio-slider">
+                <span>Boost <b class="hik-boost-value">${(this._audioBoost / 100).toFixed(1)}×</b></span>
+                <input id="hik-audio-boost" type="range" min="100" max="300" step="10" value="${Math.round(this._audioBoost)}">
+              </label>
+            </div>
+
+            <div class="hik-storage-terminal-card hik-audio-terminal-card ${this._talkRequested ? "is-live" : ""} ${!isWebRtc || playbackActive ? "is-disabled" : ""}">
+              <div class="hik-storage-terminal-kicker">walkie-talkie uplink</div>
+              <div class="hik-audio-meter-shell" title="Microphone level meter">
+                <div class="hik-audio-meter-fill mic" data-meter="mic" style="--hik-audio-level:${micPercent}%;"></div>
+                <div class="hik-audio-meter-peak" data-meter="mic" style="--hik-audio-peak:${micPeak}%;"></div>
+              </div>
+              ${this.buildMetaGrid([
+                ["Mic state", micState],
+                ["Talk mode", talkMode],
+                ["Mic level", `${micPercent}%`],
+                ["Peak", `${micPeak}%`],
+                ["Route", isWebRtc ? "WebRTC uplink" : "receive-only"],
+              ])}
+              ${isWebRtc && !playbackActive ? `
+                <div class="hik-audio-terminal-actions-row">
+                  <button type="button" class="hik-btn hik-audio-btn hik-talk-btn ${this._talkRequested ? "live" : ""}" ${talkAttrs} ${talkHandlers} aria-pressed="${this._talkRequested ? "true" : "false"}">
+                    <ha-icon icon="mdi:microphone"></ha-icon>
+                    <span>${talkLabel}</span>
+                  </button>
+                </div>
+                <label class="hik-audio-slider">
+                  <span>Mic gain <b class="hik-mic-volume-value">${Math.round(this._micVolume || 100)}%</b></span>
+                  <input id="hik-mic-volume-overlay" type="range" min="0" max="200" step="5" value="${Math.round(this._micVolume || 100)}">
+                </label>
+                <div class="hik-audio-note compact ${this._talkRequested ? "live" : ""}">
+                  <ha-icon icon="mdi:information-outline"></ha-icon>
+                  <span>${muteDuringTalk ? "Speaker auto-mutes during talk to reduce feedback." : "Speaker remains live during talk."}</span>
+                </div>
+              ` : `
+                <div class="hik-audio-note fill">
+                  <ha-icon icon="mdi:information-outline"></ha-icon>
+                  <span>${playbackActive ? "Talk is disabled during playback." : "Microphone controls require WebRTC live mode."}</span>
+                </div>
+              `}
+            </div>
+
+            <div class="hik-storage-terminal-card hik-audio-terminal-card">
+              <div class="hik-storage-terminal-kicker">backend sentinel</div>
+              ${this.buildMetaGrid([
+                ["Native tap", sentinel.streamStatus || "idle"],
+                ["Profile", sentinel.streamProfile || "active"],
+                ["Source", sentinel.streamSource || "-"],
+                ["Frames", String(sentinel.framesIngested || 0)],
+                ["Samples", String(sentinel.sampleCount || 0)],
+                ["Last audio", sentinel.lastAudio ? this.formatDateTimeLocal(sentinel.lastAudio) : "-"],
+              ])}
+              ${sentinel.streamError ? `<div class="hik-audio-note fill"><ha-icon icon="mdi:alert"></ha-icon><span>${this.escapeHtml(sentinel.streamError)}</span></div>` : ""}
+              <div class="hik-audio-terminal-actions-row">
+                <button type="button" class="hik-btn ${sentinel.streamStatus === "running" || sentinel.streamStatus === "starting" ? "warn" : ""}" id="hik-sentinel-stream-toggle">${sentinel.streamStatus === "running" || sentinel.streamStatus === "starting" ? "Stop native tap" : "Start native tap"}</button>
+                <button type="button" class="hik-btn" id="hik-sentinel-recalibrate">Recalibrate</button>
+                <button type="button" class="hik-btn" id="hik-sentinel-capture-clip">Capture clip</button>
+              </div>
+              <div class="hik-select-group" style="margin-top:12px;">
+                <div class="hik-select-wrap">
+                  <ha-icon icon="mdi:camera-switch"></ha-icon>
+                  <label for="hik-sentinel-profile" style="font-size:12px; opacity:0.8;">Tap stream</label>
+                </div>
+                <div class="hik-select-wrap">
+                  <select id="hik-sentinel-profile" class="hik-select">
+                    <option value="active" ${String(sentinel.streamProfile || "active") === "active" ? "selected" : ""}>Active stream</option>
+                    <option value="main" ${String(sentinel.streamProfile || "") === "main" ? "selected" : ""}>Main-stream</option>
+                    <option value="sub" ${String(sentinel.streamProfile || "") === "sub" ? "selected" : ""}>Sub-stream</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="hik-storage-terminal-card hik-audio-terminal-card">
+              <div class="hik-storage-terminal-kicker">classification control</div>
+              <div class="hik-audio-terminal-pill-row">
+                <span class="hik-storage-terminal-badge ${sentinel.classifierEnabled ? "is-clear" : ""}">${sentinel.classifierEnabled ? "classifier on" : "classifier off"}</span>
+                <span class="hik-storage-terminal-badge ${sentinel.gunshotActive ? "is-alert" : ""}">${sentinel.gunshotActive ? "gunshot active" : "no gunshot"}</span>
+                <span class="hik-storage-terminal-badge ${classifierBadgeClass}">${classifierBadgeLabel}</span>
+              </div>
+              ${this.buildMetaGrid([
+                ["Label", sentinel.label || "-"],
+                ["Confidence", `${confidencePct}%`],
+                ["Threshold", `${thresholdPct}%`],
+                ["Last event", sentinel.lastEvent || "-"],
+                ["Last gunshot", sentinel.lastGunshot ? this.formatDateTimeLocal(sentinel.lastGunshot) : "-"],
+                ["Calibration", `${sentinel.calibrationProfile || "balanced"} (${Math.round((sentinel.calibrationScore || 0) * 100)}%)`],
+              ])}
+              <label class="hik-audio-slider">
+                <span>Classifier threshold <b class="hik-volume-value">${thresholdPct}%</b></span>
+                <input id="hik-sentinel-threshold" type="range" min="10" max="99" step="1" value="${thresholdPct}">
+              </label>
+              <div class="hik-audio-meter-caption">Level ${levelPct}% · Peak ${peakPct}%</div>
+              <div class="hik-audio-terminal-actions-row">
+                <button type="button" class="hik-btn" id="hik-sentinel-classifier-toggle">${sentinel.classifierEnabled ? "Disable classifier" : "Enable classifier"}</button>
+                <button type="button" class="hik-btn" id="hik-sentinel-calibration-preset">${sentinel.calibrationProfile === "quiet" ? "Quiet preset" : sentinel.calibrationProfile === "noisy" ? "Noisy preset" : "Balanced preset"}</button>
+              </div>
+            </div>
+          </div>
+          <div class="hik-audio-terminal-footer">
+            <span><ha-icon icon="mdi:matrix"></ha-icon> Current scope: selected camera only.</span>
+            <span><ha-icon icon="mdi:router-network"></ha-icon> Ready for future central speaker orchestration.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
   _renderAudioControls(streamMode, playbackActive = false) {
     if (this.config.show_audio_controls === false) return "";
     const isWebRtc = this._isWebRtcMode(streamMode, playbackActive ? "playback" : "");
@@ -4755,6 +4936,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     if (this.config.show_camera_info === false && this._videoAccessoryPanel === "camera_info") this._videoAccessoryPanel = "";
     if (this.config.show_stream_mode_info === false && this._videoAccessoryPanel === "stream_mode") this._videoAccessoryPanel = "";
     if (this.config.show_stream_info === false && this._videoAccessoryPanel === "stream_info") this._videoAccessoryPanel = "";
+    if (this.config.show_audio_controls === false && this.config.show_audio_sentinel === false && this._videoAccessoryPanel === "audio_console") this._videoAccessoryPanel = "";
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
@@ -4865,6 +5047,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         </div>
       </div>
     ` : "";
+
+    const audioConsoleOverlayContent = this._renderAudioConsoleOverlay(refs, streamMode, playbackActive);
 
     const streamInfoOverlayContent = this.config.show_stream_info !== false && this._videoAccessoryPanel === "stream_info" ? `
       <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream info overlay">
@@ -5131,6 +5315,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-storage-terminal-disk-meta, .hik-storage-terminal-disk-stats { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; font:500 11px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.76); }
           .hik-storage-terminal-badges { display:flex; flex-wrap:wrap; gap:8px; }
           @media (max-width: 980px) {
+            .hik-audio-terminal-shell { width:min(calc(100% - 20px), 1120px); margin-top:12px; }
+            .hik-audio-terminal-grid { grid-template-columns: 1fr; }
             .hik-storage-terminal-grid { grid-template-columns:1fr; }
             .hik-storage-terminal-card-span { grid-column:auto; }
           }
@@ -5299,6 +5485,29 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-audio-note { min-height:44px; display:flex; gap:8px; align-items:center; padding:0 12px; border-radius:12px; border:1px dashed color-mix(in srgb, var(--hik-accent) 16%, var(--divider-color)); }
           .hik-audio-note.compact { min-height:auto; padding:10px 12px; }
           .hik-audio-note.fill { height:100%; }
+
+.hik-audio-console-overlay { align-items:flex-start; }
+.hik-audio-terminal-shell { width:min(1120px, calc(100% - 32px)); margin:18px auto 0; }
+.hik-audio-terminal-body { gap:16px; }
+.hik-audio-terminal-grid { grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+.hik-audio-terminal-card { position:relative; overflow:hidden; transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease; }
+.hik-audio-terminal-card::after { content:""; position:absolute; inset:auto -20% -50% auto; width:180px; height:180px; background: radial-gradient(circle, color-mix(in srgb, var(--hik-accent) 22%, transparent) 0%, transparent 68%); opacity:0.7; pointer-events:none; }
+.hik-audio-terminal-card:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22); }
+.hik-audio-terminal-card.is-live { border-color: color-mix(in srgb, var(--hik-accent) 44%, var(--divider-color)); }
+.hik-audio-terminal-card.is-live .hik-storage-terminal-kicker { color: var(--hik-accent); }
+.hik-audio-terminal-card.is-disabled { opacity: 0.72; }
+.hik-audio-terminal-actions-row { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.hik-audio-terminal-pill-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.hik-audio-terminal-footer { display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; font-size:12px; opacity:0.82; }
+.hik-audio-terminal-footer span { display:inline-flex; align-items:center; gap:6px; }
+.hik-audio-console-overlay .hik-audio-meter-shell { margin: 10px 0 14px; min-height: 34px; }
+.hik-audio-console-overlay .hik-audio-note.live,
+.hik-audio-console-overlay .hik-talk-btn.live { animation: hikAudioConsolePulse 1.8s ease-in-out infinite; }
+@keyframes hikAudioConsolePulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hik-accent) 0%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--hik-accent) 14%, transparent); }
+}
+
           .hik-debug-overview { display:grid; gap:12px; }
           .hik-debug-console-shell { margin-top:14px; border:1px solid rgba(255,255,255,0.08); border-radius:18px; background: color-mix(in srgb, var(--secondary-background-color) 88%, rgba(0,0,0,0.18)); overflow:hidden; }
           .hik-debug-dashboard { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:24px; background:linear-gradient(180deg, color-mix(in srgb, var(--card-background-color) 95%, var(--hik-accent) 5%), color-mix(in srgb, var(--card-background-color) 90%, var(--hik-accent) 10%)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 20px 36px rgba(0,0,0,0.22); overflow:hidden; }
@@ -5572,6 +5781,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
                       ` : ""}
+                      ${(this.config.show_audio_controls !== false || this.config.show_audio_sentinel !== false) ? `
+                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "audio_console" ? "is-active" : ""}" id="hik-overlay-audio-console-toggle" title="${this._videoAccessoryPanel === "audio_console" ? "Hide audio console" : "Show audio console"}" aria-label="${this._videoAccessoryPanel === "audio_console" ? "Hide audio console" : "Show audio console"}">
+                          <ha-icon icon="mdi:volume-source"></ha-icon>
+                        </button>
+                      ` : ""}
                       ${this.config.show_stream_info !== false ? `
                         <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_info" ? "is-active" : ""}" id="hik-overlay-stream-info-toggle" title="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}" aria-label="${this._videoAccessoryPanel === "stream_info" ? "Hide stream info" : "Show stream info"}">
                           <ha-icon icon="mdi:video-wireless-outline"></ha-icon>
@@ -5596,6 +5810,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${storageOverlayContent}
+                    ${audioConsoleOverlayContent}
                     ${streamModeOverlayContent}
                     ${streamInfoOverlayContent}
                     ${cameraInfoOverlayContent}
@@ -5677,7 +5892,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   <span class="hik-pill primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
-                ${this._renderAudioSentinelPanel(refs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
             </div>
@@ -5711,6 +5925,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         e.preventDefault();
         e.stopPropagation();
         this._toggleVideoAccessoryPanel("debug");
+      });
+    }
+    const audioConsoleOverlayToggle = this.querySelector("#hik-overlay-audio-console-toggle");
+    if (audioConsoleOverlayToggle) {
+      audioConsoleOverlayToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._toggleVideoAccessoryPanel("audio_console");
       });
     }
     const streamInfoOverlayToggle = this.querySelector("#hik-overlay-stream-info-toggle");
@@ -5777,6 +5999,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "stream_mode") {
         this._toggleVideoAccessoryPanel("stream_mode");
+      }
+    });
+
+    this.querySelector("#hik-audio-console-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "audio_console") {
+        this._toggleVideoAccessoryPanel("audio_console");
       }
     });
 
@@ -5886,6 +6116,12 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       const state = this._getAudioSentinelState(refs);
       const nextPreset = state.calibrationProfile === "balanced" ? "quiet" : (state.calibrationProfile === "quiet" ? "noisy" : "balanced");
       await this._callAudioSentinelService("audio_apply_calibration", { preset: nextPreset });
+    });
+    this.querySelector("#hik-sentinel-capture-clip")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      await this._callAudioSentinelService("audio_capture_clip");
+      this._pushAudioDebug("audio_capture_clip_requested", { source: "overlay" });
     });
     this.querySelector("#hik-sentinel-threshold")?.addEventListener("change", async (ev) => {
       const value = Math.max(0.1, Math.min(0.99, Number(ev.target?.value || 70) / 100));
