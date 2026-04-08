@@ -5,7 +5,16 @@ const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.15";
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
   entry._expanded = !entry._expanded;
-  this.requestUpdate();
+  this._queueRender();
+}
+
+_queueRender() {
+  if (this._renderQueued === true) return;
+  this._renderQueued = true;
+  window.requestAnimationFrame(() => {
+    this._renderQueued = false;
+    this.render();
+  });
 }
 
 _renderWebRtcPtzStatus() {
@@ -650,17 +659,38 @@ _pushDebugEntry(entry) {
     return text || "-";
   }
 
-  _sanitizeDebugObject(value) {
+  _sanitizeDebugObject(value, seen = null) {
     if (value == null) return value;
-    if (Array.isArray(value)) return value.map((item) => this._sanitizeDebugObject(item));
+    const visited = seen instanceof WeakSet ? seen : new WeakSet();
+    if (typeof value === "function") return "[Function]";
+    if (typeof window !== "undefined" && value === window) return "[Window]";
+    if (typeof document !== "undefined" && value === document) return "[Document]";
+    if (typeof Node !== "undefined" && value instanceof Node) {
+      const tag = String(value?.nodeName || value?.tagName || value?.localName || "node").toLowerCase();
+      return `[Node:${tag}]`;
+    }
+    if (typeof Event !== "undefined" && value instanceof Event) {
+      return {
+        type: value.type || "",
+        target: this._sanitizeDebugObject(value.target, visited),
+        currentTarget: this._sanitizeDebugObject(value.currentTarget, visited),
+      };
+    }
+    if (Array.isArray(value)) {
+      if (visited.has(value)) return "[Circular]";
+      visited.add(value);
+      return value.map((item) => this._sanitizeDebugObject(item, visited));
+    }
     if (typeof value === "object") {
+      if (visited.has(value)) return "[Circular]";
+      visited.add(value);
       const next = {};
       Object.entries(value).forEach(([key, raw]) => {
         const lower = String(key || "").toLowerCase();
         if (["password", "authorization", "authsig", "token", "access_token", "username"].includes(lower)) {
           next[key] = "<redacted>";
         } else {
-          next[key] = this._sanitizeDebugObject(raw);
+          next[key] = this._sanitizeDebugObject(raw, visited);
         }
       });
       return next;
@@ -697,15 +727,9 @@ _pushDebugEntry(entry) {
     const next = String(panel || "");
     if (next === "debug") {
       const willOpen = this._debugOverlayOpen !== true;
-      this._cleanupDebugOverlayPointerState?.();
       this._debugOverlayOpen = willOpen;
-      if (willOpen) {
-        this._videoAccessoryPanel = "";
-        const nextRect = this._clampDebugOverlayRect(this._debugOverlayRect || this._loadDebugOverlayRect() || this._getDefaultDebugOverlayRect());
-        this._setDebugOverlayRect(nextRect, { persist: true, rerender: false });
-      }
+      if (willOpen) this._videoAccessoryPanel = "";
     } else {
-      this._cleanupDebugOverlayPointerState?.();
       this._debugOverlayOpen = false;
       this._videoAccessoryPanel = this._videoAccessoryPanel === next ? "" : next;
     }
@@ -726,26 +750,7 @@ _pushDebugEntry(entry) {
 
   _debugOverlayStorageKey() {
     const cameraKey = this.selectedCamera?.entity || this.selectedCamera?.channel || this.selected || 'default';
-    return `ha_hikvision_bridge_card.debug_overlay_rect.v2.${cameraKey}`;
-  }
-
-  _getDebugOverlayHostMetrics() {
-    const host = this.querySelector('.hik-video-block') || this.querySelector('.hik-card') || this;
-    const width = Math.max(640, Math.round(host?.clientWidth || 0) || 960);
-    const height = Math.max(420, Math.round(host?.clientHeight || 0) || 620);
-    return { host, width, height };
-  }
-
-  _getDefaultDebugOverlayRect() {
-    const { width: hostWidth, height: hostHeight } = this._getDebugOverlayHostMetrics();
-    const width = Math.max(520, Math.min(1120, hostWidth - 48));
-    const height = Math.max(320, Math.min(760, hostHeight - 48));
-    return this._clampDebugOverlayRect({
-      width,
-      height,
-      x: 24,
-      y: 24,
-    });
+    return `ha_hikvision_bridge_card.debug_overlay_rect.${cameraKey}`;
   }
 
   _debugOverlayMemoryStore() {
@@ -758,7 +763,7 @@ _pushDebugEntry(entry) {
   }
 
   _normalizeDebugOverlayRect(rect = null) {
-    const defaults = this._getDefaultDebugOverlayRect();
+    const defaults = { width: 960, height: 620, x: 24, y: 24 };
     const src = rect && typeof rect === "object" ? rect : {};
     const widthRaw = Number(src.width);
     const heightRaw = Number(src.height);
@@ -776,10 +781,10 @@ _pushDebugEntry(entry) {
       const key = this._debugOverlayStorageKey();
       const memory = this._debugOverlayMemoryStore();
       const fromMemory = memory && memory[key];
-      if (fromMemory) return this._clampDebugOverlayRect(fromMemory);
+      if (fromMemory) return this._normalizeDebugOverlayRect(fromMemory);
       const raw = window?.localStorage?.getItem?.(key);
       if (!raw) return null;
-      const parsed = this._clampDebugOverlayRect(JSON.parse(raw));
+      const parsed = this._normalizeDebugOverlayRect(JSON.parse(raw));
       if (memory) memory[key] = parsed;
       return parsed;
     } catch (err) {
@@ -790,7 +795,7 @@ _pushDebugEntry(entry) {
   _saveDebugOverlayRect() {
     try {
       const key = this._debugOverlayStorageKey();
-      const rect = this._clampDebugOverlayRect(this._debugOverlayRect);
+      const rect = this._normalizeDebugOverlayRect(this._debugOverlayRect);
       const memory = this._debugOverlayMemoryStore();
       if (memory) memory[key] = rect;
       window?.localStorage?.setItem?.(key, JSON.stringify(rect));
@@ -820,12 +825,14 @@ _pushDebugEntry(entry) {
   }
 
   _resetDebugOverlayRect() {
-    this._setDebugOverlayRect(this._getDefaultDebugOverlayRect());
+    this._setDebugOverlayRect(this._normalizeDebugOverlayRect(null));
   }
 
   _clampDebugOverlayRect(rect = null) {
     const next = this._normalizeDebugOverlayRect(rect || this._debugOverlayRect);
-    const { width: hostWidth, height: hostHeight } = this._getDebugOverlayHostMetrics();
+    const host = this.querySelector('.hik-video-block') || this.querySelector('.hik-card') || this;
+    const hostWidth = Math.max(640, Math.round(host?.clientWidth || 0) || 960);
+    const hostHeight = Math.max(420, Math.round(host?.clientHeight || 0) || 620);
     const width = Math.min(Math.max(520, next.width), Math.max(520, hostWidth - 24));
     const height = Math.min(Math.max(320, next.height), Math.max(320, hostHeight - 24));
     const maxX = Math.max(0, hostWidth - width - 12);
@@ -1011,8 +1018,7 @@ _subscribeDebug() {
       const key = String(entry?.idx || `${entry?.time || ""}-${entry?.message || ""}`);
       const existing = Array.isArray(this._debugEntries) ? this._debugEntries.filter((item) => String(item?.idx || `${item?.time || ""}-${item?.message || ""}`) !== key) : [];
       this._debugEntries = [...existing, entry].slice(-maxEntries);
-      this.requestUpdate?.();
-      this.render?.();
+      this._queueRender();
     },
     {
       type: "ha_hikvision_bridge/subscribe_debug"
@@ -4536,7 +4542,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       stream_mode: "Stream Mode Panel",
       storage: "NVR System Info Panel",
       alarm: "Alarm Dashboard Panel",
-      debug: "Debug Console",
     };
     const panelName = panelNames[String(panelKey || "")] || "Panel";
     return `${isOpen ? "Hide" : "Show"} ${panelName}`;
@@ -4546,7 +4551,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     const streamModeEnabled = options.streamModeEnabled !== false;
     const storageEnabled = options.storageEnabled === true;
     const alarmEnabled = options.alarmEnabled !== false;
-    const debugEnabled = options.debugEnabled === true;
     return `
       <div class="hik-status-pills-overlay" aria-label="Status pills">
         <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
@@ -4585,18 +4589,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           >
             <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
             <span>Alarm</span>
-          </button>
-        ` : ""}
-        ${debugEnabled ? `
-          <button
-            type="button"
-            class="hik-status-pill-btn ${this._debugOverlayOpen ? "is-active" : ""}"
-            id="hik-overlay-debug-toggle"
-            title="${this._panelToggleLabel("debug", this._debugOverlayOpen)}"
-            aria-label="${this._panelToggleLabel("debug", this._debugOverlayOpen)}"
-          >
-            <ha-icon icon="mdi:bug-outline"></ha-icon>
-            <span>Debug</span>
           </button>
         ` : ""}
       </div>
@@ -5374,7 +5366,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
-                    ${this._renderStatusPillsOverlay(versionInfo, { streamModeEnabled: this.config.show_stream_mode_info !== false, storageEnabled: storagePanelSupported, alarmEnabled: this.config.show_alarm_dashboard !== false, debugEnabled: this.config.debug?.enabled === true })}
+                    ${this._renderStatusPillsOverlay(versionInfo, { streamModeEnabled: this.config.show_stream_mode_info !== false, storageEnabled: storagePanelSupported, alarmEnabled: this.config.show_alarm_dashboard !== false })}
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -5429,6 +5421,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         ` : ""}
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
+                        </button>
+                      ` : ""}
+                      ${this.config.debug?.enabled === true ? `
+                        <button type="button" class="hik-video-media-btn ${this._debugOverlayOpen ? "is-active" : ""}" id="hik-overlay-debug-toggle" title="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}" aria-label="${this._debugOverlayOpen ? "Hide debug dashboard" : "Show debug dashboard"}">
+                          <ha-icon icon="mdi:bug-outline"></ha-icon>
                         </button>
                       ` : ""}
                       ${playbackPanelSupported ? `
