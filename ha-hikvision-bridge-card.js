@@ -3187,6 +3187,126 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
 }
 
 
+  renderStorageSystemOverlay(globalRefs = {}, dvr = {}, storage = {}, storageSummary = {}, nvrAlarmBadges = []) {
+    if (this._videoAccessoryPanel !== "storage" || this.config.show_storage_info === false) return "";
+    const overlayEntity = globalRefs.dvr || globalRefs.storage || "Auto-detect pending";
+    const rawHealth = String(
+      storageSummary.health
+      || this.pickValue([storage, dvr], ["overall_health", "health_status", "health"], "unknown")
+    );
+    const overallHealthTone = /critical|fail|error|offline|fault|bad/i.test(rawHealth)
+      ? "is-alert"
+      : /warn|degrad|rebuild|initial|format/i.test(rawHealth)
+        ? "is-warn"
+        : "is-clear";
+    const alarmBadges = Array.isArray(nvrAlarmBadges) ? nvrAlarmBadges : [];
+    const totalRaw = Number(storageSummary.totalRaw || 0);
+    const usedRaw = Number(storageSummary.usedRaw || 0);
+    const totalUsedPct = totalRaw > 0 ? Math.max(0, Math.min(100, Math.round((usedRaw / totalRaw) * 100))) : 0;
+    const healthyDisks = Number(this.pickValue([dvr, storage], ["healthy_disks"], (storageSummary.hdds || []).filter((disk) => disk.health_color === "green").length || 0));
+    const failedDisks = Number(this.pickValue([dvr, storage], ["failed_disks"], (storageSummary.hdds || []).filter((disk) => disk.health_color === "red").length || 0));
+    const systemRows = [
+      ["Entity", overlayEntity],
+      ["Name", this.pickValue([dvr], ["device_name", "friendly_name", "dvr_name", "nvr_name"], "-")],
+      ["Model", this.pickValue([dvr], ["model", "device_model", "system_model"], "-")],
+      ["Vendor", this.pickValue([dvr], ["manufacturer", "vendor", "brand"], "Hikvision")],
+      ["Firmware", this.pickValue([dvr], ["firmware_version", "firmware", "software_version"], "-")],
+      ["Build", this.pickValue([dvr], ["build_number", "build"], "-")],
+      ["Serial", this.pickValue([dvr], ["serial_number", "serial"], "-")],
+      ["Alarm stream", this.alarmOn(globalRefs.alarmStream) ? "Connected" : "Disconnected"],
+      ["Active alarms", String(this.pickValue([dvr], ["active_alarm_count"], alarmBadges.filter((badge) => badge.level === "warn").length || 0))],
+      ["Work mode", this.pickValue([dvr, storage], ["work_mode"], "-")],
+    ];
+    const storageRows = [
+      ["Disk mode", storageSummary.diskMode || this.humanizeDiskMode(this.pickValue([dvr, storage], ["disk_mode"], "-"))],
+      ["Disks", String(this.pickValue([dvr, storage], ["disk_count"], storageSummary.disks || 0))],
+      ["Healthy", String(healthyDisks)],
+      ["Failed", String(failedDisks)],
+      ["Total capacity", this.pickValue([dvr, storage], ["total_capacity_mb", "storage_total"], storageSummary.total)],
+      ["Total used", this.pickValue([storage], ["used_capacity_mb", "storage_used"], storageSummary.used)],
+      ["Free capacity", this.pickValue([dvr, storage], ["free_capacity_mb", "storage_free"], storageSummary.free)],
+      ["Overall health", rawHealth || "-"],
+    ];
+    return `
+      <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="NVR system info overlay">
+        <div class="hik-storage-terminal-shell">
+          <div class="hik-storage-terminal-head">
+            <div class="hik-storage-terminal-title">
+              <span class="hik-storage-terminal-dot is-red"></span>
+              <span class="hik-storage-terminal-dot is-amber"></span>
+              <span class="hik-storage-terminal-dot is-green"></span>
+              <span class="hik-storage-terminal-heading">$ hikvision nvr_system_info --storage --follow</span>
+            </div>
+            <div class="hik-storage-terminal-actions">
+              <span class="hik-storage-terminal-badge ${overallHealthTone}">${this.escapeHtml(rawHealth || "Unknown")}</span>
+              <button type="button" class="hik-video-media-btn" id="hik-storage-overlay-close" title="Close NVR system info" aria-label="Close NVR system info">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="hik-storage-terminal-body">
+            <div class="hik-storage-terminal-grid">
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">system identity</div>
+                ${this.buildMetaGrid(systemRows)}
+              </div>
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">storage summary</div>
+                ${this.buildMetaGrid(storageRows)}
+                <div class="hik-storage-terminal-usage">
+                  <div class="hik-storage-terminal-usage-head">
+                    <span>Capacity usage</span>
+                    <span>${totalUsedPct}% used</span>
+                  </div>
+                  <div class="hik-storage-terminal-bar"><span style="width:${totalUsedPct}%;"></span></div>
+                </div>
+              </div>
+              <div class="hik-storage-terminal-card hik-storage-terminal-card-span">
+                <div class="hik-storage-terminal-kicker">disk inventory</div>
+                ${(storageSummary.hdds || []).length ? `
+                  <div class="hik-storage-terminal-disklist">
+                    ${(storageSummary.hdds || []).map((disk) => {
+                      const diskPct = Number(disk.capacity_mb || 0) > 0
+                        ? Math.max(0, Math.min(100, Math.round((Number(disk.used_space_mb || 0) / Number(disk.capacity_mb || 1)) * 100)))
+                        : 0;
+                      const diskTone = this.escapeHtml(disk.health_color || "yellow");
+                      return `
+                        <div class="hik-storage-terminal-disk ${diskTone}">
+                          <div class="hik-storage-terminal-disk-head">
+                            <div class="hik-storage-terminal-disk-title">
+                              <span>${this.escapeHtml(disk.name || `HDD ${disk.id || "?"}`)}</span>
+                              <span class="hik-health-chip ${diskTone}"><span class="hik-health-dot"></span>${this.escapeHtml(String(disk.status || "unknown").toUpperCase())}</span>
+                            </div>
+                            <div class="hik-storage-terminal-disk-meta">${this.escapeHtml(`${disk.type || "Disk"} · ${disk.capacity_text || "-"}`)}</div>
+                          </div>
+                          <div class="hik-storage-terminal-bar"><span style="width:${diskPct}%;"></span></div>
+                          <div class="hik-storage-terminal-disk-stats">
+                            <span>Used ${this.escapeHtml(disk.used_text || "-")}</span>
+                            <span>Free ${this.escapeHtml(disk.free_text || "-")}</span>
+                            <span>${diskPct}% used</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : `<div class="hik-empty-note">No HDD data available</div>`}
+              </div>
+              <div class="hik-storage-terminal-card">
+                <div class="hik-storage-terminal-kicker">nvr alarms</div>
+                ${alarmBadges.length ? `
+                  <div class="hik-storage-terminal-badges">
+                    ${alarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
+                  </div>
+                ` : `<div class="hik-empty-note">No active NVR alarms</div>`}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+
   formatStorageSize(valueMb) {
     const value = Number(valueMb || 0);
     if (!Number.isFinite(value) || value < 0) return "-";
@@ -4581,35 +4701,11 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       </div>
     ` : "";
 
-    const storageAccessoryPanel = this.config.show_storage_info !== false ? `
-      <div class="hik-panel hik-info-card hik-video-accessory-panel">
-        <div class="hik-sub"><ha-icon icon="mdi:harddisk"></ha-icon>NVR Storage Info</div>
-        ${this.buildMetaGrid([
-          ["Entity", globalRefs.dvr || globalRefs.storage || "Auto-detect pending"],
-          ["Disk mode", storageSummary.diskMode],
-          ["Total capacity", storageSummary.total],
-          ["Total used", storageSummary.used],
-          ["Total free", storageSummary.free],
-          ["Disks", storageSummary.disks],
-          ["Overall health", storageSummary.health],
-        ])}
-        ${(storageSummary.hdds || []).length ? `<div class="hik-storage-list">${storageSummary.hdds.map((disk) => `
-          <div class="hik-storage-item ${this.escapeHtml(disk.health_color || "yellow")}">
-            <div class="hik-storage-row">
-              <b>${this.escapeHtml(disk.name || `HDD ${disk.id || "?"}`)}</b>
-              <span class="hik-health-chip ${this.escapeHtml(disk.health_color || "yellow")}"><span class="hik-health-dot"></span>${this.escapeHtml(String(disk.status || "unknown").toUpperCase())}</span>
-            </div>
-            <span>${this.escapeHtml(`${disk.type || "Disk"} · Size ${disk.capacity_text}`)}</span>
-            <span>${this.escapeHtml(`Used ${disk.used_text} · Free ${disk.free_text}`)}</span>
-          </div>`).join("")}</div>` : `<div class="hik-empty-note">No HDD data available</div>`}
-      </div>
-    ` : "";
+    const storageOverlayContent = this.renderStorageSystemOverlay(globalRefs, dvr, storage, storageSummary, nvrAlarmBadges);
 
     const videoAccessoryPanelContent = this._videoAccessoryPanel === "stream_mode"
       ? streamModeAccessoryPanel
-      : this._videoAccessoryPanel === "storage"
-        ? storageAccessoryPanel
-        : "";
+      : "";
 
     const preservedVideoHost = this._preserveVideoHost();
 
@@ -4772,6 +4868,49 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-alarm-terminal-card .hik-alarm-name { color:#d8ffe3; }
           .hik-alarm-terminal-card .hik-alarm-name ha-icon { color:#74f7a3; }
           .hik-alarm-terminal-card .hik-empty-note { font:500 12px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.72); background:rgba(8,20,14,0.56); border:1px dashed rgba(120,255,176,0.16); }
+
+          .hik-storage-terminal-overlay { position:absolute; inset:52px 14px 14px 14px; z-index:7; display:block; pointer-events:none; }
+          .hik-storage-terminal-shell { height:100%; display:grid; grid-template-rows:auto minmax(0, 1fr); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(3,11,9,0.94), rgba(5,13,18,0.90)); border:1px solid rgba(120,255,176,0.22); box-shadow:0 20px 42px rgba(0,0,0,0.40), inset 0 0 0 1px rgba(96,255,160,0.06); backdrop-filter:blur(14px) saturate(1.08); pointer-events:auto; }
+          .hik-storage-terminal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(120,255,176,0.16); background:linear-gradient(180deg, rgba(8,30,24,0.95), rgba(7,18,20,0.90)); }
+          .hik-storage-terminal-title { display:flex; align-items:center; gap:10px; min-width:0; }
+          .hik-storage-terminal-dot { width:10px; height:10px; border-radius:999px; box-shadow:0 0 10px currentColor; }
+          .hik-storage-terminal-dot.is-red { color:#ff6b6b; background:currentColor; }
+          .hik-storage-terminal-dot.is-amber { color:#ffd166; background:currentColor; }
+          .hik-storage-terminal-dot.is-green { color:#6bff95; background:currentColor; }
+          .hik-storage-terminal-heading { font:600 12px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.04em; color:#b8ffca; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 0 8px rgba(107,255,149,0.18); }
+          .hik-storage-terminal-actions { display:flex; align-items:center; gap:10px; }
+          .hik-storage-terminal-badge { min-height:28px; padding:0 10px; border-radius:999px; display:inline-flex; align-items:center; font:700 11px/1 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; border:1px solid rgba(120,255,176,0.18); background:rgba(12,28,18,0.72); color:#afffbe; }
+          .hik-storage-terminal-badge.is-alert { color:#ffd6d6; border-color:rgba(255,107,107,0.34); background:rgba(62,10,10,0.72); }
+          .hik-storage-terminal-badge.is-warn { color:#ffe8b3; border-color:rgba(255,209,102,0.34); background:rgba(56,36,10,0.72); }
+          .hik-storage-terminal-badge.is-clear { color:#b8ffca; }
+          .hik-storage-terminal-body { min-height:0; overflow:auto; padding:14px; }
+          .hik-storage-terminal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+          .hik-storage-terminal-card { min-width:0; border-radius:14px; padding:12px; background:linear-gradient(180deg, rgba(8,20,18,0.80), rgba(6,13,14,0.70)); border:1px solid rgba(120,255,176,0.12); box-shadow:inset 0 1px 0 rgba(120,255,176,0.04); }
+          .hik-storage-terminal-card-span { grid-column:1 / -1; }
+          .hik-storage-terminal-kicker { margin-bottom:8px; font:700 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.14em; text-transform:uppercase; color:#74f7a3; opacity:0.94; }
+          .hik-storage-terminal-card .hik-meta { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px 14px; }
+          .hik-storage-terminal-card .hik-meta b { display:block; margin-bottom:4px; font:700 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; color:rgba(160,255,196,0.72); }
+          .hik-storage-terminal-card .hik-meta span { display:block; font:600 12px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#dcffe6; word-break:break-word; }
+          .hik-storage-terminal-usage { display:grid; gap:8px; margin-top:12px; }
+          .hik-storage-terminal-usage-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font:600 11px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; letter-spacing:0.08em; text-transform:uppercase; color:rgba(160,255,196,0.74); }
+          .hik-storage-terminal-bar { position:relative; height:10px; border-radius:999px; overflow:hidden; background:rgba(4,12,10,0.88); border:1px solid rgba(120,255,176,0.10); box-shadow:inset 0 1px 4px rgba(0,0,0,0.34); }
+          .hik-storage-terminal-bar > span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg, rgba(64,255,156,0.92), rgba(80,220,255,0.88)); box-shadow:0 0 18px rgba(64,255,156,0.18); }
+          .hik-storage-terminal-disklist { display:grid; gap:12px; }
+          .hik-storage-terminal-disk { display:grid; gap:10px; padding:12px; border-radius:12px; background:linear-gradient(180deg, rgba(8,18,16,0.82), rgba(5,11,12,0.72)); border:1px solid rgba(120,255,176,0.10); }
+          .hik-storage-terminal-disk.red { border-color:rgba(255,107,107,0.28); box-shadow:inset 0 0 0 1px rgba(255,107,107,0.08); }
+          .hik-storage-terminal-disk.yellow { border-color:rgba(255,209,102,0.24); box-shadow:inset 0 0 0 1px rgba(255,209,102,0.06); }
+          .hik-storage-terminal-disk.green { border-color:rgba(107,255,149,0.24); box-shadow:inset 0 0 0 1px rgba(107,255,149,0.06); }
+          .hik-storage-terminal-disk-head { display:grid; gap:6px; }
+          .hik-storage-terminal-disk-title { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; font:700 12px/1.3 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:#dfffe8; }
+          .hik-storage-terminal-disk-meta, .hik-storage-terminal-disk-stats { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; font:500 11px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; color:rgba(184,255,202,0.76); }
+          .hik-storage-terminal-badges { display:flex; flex-wrap:wrap; gap:8px; }
+          @media (max-width: 980px) {
+            .hik-storage-terminal-grid { grid-template-columns:1fr; }
+            .hik-storage-terminal-card-span { grid-column:auto; }
+          }
+          @media (max-width: 720px) {
+            .hik-storage-terminal-card .hik-meta { grid-template-columns:1fr; }
+          }
 
           .hik-video-ptz-surface { position:absolute; inset:14px; pointer-events:none; }
           .hik-video-ptz-top { position:absolute; top:0; left:0; display:flex; gap:8px; }
@@ -5092,7 +5231,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                 <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
-                    <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"} ${this._videoAccessoryPanel === "alarm" ? "is-suppressed" : ""}" aria-label="PTZ video overlay">
+                    <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"} ${(this._videoAccessoryPanel === "alarm" || this._videoAccessoryPanel === "storage") ? "is-suppressed" : ""}" aria-label="PTZ video overlay">
                       <div class="hik-video-ptz-surface">
                         <div class="hik-video-ptz-top">
                           <div class="hik-video-ptz-chip">
@@ -5229,6 +5368,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                     </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
                     ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
+                    ${storageOverlayContent}
                     ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
@@ -5405,6 +5545,14 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       e.stopPropagation();
       if (this._videoAccessoryPanel === "alarm") {
         this._toggleVideoAccessoryPanel("alarm");
+      }
+    });
+
+    this.querySelector("#hik-storage-overlay-close")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._videoAccessoryPanel === "storage") {
+        this._toggleVideoAccessoryPanel("storage");
       }
     });
 
