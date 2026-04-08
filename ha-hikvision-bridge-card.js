@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.12 */
+/* UI Split Patch 2.6.13 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.19";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.20";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -769,7 +769,8 @@ _pushDebugEntry(entry) {
 
   _renderVideoAccessoryPanel(content = "") {
     const panel = String(this._videoAccessoryPanel || "");
-    if (!panel || !content) return "";
+    const hasDebugAccessory = this._debugOverlayOpen === true && String(content || "").trim() !== "";
+    if ((!panel && !hasDebugAccessory) || !content) return "";
     return `
       <div class="hik-video-accessory-wrap">
         ${content}
