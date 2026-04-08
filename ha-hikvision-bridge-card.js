@@ -4508,11 +4508,60 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     };
   }
 
-  _renderVersionOverlay(versionInfo = {}) {
+  _panelToggleLabel(panelKey = "", isOpen = false) {
+    const panelNames = {
+      stream_mode: "Stream Mode Panel",
+      storage: "NVR System Info Panel",
+      alarm: "Alarm Dashboard Panel",
+    };
+    const panelName = panelNames[String(panelKey || "")] || "Panel";
+    return `${isOpen ? "Hide" : "Show"} ${panelName}`;
+  }
+
+  _renderStatusPillsOverlay(versionInfo = {}, options = {}) {
+    const streamModeEnabled = options.streamModeEnabled !== false;
+    const storageEnabled = options.storageEnabled === true;
+    const alarmEnabled = options.alarmEnabled !== false;
     return `
-      <div class="hik-version-overlay" aria-label="Frontend and backend versions">
+      <div class="hik-status-pills-overlay" aria-label="Status pills">
         <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
         <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
+        ${streamModeEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}"
+            id="hik-overlay-stream-mode-toggle"
+            title="${this._panelToggleLabel("stream_mode", this._videoAccessoryPanel === "stream_mode")}"
+            aria-label="${this._panelToggleLabel("stream_mode", this._videoAccessoryPanel === "stream_mode")}"
+          >
+            <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
+            <span>Stream</span>
+          </button>
+        ` : ""}
+        ${storageEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}"
+            id="hik-overlay-storage-toggle"
+            title="${this._panelToggleLabel("storage", this._videoAccessoryPanel === "storage")}"
+            aria-label="${this._panelToggleLabel("storage", this._videoAccessoryPanel === "storage")}"
+          >
+            <ha-icon icon="mdi:harddisk"></ha-icon>
+            <span>NVR</span>
+          </button>
+        ` : ""}
+        ${alarmEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._videoAccessoryPanel === "alarm" ? "is-active" : ""}"
+            id="hik-overlay-alarm-toggle"
+            title="${this._panelToggleLabel("alarm", this._videoAccessoryPanel === "alarm")}"
+            aria-label="${this._panelToggleLabel("alarm", this._videoAccessoryPanel === "alarm")}"
+          >
+            <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
+            <span>Alarm</span>
+          </button>
+        ` : ""}
       </div>
     `;
   }
@@ -4966,8 +5015,13 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
           .hik-grid-tile-footer { position:absolute; inset:auto 10px 10px 10px; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 10px; border-radius:12px; background:rgba(10,14,20,0.42); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(10px); color:var(--primary-text-color); font-size:11px; font-weight:700; }
           .hik-grid-tile-footer.focused { font-size:12px; }
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
-          .hik-version-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:none; z-index:2; }
-          .hik-version-chip { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
+          .hik-status-pills-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:auto; z-index:2; flex-wrap:wrap; max-width:min(88%, 760px); }
+          .hik-version-chip, .hik-status-pill-btn { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
+          .hik-status-pill-btn { min-height:22px; padding:0 9px; gap:4px; cursor:pointer; pointer-events:auto; }
+          .hik-status-pill-btn ha-icon { --mdc-icon-size:12px; color:var(--hik-accent); }
+          .hik-status-pill-btn.is-active { background:rgba(120,16,16,0.46); border-color:rgba(255,80,80,0.30); box-shadow:0 0 0 1px rgba(255,80,80,0.12), 0 6px 16px rgba(0,0,0,0.20); }
+          .hik-status-pill-btn:hover:not(:disabled) { background:rgba(14,20,28,0.48); transform:translateY(-1px); }
+          .hik-status-pill-btn:active:not(:disabled) { transform:scale(0.97); }
           .hik-video-media-bottom { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); align-items:center; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
           .hik-video-media-btn { min-width:clamp(34px, 3.8vw, 42px); height:clamp(34px, 3.8vw, 42px); border:none; border-radius:clamp(10px, 1vw, 14px); display:grid; place-items:center; cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease; }          .hik-video-media-btn.is-active { background:rgba(120,16,16,0.50); border-color:rgba(255,80,80,0.34); box-shadow:0 0 0 1px rgba(255,80,80,0.14), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -5283,7 +5337,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   ` : ""}
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
-                    ${this._renderVersionOverlay(versionInfo)}
+                    ${this._renderStatusPillsOverlay(versionInfo, { streamModeEnabled: this.config.show_stream_mode_info !== false, storageEnabled: storagePanelSupported, alarmEnabled: this.config.show_alarm_dashboard !== false })}
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -5338,21 +5392,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                         ` : ""}
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${this.config.show_stream_mode_info !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "stream_mode" ? "is-active" : ""}" id="hik-overlay-stream-mode-toggle" title="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}" aria-label="${this._videoAccessoryPanel === "stream_mode" ? "Hide stream mode panel" : "Show stream mode panel"}">
-                          <ha-icon icon="mdi:transit-connection-variant"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${storagePanelSupported ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "storage" ? "is-active" : ""}" id="hik-overlay-storage-toggle" title="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}" aria-label="${this._videoAccessoryPanel === "storage" ? "Hide storage panel" : "Show storage panel"}">
-                          <ha-icon icon="mdi:harddisk"></ha-icon>
-                        </button>
-                      ` : ""}
-                      ${this.config.show_alarm_dashboard !== false ? `
-                        <button type="button" class="hik-video-media-btn ${this._videoAccessoryPanel === "alarm" ? "is-active" : ""}" id="hik-overlay-alarm-toggle" title="${this._videoAccessoryPanel === "alarm" ? "Hide alarm dashboard" : "Show alarm dashboard"}" aria-label="${this._videoAccessoryPanel === "alarm" ? "Hide alarm dashboard" : "Show alarm dashboard"}">
-                          <ha-icon icon="mdi:shield-alert-outline"></ha-icon>
                         </button>
                       ` : ""}
                       ${this.config.debug?.enabled === true ? `
@@ -5447,7 +5486,8 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
                   <span class="hik-pill primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
-                                ${this._renderAudioSentinelPanel(refs)}
+                ${this._renderAudioControls(streamMode, playbackActive)}
+                ${this._renderAudioSentinelPanel(refs)}
                 ${this.renderDebugOverlay(camAttrs)}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
