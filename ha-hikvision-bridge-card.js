@@ -119,6 +119,7 @@ _pushDebugEntry(entry) {
       speed: 50,
       lens_step: 60,
       ptz_duration: 450,
+      ptz_repeat_delay: 0,
       lens_duration: 180,
       lens_stop_safeguard: false,
       refocus_step: 40,
@@ -164,6 +165,11 @@ _pushDebugEntry(entry) {
     this.config.debug = this._normalizeDebugConfig(this.config);
     this.selected = 0;
     this._repeatHandle = null;
+    this._ptzHoldActive = this._ptzHoldActive || false;
+    this._ptzReleaseCleanup = this._ptzReleaseCleanup || null;
+    this._ptzHoldPointerId = this._ptzHoldPointerId ?? null;
+    this._ptzHoldTraceId = this._ptzHoldTraceId || "";
+    this._ptzHoldSource = this._ptzHoldSource || "";
     this._videoCard = null;
     this._videoCardConfig = this._videoCardConfig || null;
     this._controlsVisible = this.config.show_controls === false ? false : this.config.controls_mode !== "toggle";
@@ -2003,6 +2009,9 @@ _toggleDebugFilter(kind, value) {
       title: "ha-hikvision-bridge-card",
       auto_discover: true,
       controls_mode: "always",
+      speed: 50,
+      ptz_duration: 450,
+      ptz_repeat_delay: 0,
       show_camera_info: true,
       show_stream_info: true,
       show_dvr_info: true,
@@ -2483,18 +2492,188 @@ _toggleDebugFilter(kind, value) {
     `;
   }
 
-  stopMove(context = {}) {
+  _clearPtzRepeatTimer() {
     if (this._repeatHandle) {
-      clearInterval(this._repeatHandle);
+      clearTimeout(this._repeatHandle);
       this._repeatHandle = null;
     }
+  }
+
+  _detachPtzReleaseListeners() {
+    if (typeof this._ptzReleaseCleanup === "function") {
+      try { this._ptzReleaseCleanup(); } catch (err) {}
+    }
+    this._ptzReleaseCleanup = null;
+    this._ptzHoldPointerId = null;
+  }
+
+  _resetHeldMoveState() {
+    this._clearPtzRepeatTimer();
+    this._detachPtzReleaseListeners();
+    this._ptzHoldActive = false;
+    this._ptzHoldTraceId = "";
+    this._ptzHoldSource = "";
+  }
+
+  stopMove(context = {}) {
+    const hadTimer = !!this._repeatHandle;
+    const wasHolding = this._ptzHoldActive === true;
+    this._resetHeldMoveState();
     if (context?.trace_id) {
-      this._pushTraceDebug("ptz", "debug", "ptz_stop_noop", "PTZ stop requested but single-click mode is active", { ...context }, context?.trace_id || "", "frontend");
+      this._pushTraceDebug(
+        "ptz",
+        hadTimer || wasHolding ? "info" : "debug",
+        hadTimer || wasHolding ? "ptz_hold_stopped" : "ptz_stop_noop",
+        hadTimer || wasHolding ? "Stopped repeated momentary PTZ" : "PTZ stop requested with no active repeated movement",
+        { ...context, had_timer: hadTimer, holding: wasHolding },
+        context?.trace_id || "",
+        "frontend",
+      );
     }
   }
 
   getPTZDuration() {
     return Math.max(100, Number(this.config.ptz_duration ?? 450));
+  }
+
+  getPTZRepeatDelay() {
+    return Math.max(0, Number(this.config.ptz_repeat_delay ?? 0));
+  }
+
+  _attachPtzReleaseListeners(button, pointerId = null) {
+    this._detachPtzReleaseListeners();
+    this._ptzHoldPointerId = pointerId;
+
+    const finish = (ev) => {
+      if (ev?.type?.startsWith?.("pointer") && this._ptzHoldPointerId != null) {
+        if (ev.pointerId != null && ev.pointerId !== this._ptzHoldPointerId) return;
+      }
+      this._handlePtzButtonUp(ev);
+    };
+
+    const blurFinish = () => this._handlePtzButtonUp();
+    const visibilityFinish = () => {
+      if (document.visibilityState === "hidden") this._handlePtzButtonUp();
+    };
+    const opts = { capture: true };
+
+    window.addEventListener("pointerup", finish, opts);
+    window.addEventListener("pointercancel", finish, opts);
+    window.addEventListener("mouseup", finish, opts);
+    window.addEventListener("touchend", finish, opts);
+    window.addEventListener("touchcancel", finish, opts);
+    window.addEventListener("blur", blurFinish, opts);
+    document.addEventListener("visibilitychange", visibilityFinish, opts);
+
+    if (button?.setPointerCapture && pointerId != null) {
+      try { button.setPointerCapture(pointerId); } catch (err) {}
+    }
+
+    this._ptzReleaseCleanup = () => {
+      if (button?.releasePointerCapture && pointerId != null) {
+        try { button.releasePointerCapture(pointerId); } catch (err) {}
+      }
+      window.removeEventListener("pointerup", finish, opts);
+      window.removeEventListener("pointercancel", finish, opts);
+      window.removeEventListener("mouseup", finish, opts);
+      window.removeEventListener("touchend", finish, opts);
+      window.removeEventListener("touchcancel", finish, opts);
+      window.removeEventListener("blur", blurFinish, opts);
+      document.removeEventListener("visibilitychange", visibilityFinish, opts);
+    };
+  }
+
+  _scheduleHeldMoveRepeat(pan, tilt, context = {}, traceId = "") {
+    if (!this._ptzHoldActive) return;
+    const duration = this.getPTZDuration();
+    const repeatDelay = this.getPTZRepeatDelay();
+    const cadence = Math.max(0, duration + repeatDelay);
+    this._clearPtzRepeatTimer();
+    this._repeatHandle = window.setTimeout(() => {
+      this._repeatHandle = null;
+      if (!this._ptzHoldActive) return;
+      this._pushTraceDebug("ptz", "debug", "ptz_hold_repeat", "Sending held PTZ repeat pulse", {
+        pan: Number(pan || 0),
+        tilt: Number(tilt || 0),
+        duration,
+        repeat_delay: repeatDelay,
+        cadence,
+        source: context?.source || "panel",
+      }, traceId, "frontend");
+      this.startMove(pan, tilt, { ...context, trace_id: traceId, hold_repeat: true });
+      this._scheduleHeldMoveRepeat(pan, tilt, context, traceId);
+    }, cadence);
+  }
+
+  _handlePtzButtonDown(button, pan, tilt, ev, context = {}) {
+    ev?.preventDefault?.();
+    ev?.stopPropagation?.();
+    if (!button || button.disabled) return;
+    if (this._returningHome || !this.isOnline()) return;
+
+    const traceId = context?.trace_id || this._nextDebugTraceId("ptz");
+    const source = context?.source || "panel";
+    this._resetHeldMoveState();
+    this._ptzHoldActive = true;
+    this._ptzHoldTraceId = traceId;
+    this._ptzHoldSource = source;
+    this._attachPtzReleaseListeners(button, ev?.pointerId ?? null);
+
+    this._pushTraceDebug("ptz", "info", "ptz_hold_started", "Starting repeated momentary PTZ hold", {
+      pan: Number(pan || 0),
+      tilt: Number(tilt || 0),
+      duration: this.getPTZDuration(),
+      repeat_delay: this.getPTZRepeatDelay(),
+      source,
+    }, traceId, "frontend");
+
+    this.startMove(pan, tilt, { ...context, trace_id: traceId, source, hold_start: true });
+    this._scheduleHeldMoveRepeat(pan, tilt, { ...context, trace_id: traceId, source }, traceId);
+  }
+
+  _handlePtzButtonUp(ev) {
+    ev?.preventDefault?.();
+    ev?.stopPropagation?.();
+    if (!this._ptzHoldActive && !this._repeatHandle) return;
+    const traceId = this._ptzHoldTraceId || this._nextDebugTraceId("ptz");
+    const source = this._ptzHoldSource || "panel";
+    this.stopMove({ trace_id: traceId, source, action: "hold_release" });
+  }
+
+  _bindHoldPtzButton(button, pan, tilt, source = "panel") {
+    if (!button) return;
+    const down = (ev) => this._handlePtzButtonDown(button, pan, tilt, ev, { source });
+    const up = (ev) => this._handlePtzButtonUp(ev);
+    const suppress = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+
+    if (window.PointerEvent) {
+      button.onpointerdown = down;
+      button.onpointerup = up;
+      button.onpointercancel = up;
+      button.onlostpointercapture = up;
+    } else {
+      button.onmousedown = down;
+      button.onmouseup = up;
+      button.onmouseleave = up;
+      button.ontouchstart = down;
+      button.ontouchend = up;
+      button.ontouchcancel = up;
+    }
+
+    button.onclick = suppress;
+    button.oncontextmenu = suppress;
+    button.onkeydown = (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.startMove(pan, tilt, { source, trace_id: this._nextDebugTraceId("ptz"), keyboard: true });
+      }
+    };
+    button.style.touchAction = "none";
+    button.style.userSelect = "none";
   }
 
   _resolvePtzAxis(value, speed) {
@@ -6274,13 +6453,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     this.querySelectorAll(".hik-video-ptz-overlay .ptz-btn").forEach((btn) => {
       const pan = Number(btn.dataset.pan);
       const tilt = Number(btn.dataset.tilt);
-      const source = "overlay";
-      const click = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        this.startMove(pan, tilt, { source });
-      };
-      btn.addEventListener("click", click);
+      this._bindHoldPtzButton(btn, pan, tilt, "overlay");
     });
 
     this.querySelector("#hik-center-overlay")?.addEventListener("click", () => this.handleCenter());
@@ -6504,6 +6677,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const tint = Number(this.config.panel_tint ?? 8);
     const speed = Number(this.config.speed ?? 50);
     const ptzDuration = Number(this.config.ptz_duration ?? 450);
+    const ptzRepeatDelay = Number(this.config.ptz_repeat_delay ?? 0);
     const lensStep = Number(this.config.lens_step ?? 60);
     const lensDuration = Number(this.config.lens_duration ?? 180);
     const refocusStep = Number(this.config.refocus_step ?? 40);
@@ -6547,10 +6721,11 @@ class HikvisionPTZCardEditor extends HTMLElement {
 
         ${this._section(
           "PTZ controls",
-          "Momentary PTZ tuning for NVR/DVR proxy control. Use shorter duration for finer taps. Raise speed only if motion is too weak.",
+          "Momentary PTZ tuning for NVR/DVR proxy control. Hold a PTZ button to send repeated momentary pulses until release. Use shorter duration for finer taps, then add repeat delay only when you want a pause between pulses.",
           `
-            ${this._field("speed", "PTZ speed", `<input id="speed" type="number" min="1" max="100" value="${speed}" style="width:100%;">`, "Used as the pan/tilt strength for momentary PTZ. Start around 50-70. Increase it when each pulse feels too weak.")}
-            ${this._field("ptz_duration", "PTZ duration (ms)", `<input id="ptz_duration" type="number" min="100" value="${ptzDuration}" style="width:100%;">`, "How long each PTZ pulse runs. Lower values such as 120-180 ms give tighter control. Higher values move farther per tap.")}
+            ${this._field("speed", "PTZ speed", `<input id="speed" type="number" min="1" max="100" value="${speed}" style="width:100%;">`, "Used as the pan/tilt strength for each momentary PTZ pulse. Start around 50-70. Increase it when each pulse feels too weak.")}
+            ${this._field("ptz_duration", "PTZ duration (ms)", `<input id="ptz_duration" type="number" min="100" value="${ptzDuration}" style="width:100%;">`, "How long each PTZ pulse runs. Lower values such as 120-180 ms give tighter control. Higher values move farther per pulse.")}
+            ${this._field("ptz_repeat_delay", "PTZ repeat delay (ms)", `<input id="ptz_repeat_delay" type="number" min="0" value="${ptzRepeatDelay}" style="width:100%;">`, "Extra wait after one momentary pulse finishes before the next pulse is sent while holding the button. Use 0 for the fastest fake continuous movement. Increase it to slow the hold cadence and make motion more deliberate.")}
             ${this._field("speed_position", "PTZ speed slider placement", `
               <select id="speed_position" style="width:100%;">
                 <option value="left" ${speedPosition === "left" ? "selected" : ""}>Left of PTZ stick</option>
@@ -6633,7 +6808,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
 
     [
       "title", "video_mode", "controls_mode", "accent_color", "panel_tint",
-      "speed", "ptz_duration", "speed_position",
+      "speed", "ptz_duration", "ptz_repeat_delay", "speed_position",
       "lens_step", "lens_duration", "refocus_step", "lens_stop_safeguard",
       "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost",
       "show_playback_panel", "show_audio_controls", "mute_during_talk",
@@ -6660,6 +6835,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       title: this._stringValue("title", this.config.title || "ha-hikvision-bridge-card"),
       speed: this._numberValue("speed", Number(this.config.speed ?? 50), { min: 1, max: 100 }),
       ptz_duration: this._numberValue("ptz_duration", Number(this.config.ptz_duration ?? 450), { min: 100 }),
+      ptz_repeat_delay: this._numberValue("ptz_repeat_delay", Number(this.config.ptz_repeat_delay ?? 0), { min: 0 }),
       lens_step: this._numberValue("lens_step", Number(this.config.lens_step ?? 60), { min: 1, max: 100 }),
       lens_duration: this._numberValue("lens_duration", Number(this.config.lens_duration ?? 180), { min: 60 }),
       refocus_step: this._numberValue("refocus_step", Number(this.config.refocus_step ?? 40), { min: 1, max: 100 }),
