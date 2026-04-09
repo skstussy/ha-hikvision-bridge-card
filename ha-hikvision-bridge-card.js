@@ -346,10 +346,13 @@ _pushDebugEntry(entry) {
 
   _playbackTickerText() {
     const cam = this.selectedCamera || {};
+    const playbackState = this.getPlaybackState?.(cam?.channel ?? null) || {};
+    if (playbackState?.pendingTime) return playbackState.currentTime || playbackState.pendingTime || "";
     const refs = cam?.channel != null ? this.refsForChannel?.(cam.channel) || {} : {};
     const cameraEntity = refs.camera ? this.getEntity?.(refs.camera) : null;
     const attrs = cameraEntity?.attributes || {};
-    const value = attrs.playback_requested_time || attrs.playback_clip_start_time || "";
+    if (attrs.playback_active !== true && playbackState?.currentTime) return playbackState.currentTime;
+    const value = attrs.playback_requested_time || attrs.playback_clip_start_time || playbackState.currentTime || "";
     return value ? this.formatDateTimeLocal(value) : "";
   }
 
@@ -2860,8 +2863,15 @@ formatDateTimeLocal(value = null) {
 syncPlaybackState(cameraAttrs = {}) {
   const state = this.getPlaybackState();
   if (!state.currentTime) state.currentTime = this.formatDateTimeLocal();
-  const requested = cameraAttrs.playback_requested_time;
-  if (requested) state.currentTime = this.formatDateTimeLocal(requested);
+  const requested = cameraAttrs.playback_requested_time ? this.formatDateTimeLocal(cameraAttrs.playback_requested_time) : "";
+  if (requested) {
+    if (state.pendingTime && requested === state.pendingTime) {
+      state.pendingTime = "";
+      state.currentTime = requested;
+    } else if (!state.pendingTime) {
+      state.currentTime = requested;
+    }
+  }
   if (cameraAttrs.playback_active !== true) state.paused = false;
   return state;
 }
@@ -3015,14 +3025,25 @@ async startPlayback(timestamp = null) {
   const refs = this.refsForChannel(cam.channel);
   if (!refs.camera) return;
   const state = this.getPlaybackState(cam.channel);
-  const requested = timestamp || state.currentTime || this.formatDateTimeLocal();
+  const requested = this.formatDateTimeLocal(timestamp || state.currentTime || this.formatDateTimeLocal()) || this.formatDateTimeLocal();
   state.currentTime = requested;
+  state.pendingTime = requested;
   state.paused = false;
+  this.render();
   this._pushDebug("playback", "info", "playback_start_requested", "Requested playback start", { requested_time: requested, entity_id: refs.camera }, "frontend");
-  await this._hass.callService("ha_hikvision_bridge", "playback_seek", {
-    entity_id: refs.camera,
-    timestamp: requested,
-  });
+  try {
+    await this._hass.callService("ha_hikvision_bridge", "playback_seek", {
+      entity_id: refs.camera,
+      timestamp: requested,
+    });
+  } catch (error) {
+    this._pushDebug("playback", "error", "playback_start_failed", "Playback start failed", {
+      requested_time: requested,
+      entity_id: refs.camera,
+      error: error?.message || String(error || ""),
+    }, "frontend");
+    throw error;
+  }
 }
 
 async stopPlayback() {
@@ -3089,19 +3110,10 @@ async seekPlayback(direction = 1) {
   const camAttrs = cameraEntity?.attributes || {};
   const playbackActive = camAttrs.playback_active === true && !!camAttrs.playback_uri;
 
-  if (!playbackActive || !camAttrs.playback_uri) {
-    this._pushTraceDebug("playback", "warn", "playback_seek_skipped", "Playback seek skipped", {
-      reason: "playback_not_active",
-      direction: Number(direction || 1),
-      playback_active: playbackActive,
-      playback_uri_present: !!camAttrs.playback_uri,
-    }, traceId, "frontend");
-    return;
-  }
-
   const presetSeconds = Number(state.preset || 1);
   const seconds = Number(direction || 1) * presetSeconds;
-  const base = state.currentTime ? new Date(state.currentTime) : new Date();
+  const baseValue = state.currentTime || camAttrs.playback_requested_time || camAttrs.playback_clip_start_time || this.formatDateTimeLocal();
+  const base = new Date(baseValue);
   if (Number.isNaN(base.getTime())) {
     this._pushTraceDebug("playback", "warn", "playback_seek_skipped", "Playback seek skipped", {
       reason: "invalid_current_time",
@@ -3112,15 +3124,23 @@ async seekPlayback(direction = 1) {
 
   base.setSeconds(base.getSeconds() + seconds);
   state.currentTime = this.formatDateTimeLocal(base);
-  this._playbackSeekInFlight = true;
+  state.pendingTime = state.currentTime;
   this._lastPlaybackSeekAt = now;
+  this.render();
 
   this._pushTraceDebug("playback", "info", "playback_seek_adjusted", direction < 0 ? "Playback seek moved backward" : "Playback seek moved forward", {
     direction: Number(direction || 1),
     seconds,
     requested_time: state.currentTime,
+    playback_active: playbackActive,
     snapshot: this._getDebugCameraSnapshot(),
   }, traceId, "frontend");
+
+  if (!playbackActive || !camAttrs.playback_uri) {
+    return;
+  }
+
+  this._playbackSeekInFlight = true;
 
   if (state.paused) {
     this._playbackSeekInFlight = false;
@@ -6624,10 +6644,16 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     this.querySelector("#hik-playback-resume-overlay")?.addEventListener("click", () => this.resumePlayback());
     this._bindPlaybackSeekHold(this.querySelector("#hik-playback-back-overlay"), -1);
     this._bindPlaybackSeekHold(this.querySelector("#hik-playback-forward-overlay"), 1);
-    this.querySelector("#hik-playback-time-overlay")?.addEventListener("change", (ev) => {
+    const playbackTimeOverlay = this.querySelector("#hik-playback-time-overlay");
+    const updatePlaybackTimeOverlay = (ev) => {
       const state = this.getPlaybackState();
-      state.currentTime = ev.target.value;
-    });
+      const nextValue = this.formatDateTimeLocal(ev?.target?.value || state.currentTime || this.formatDateTimeLocal()) || "";
+      state.currentTime = nextValue;
+      state.pendingTime = nextValue;
+      if (ev?.type === "change") this.render();
+    };
+    playbackTimeOverlay?.addEventListener("input", updatePlaybackTimeOverlay);
+    playbackTimeOverlay?.addEventListener("change", updatePlaybackTimeOverlay);
     this.querySelector("#hik-playback-preset-overlay")?.addEventListener("change", (ev) => {
       const state = this.getPlaybackState();
       state.preset = Number(ev.target.value || 1);
