@@ -118,7 +118,6 @@ _pushDebugEntry(entry) {
       title: "ha-hikvision-bridge-card",
       speed: 50,
       lens_step: 60,
-      repeat_ms: 200,
       ptz_duration: 450,
       lens_duration: 180,
       lens_stop_safeguard: false,
@@ -2488,14 +2487,21 @@ _toggleDebugFilter(kind, value) {
     if (this._repeatHandle) {
       clearInterval(this._repeatHandle);
       this._repeatHandle = null;
-      this._pushTraceDebug("ptz", "debug", "ptz_stop", "Stopped PTZ repeat loop", { ...context }, context?.trace_id || "", "frontend");
-    } else if (context?.trace_id) {
-      this._pushTraceDebug("ptz", "debug", "ptz_stop_noop", "PTZ stop requested with no active repeat loop", { ...context }, context?.trace_id || "", "frontend");
+    }
+    if (context?.trace_id) {
+      this._pushTraceDebug("ptz", "debug", "ptz_stop_noop", "PTZ stop requested but single-click mode is active", { ...context }, context?.trace_id || "", "frontend");
     }
   }
 
   getPTZDuration() {
-    return Math.max(100, Number(this.config.ptz_duration ?? this.config.repeat_ms ?? 450));
+    return Math.max(100, Number(this.config.ptz_duration ?? 450));
+  }
+
+  _resolvePtzAxis(value, speed) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric) || numeric === 0) return 0;
+    if (Math.abs(numeric) <= 1) return Math.sign(numeric) * speed;
+    return Math.max(-100, Math.min(100, numeric));
   }
 
   getLensDuration() {
@@ -2570,30 +2576,31 @@ _toggleDebugFilter(kind, value) {
 
   startMove(pan, tilt, context = {}) {
     const traceId = context?.trace_id || this._nextDebugTraceId("ptz");
-    this.stopMove({ ...context, trace_id: traceId, action: context?.action || "pre_start" });
-    this._pushTraceDebug("ptz", "info", "ptz_move_requested", "Starting PTZ move", { pan, tilt, duration: this.getPTZDuration(), repeat_ms: this.config.repeat_ms, source: context?.source || "panel" }, traceId, "frontend");
-    const run = () => {
-      const cam = this.selectedCamera;
-      if (!cam || !this._hass || !this.canPtz() || this._returningHome) {
-        this._pushTraceDebug("ptz", "warn", "ptz_move_tick_skipped", "Skipped PTZ move tick", { pan, tilt, can_ptz: this.canPtz(), returning_home: !!this._returningHome }, traceId, "frontend");
-        return;
-      }
-      this._pushTraceDebug("service", "debug", "ptz_service_requested", "Calling PTZ service", { pan, tilt, duration: this.getPTZDuration(), source: context?.source || "panel" }, traceId, "frontend");
-      this._hass.callService("ha_hikvision_bridge", "ptz", {
-        channel: String(cam.channel),
-        pan,
-        tilt,
-        duration: this.getPTZDuration(),
-      });
-      this.updatePTZState({
-        pan: pan > 0 ? 1 : pan < 0 ? -1 : 0,
-        tilt: tilt > 0 ? 1 : tilt < 0 ? -1 : 0,
-      });
-      this.render();
-    };
-    run();
-    this._repeatHandle = setInterval(run, Number(this.config.repeat_ms ?? 200));
-    this._pushTraceDebug("ptz", "debug", "ptz_repeat_armed", "Armed PTZ repeat loop", { repeat_ms: Number(this.config.repeat_ms ?? 200) }, traceId, "frontend");
+    const cam = this.selectedCamera;
+    if (!cam || !this._hass || !this.canPtz() || this._returningHome) {
+      this._pushTraceDebug("ptz", "warn", "ptz_move_skipped", "Skipped PTZ move", { pan, tilt, can_ptz: this.canPtz(), returning_home: !!this._returningHome }, traceId, "frontend");
+      return;
+    }
+
+    const speed = Math.max(1, Math.min(100, Number(this.config.speed || 50)));
+    const panValue = this._resolvePtzAxis(pan, speed);
+    const tiltValue = this._resolvePtzAxis(tilt, speed);
+    const duration = this.getPTZDuration();
+
+    this._pushTraceDebug("ptz", "info", "ptz_move_requested", "Sending PTZ single-click move", { pan: panValue, tilt: tiltValue, speed, duration, source: context?.source || "panel" }, traceId, "frontend");
+    this._pushTraceDebug("service", "debug", "ptz_service_requested", "Calling PTZ service", { pan: panValue, tilt: tiltValue, speed, duration, source: context?.source || "panel" }, traceId, "frontend");
+    this._hass.callService("ha_hikvision_bridge", "ptz", {
+      channel: String(cam.channel),
+      pan: panValue,
+      tilt: tiltValue,
+      duration,
+      speed,
+    });
+    this.updatePTZState({
+      pan: panValue > 0 ? 1 : panValue < 0 ? -1 : 0,
+      tilt: tiltValue > 0 ? 1 : tiltValue < 0 ? -1 : 0,
+    });
+    this.render();
   }
 
   callLens(service, direction = 0, context = {}) {
@@ -6268,14 +6275,12 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       const pan = Number(btn.dataset.pan);
       const tilt = Number(btn.dataset.tilt);
       const source = "overlay";
-      const start = (ev) => { ev.preventDefault(); this.startMove(pan, tilt, { source }); };
-      const stop = () => this.stopMove({ source });
-      btn.addEventListener("mousedown", start);
-      btn.addEventListener("mouseup", stop);
-      btn.addEventListener("mouseleave", stop);
-      btn.addEventListener("touchstart", start, { passive: false });
-      btn.addEventListener("touchend", stop);
-      btn.addEventListener("touchcancel", stop);
+      const click = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.startMove(pan, tilt, { source });
+      };
+      btn.addEventListener("click", click);
     });
 
     this.querySelector("#hik-center-overlay")?.addEventListener("click", () => this.handleCenter());
@@ -6442,9 +6447,8 @@ class HikvisionPTZCardEditor extends HTMLElement {
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "ha-hikvision-bridge-card"}" style="width:100%;"></div>
-          <div><label>Default speed</label><br><input id="speed" type="number" min="1" max="100" value="${this.config.speed || 50}" style="width:100%;"></div>
-          <div><label>Repeat interval (ms)</label><br><input id="repeat_ms" type="number" min="100" value="${this.config.repeat_ms ?? 200}" style="width:100%;"></div>
-          <div><label>PTZ pulse duration (ms)</label><br><input id="ptz_duration" type="number" min="100" value="${this.config.ptz_duration ?? 450}" style="width:100%;"></div>
+          <div><label>Default PTZ speed</label><br><input id="speed" type="number" min="1" max="100" value="${this.config.speed || 50}" style="width:100%;"></div>
+          <div><label>PTZ click duration (ms)</label><br><input id="ptz_duration" type="number" min="100" value="${this.config.ptz_duration ?? 450}" style="width:100%;"></div>
           <div><label>Focus / Iris step value</label><br><input id="lens_step" type="number" min="1" max="100" value="${this.config.lens_step || 60}" style="width:100%;"></div>
           <div><label>Lens pulse duration (ms)</label><br><input id="lens_duration" type="number" min="60" value="${this.config.lens_duration ?? 180}" style="width:100%;"></div>
           <div><label>Refocus zoom step</label><br><input id="refocus_step" type="number" min="1" max="100" value="${this.config.refocus_step ?? 40}" style="width:100%;"></div>
@@ -6522,7 +6526,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    ["title", "speed", "repeat_ms", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    ["title", "speed", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
@@ -6534,7 +6538,6 @@ class HikvisionPTZCardEditor extends HTMLElement {
       type: "custom:ha-hikvision-bridge-card",
       title: this.querySelector("#title").value,
       speed: Number(this.querySelector("#speed").value),
-      repeat_ms: Number(this.querySelector("#repeat_ms").value),
       ptz_duration: Number(this.querySelector("#ptz_duration").value),
       lens_step: Number(this.querySelector("#lens_step").value),
       lens_duration: Number(this.querySelector("#lens_duration").value),
