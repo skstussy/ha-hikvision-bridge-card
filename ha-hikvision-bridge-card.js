@@ -3631,6 +3631,62 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
     };
   }
 
+  _hasStorageEvidence(storage = {}, dvr = {}, camAttrs = {}) {
+    const attrs = [storage, dvr, camAttrs];
+    const hdds = this.pickValue(attrs, ["hdds"], null);
+    const diskCount = Number(this.pickValue(attrs, ["disk_count", "hdd_count", "drives", "storage_disks"], 0)) || 0;
+    const totalCapacity = Number(this.pickValue(attrs, ["total_capacity_mb", "storage_total", "total_capacity", "capacity_total", "hdd_total", "disk_total"], 0)) || 0;
+    const usedCapacity = Number(this.pickValue(attrs, ["used_capacity_mb", "storage_used", "used_capacity", "capacity_used", "hdd_used", "disk_used"], 0)) || 0;
+    const freeCapacity = Number(this.pickValue(attrs, ["free_capacity_mb", "storage_free", "free_capacity", "capacity_free", "hdd_free", "disk_free"], 0)) || 0;
+    return Boolean(
+      (Array.isArray(hdds) && hdds.length > 0)
+      || diskCount > 0
+      || totalCapacity > 0
+      || usedCapacity > 0
+      || freeCapacity > 0
+    );
+  }
+
+  _resolvePlaybackCapability(storage = {}, dvr = {}, camAttrs = {}) {
+    const caps = this._storageCapabilities(storage, dvr, camAttrs);
+    const storageDetected = this._hasStorageEvidence(storage, dvr, camAttrs) || caps.storagePresent === true;
+    const playbackUri = String(this.pickValue([camAttrs], ["playback_uri"], "") || "").trim();
+    const playbackActive = this.pickValue([camAttrs], ["playback_active"], null) === true;
+    const endpointSignalsMissing = caps.storageInfoSupported === false && caps.storageHddCapsSupported === false;
+
+    let supported = null;
+    let reason = "";
+
+    if (playbackActive || playbackUri) {
+      supported = true;
+    } else if (storageDetected) {
+      supported = true;
+    } else if (caps.playbackSupported === true) {
+      supported = true;
+    } else if (caps.storagePresent === false) {
+      supported = false;
+      reason = "No recording storage detected on this recorder.";
+    } else if (caps.playbackSupported === false) {
+      supported = false;
+      reason = "Playback is reported as unavailable by the recorder.";
+    } else if (endpointSignalsMissing) {
+      supported = false;
+      reason = "The recorder does not expose supported playback or storage capability signals.";
+    } else {
+      supported = false;
+      reason = "Playback availability could not be confirmed.";
+    }
+
+    if (supported === true) reason = "";
+    return {
+      supported,
+      reason,
+      storageDetected,
+      explicitFalseRecovered: caps.playbackSupported === false && storageDetected,
+      controlsEnabled: supported === true && this.config.show_playback_panel !== false,
+    };
+  }
+
   _canShowStoragePanel(storage = {}, dvr = {}, camAttrs = {}) {
     const caps = this._storageCapabilities(storage, dvr, camAttrs);
     if (caps.storagePresent === false) return false;
@@ -3639,11 +3695,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
   }
 
   _canShowPlaybackControls(storage = {}, dvr = {}, camAttrs = {}) {
-    const caps = this._storageCapabilities(storage, dvr, camAttrs);
-    if (caps.playbackSupported !== null) return caps.playbackSupported;
-    if (caps.storagePresent === false) return false;
-    if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) return false;
-    return this.config.show_playback_panel !== false;
+    return this._resolvePlaybackCapability(storage, dvr, camAttrs).controlsEnabled;
   }
 
   _buildCapabilityNotices(camAttrs = {}, storage = {}, dvr = {}) {
@@ -3659,17 +3711,6 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
         icon: 'mdi:axis-arrow-lock',
         title: 'PTZ controls hidden',
         text: ptzUnsupportedReason || `This build only enables PTZ when the recorder exposes a compatible PTZCtrlProxy momentary endpoint.`,
-      });
-    }
-
-    if (caps.playbackSupported === false) {
-      let reason = 'Recording playback is unavailable on this device.';
-      if (caps.storagePresent === false) reason = 'Recording playback is hidden because no recording storage is detected.';
-      else if (caps.storageInfoSupported === false && caps.storageHddCapsSupported === false) reason = 'Recording playback is hidden because the NVR does not expose supported storage capability endpoints.';
-      notices.push({
-        icon: 'mdi:play-box-multiple-outline',
-        title: 'Playback hidden',
-        text: reason,
       });
     }
 
@@ -4981,6 +5022,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       audio_console: "Audio Console Panel",
       stream_info: "Stream Info Panel",
       camera_info: "Camera Info Panel",
+      playback: "Playback Controls",
       debug: "Debug Dashboard Panel",
     };
     const panelName = panelNames[String(panelKey || "")] || "Panel";
@@ -4995,10 +5037,32 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const streamInfoEnabled = options.streamInfoEnabled === true;
     const cameraInfoEnabled = options.cameraInfoEnabled === true;
     const debugEnabled = options.debugEnabled === true;
+    const playbackEnabled = options.playbackEnabled === true;
+    const playbackSupported = options.playbackSupported === true;
+    const playbackIndicatorVisible = options.playbackIndicatorVisible === true;
+    const playbackReason = String(options.playbackReason || "").trim();
+    const playbackActive = options.playbackActive === true;
     return `
       <div class="hik-status-pills-overlay" aria-label="Status pills">
         <span class="hik-version-chip" title="Frontend version">FE ${this.escapeHtml(versionInfo.frontend || "-")}</span>
         <span class="hik-version-chip" title="Backend version">BE ${this.escapeHtml(versionInfo.backend || "-")}</span>
+        ${playbackEnabled ? `
+          <button
+            type="button"
+            class="hik-status-pill-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}"
+            id="hik-overlay-playback-toggle"
+            title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}"
+            aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}"
+          >
+            <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
+            <span>${playbackActive ? "Playback" : "Playback"}</span>
+          </button>
+        ` : playbackIndicatorVisible ? `
+          <span class="hik-status-pill-indicator is-muted" title="${this.escapeHtml(playbackReason || "Recording playback is unavailable")}">
+            <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
+            <span>No Playback</span>
+          </span>
+        ` : ""}
         ${streamModeEnabled ? `
           <button
             type="button"
@@ -5117,8 +5181,9 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const dvr = dvrEntity?.attributes || {};
     const storage = storageEntity?.attributes || {};
     const storageSummary = this.summarizeStorage(storage, storageEntity);
+    const playbackCapability = this._resolvePlaybackCapability(storage, dvr, camAttrs);
     const storagePanelSupported = this._canShowStoragePanel(storage, dvr, camAttrs);
-    const playbackPanelSupported = this._canShowPlaybackControls(storage, dvr, camAttrs);
+    const playbackPanelSupported = playbackCapability.controlsEnabled;
     const online = onlineEntity ? onlineEntity.state === "on" : camAttrs.online !== false;
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
@@ -5651,9 +5716,12 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-grid-tile-footer.focused { font-size:12px; }
           .hik-video-media-topcenter { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:center; justify-content:center; z-index:2; padding:0 8px; }          .hik-video-media-topright { position:absolute; top:0; right:0; display:flex; gap:var(--hik-ov-gap); pointer-events:auto; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; max-width:min(72%, 900px); z-index:2; }
           .hik-status-pills-overlay { position:absolute; top:0; left:0; display:flex; gap:6px; align-items:center; pointer-events:auto; z-index:2; flex-wrap:wrap; max-width:min(88%, 760px); }
-          .hik-version-chip, .hik-status-pill-btn { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
-          .hik-status-pill-btn { min-height:22px; padding:0 9px; gap:4px; cursor:pointer; pointer-events:auto; }
-          .hik-status-pill-btn ha-icon { --mdc-icon-size:12px; color:var(--hik-accent); }
+          .hik-version-chip, .hik-status-pill-btn, .hik-status-pill-indicator { min-height:18px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; letter-spacing:0.04em; line-height:1; color:rgba(255,255,255,0.92); background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.10); backdrop-filter:blur(10px) saturate(1.1); box-shadow:0 6px 16px rgba(0,0,0,0.20); white-space:nowrap; }
+          .hik-status-pill-btn, .hik-status-pill-indicator { min-height:22px; padding:0 9px; gap:4px; }
+          .hik-status-pill-btn { cursor:pointer; pointer-events:auto; }
+          .hik-status-pill-btn ha-icon, .hik-status-pill-indicator ha-icon { --mdc-icon-size:12px; color:var(--hik-accent); }
+          .hik-status-pill-indicator { pointer-events:auto; }
+          .hik-status-pill-indicator.is-muted { color:rgba(255,255,255,0.72); border-color:rgba(255,255,255,0.08); background:rgba(10,14,20,0.28); }
           .hik-status-pill-btn.is-active { background:rgba(120,16,16,0.46); border-color:rgba(255,80,80,0.30); box-shadow:0 0 0 1px rgba(255,80,80,0.12), 0 6px 16px rgba(0,0,0,0.20); }
           .hik-status-pill-btn:hover:not(:disabled) { background:rgba(14,20,28,0.48); transform:translateY(-1px); }
           .hik-status-pill-btn:active:not(:disabled) { transform:scale(0.97); }
@@ -5990,6 +6058,11 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                   ${this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
                     ${this._renderStatusPillsOverlay(versionInfo, {
+                      playbackEnabled: playbackCapability.controlsEnabled,
+                      playbackSupported: playbackCapability.supported === true,
+                      playbackIndicatorVisible: playbackCapability.supported === false,
+                      playbackReason: playbackCapability.reason,
+                      playbackActive,
                       streamModeEnabled: this.config.show_stream_mode_info !== false,
                       storageEnabled: storagePanelSupported,
                       alarmEnabled: this.config.show_alarm_dashboard !== false,
@@ -6053,11 +6126,6 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
-                      ` : ""}
-                      ${playbackPanelSupported ? `
-                      <button type="button" class="hik-video-media-btn ${this._playbackOverlayVisible || playbackActive ? "is-active" : ""}" id="hik-playback-overlay-toggle" title="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}" aria-label="${this._playbackOverlayVisible || playbackActive ? "Hide playback controls" : "Show playback controls"}">
-                        <ha-icon icon="mdi:play-box-multiple-outline"></ha-icon>
-                      </button>
                       ` : ""}
                     </div>
                     ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
@@ -6444,7 +6512,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       this._controlsVisible = !this._controlsVisible;
       this.render();
     };
-    this.querySelector("#hik-playback-overlay-toggle")?.addEventListener("click", (ev) => {
+    this.querySelector("#hik-overlay-playback-toggle")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       this._playbackOverlayVisible = !this._playbackOverlayVisible;
       this.render();
