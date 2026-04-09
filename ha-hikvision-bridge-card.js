@@ -3479,7 +3479,7 @@ renderAlarmOverlay(globalRefs, dvr = {}, refs = {}, storageSummary = {}) {
       notices.push({
         icon: 'mdi:axis-arrow-lock',
         title: 'PTZ controls hidden',
-        text: ptzUnsupportedReason || `This build only enables PTZ when the device exposes a compatible ${ptzImplementation || ptzCapabilityMode || 'supported'} mode.`,
+        text: ptzUnsupportedReason || `This build only enables PTZ when the recorder exposes a compatible PTZCtrlProxy momentary endpoint.`,
       });
     }
 
@@ -4949,7 +4949,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const rtspUrl = camAttrs.rtsp_url || stream.rtsp_url || info.rtsp_url || "";
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
     const entityName = refs.camera || "-";
-    const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_proxy_supported ? "proxy" : (camAttrs.ptz_direct_supported ? "direct" : "none"));
+    const ptzMode = camAttrs.ptz_control_method || info.ptz_control_method || (camAttrs.ptz_supported ? "proxy" : "none");
     const ptzCapabilityMode = camAttrs.ptz_capability_mode || info.ptz_capability_mode || "-";
     const ptzImplementation = camAttrs.ptz_implementation || info.ptz_implementation || "-";
     const ptzUnsupportedReason = camAttrs.ptz_unsupported_reason || info.ptz_unsupported_reason || "";
