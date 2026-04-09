@@ -6139,13 +6139,13 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                 </div>
                 ${this.config.show_status_pills !== false ? `
                 <div class="hik-status-row">
-                  <span class="hik-pill hik-pill-static hik-pill-animate"><ha-icon icon="mdi:numeric-${cam.channel}-circle-outline"></ha-icon>Channel ${cam.channel}</span>
-                  <span class="hik-pill hik-pill-static hik-pill-animate ${online ? "good is-live" : "warn is-alert"}"><ha-icon icon="${online ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>${online ? "Connected" : "Offline"}</span>
-                  <span class="hik-pill hik-pill-static hik-pill-animate ${online ? "good is-live" : "warn is-alert"}"><ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>${online ? "Online" : "Offline"}</span>
-                  <span class="hik-pill hik-pill-static hik-pill-animate ${ptz ? "good is-live" : "warn is-alert"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>${ptz ? `PTZ ${this.escapeHtml(ptzMode)}` : "No PTZ"}</span>
-                  <span class="hik-pill hik-pill-static hik-pill-animate primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
-                  ${this.isDebugEnabled() ? `<span class="hik-pill hik-pill-static hik-pill-animate warn is-alert" title="Debug mode is enabled and may reduce browser performance"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</span>` : ""}
-                  ${cameraAlarmBadges.map((badge) => `<span class="hik-pill hik-pill-static hik-pill-animate ${badge.level || "warn"} ${badge.level === "warn" ? "is-alert" : "is-live"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
+                  <span class="hik-pill hik-pill-static"><ha-icon icon="mdi:numeric-${cam.channel}-circle-outline"></ha-icon>Channel ${cam.channel}</span>
+                  <span class="hik-pill hik-pill-static ${online ? "good" : "warn"}"><ha-icon icon="${online ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>${online ? "Connected" : "Offline"}</span>
+                  <span class="hik-pill hik-pill-static ${online ? "good" : "warn"}"><ha-icon icon="${online ? "mdi:lan-connect" : "mdi:lan-disconnect"}"></ha-icon>${online ? "Online" : "Offline"}</span>
+                  <span class="hik-pill hik-pill-static ${ptz ? "good" : "warn"}"><ha-icon icon="mdi:axis-arrow"></ha-icon>${ptz ? `PTZ ${this.escapeHtml(ptzMode)}` : "No PTZ"}</span>
+                  <span class="hik-pill hik-pill-static primary"><ha-icon icon="mdi:video-outline"></ha-icon>Video ${this.escapeHtml(videoMethod)}</span>
+                  ${this.isDebugEnabled() && this._debugOverlayOpen === true ? `<span class="hik-pill hik-pill-static warn" title="Debug mode is enabled and may reduce browser performance"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</span>` : ""}
+                  ${cameraAlarmBadges.map((badge) => `<span class="hik-pill hik-pill-static ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
                 ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
               </div>
@@ -6603,6 +6603,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
     this.render();
+    this._restoreEditorViewState();
   }
 
   _escapeAttr(value) {
@@ -6667,6 +6668,60 @@ class HikvisionPTZCardEditor extends HTMLElement {
   _stringValue(id, fallback = "") {
     const element = this.querySelector(`#${id}`);
     return element ? String(element.value ?? "") : fallback;
+  }
+
+  _captureEditorViewState(sourceId = "") {
+    const activeElement = sourceId ? this.querySelector(`#${sourceId}`) : this.querySelector(":focus");
+    this._editorViewState = {
+      sourceId: activeElement?.id || sourceId || "",
+      selectionStart: typeof activeElement?.selectionStart === "number" ? activeElement.selectionStart : null,
+      selectionEnd: typeof activeElement?.selectionEnd === "number" ? activeElement.selectionEnd : null,
+      windowScrollX: window.scrollX || 0,
+      windowScrollY: window.scrollY || 0,
+    };
+  }
+
+  _restoreEditorViewState() {
+    const state = this._editorViewState;
+    if (!state) return;
+    this._editorViewState = null;
+    requestAnimationFrame(() => {
+      try {
+        window.scrollTo(state.windowScrollX || 0, state.windowScrollY || 0);
+      } catch (err) {}
+      if (!state.sourceId) return;
+      const element = this.querySelector(`#${state.sourceId}`);
+      if (!element || typeof element.focus !== "function") return;
+      try {
+        element.focus({ preventScroll: true });
+      } catch (err) {
+        try { element.focus(); } catch (focusErr) {}
+      }
+      if (typeof state.selectionStart === "number" && typeof element.setSelectionRange === "function") {
+        try {
+          element.setSelectionRange(state.selectionStart, state.selectionEnd ?? state.selectionStart);
+        } catch (err) {}
+      }
+    });
+  }
+
+  _bindConfigField(id) {
+    const element = this.querySelector(`#${id}`);
+    if (!element) return;
+    const tag = String(element.tagName || "").toLowerCase();
+    const type = String(element.type || "").toLowerCase();
+    const commit = () => {
+      this._captureEditorViewState(id);
+      this._valueChanged();
+    };
+    element.addEventListener("change", commit);
+    if (type === "checkbox" || tag === "select") return;
+    element.addEventListener("blur", commit);
+    element.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      commit();
+    });
   }
 
   render() {
@@ -6818,8 +6873,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       "debug_enabled",
       "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay",
     ].forEach((id) => {
-      this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
-      this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
+      this._bindConfigField(id);
     });
   }
 
