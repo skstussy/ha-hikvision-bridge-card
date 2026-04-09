@@ -172,7 +172,7 @@ type: custom:hikvision-ptz-card
 title: Front Yard PTZ
 auto_discover: true
 speed: 50
-repeat_ms: 350
+repeat_ms: 200
 controls_mode: always
 accent_color: "#03a9f4"
 panel_tint: 8
