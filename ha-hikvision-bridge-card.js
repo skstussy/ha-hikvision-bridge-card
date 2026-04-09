@@ -6425,14 +6425,75 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
   }
 }
 
+
 class HikvisionPTZCardEditor extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
     this.render();
   }
 
-  rowCheckbox(id, label, checked) {
-    return `<label style="display:flex;align-items:center;gap:8px;"><input id="${id}" type="checkbox" ${checked ? "checked" : ""}> ${label}</label>`;
+  _escapeAttr(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  rowCheckbox(id, label, checked, help = "") {
+    return `
+      <label for="${id}" style="display:grid;gap:4px;padding:10px 12px;border:1px solid var(--divider-color);border-radius:12px;background:var(--card-background-color);cursor:pointer;">
+        <span style="display:flex;align-items:center;gap:10px;">
+          <input id="${id}" type="checkbox" ${checked ? "checked" : ""}>
+          <span style="font-weight:600;">${label}</span>
+        </span>
+        ${help ? `<span style="font-size:12px;line-height:1.45;color:var(--secondary-text-color);padding-left:28px;">${help}</span>` : ""}
+      </label>
+    `;
+  }
+
+  _section(title, description, content, columns = "repeat(auto-fit, minmax(240px, 1fr))") {
+    return `
+      <section style="display:grid;gap:12px;padding:16px;border:1px solid var(--divider-color);border-radius:16px;background:var(--ha-card-background, var(--card-background-color));box-shadow:var(--ha-card-box-shadow, none);">
+        <div style="display:grid;gap:4px;">
+          <div style="font-size:16px;font-weight:700;">${title}</div>
+          ${description ? `<div style="font-size:13px;line-height:1.45;color:var(--secondary-text-color);">${description}</div>` : ""}
+        </div>
+        <div style="display:grid;grid-template-columns:${columns};gap:12px;">
+          ${content}
+        </div>
+      </section>
+    `;
+  }
+
+  _field(id, label, control, help = "") {
+    return `
+      <label for="${id}" style="display:grid;gap:6px;padding:12px;border:1px solid var(--divider-color);border-radius:12px;background:var(--card-background-color);">
+        <span style="font-weight:600;">${label}</span>
+        ${control}
+        ${help ? `<span style="font-size:12px;line-height:1.45;color:var(--secondary-text-color);">${help}</span>` : ""}
+      </label>
+    `;
+  }
+
+  _numberValue(id, fallback, options = {}) {
+    const element = this.querySelector(`#${id}`);
+    if (!element) return fallback;
+    let value = Number(element.value);
+    if (!Number.isFinite(value)) value = fallback;
+    if (Number.isFinite(options.min)) value = Math.max(options.min, value);
+    if (Number.isFinite(options.max)) value = Math.min(options.max, value);
+    return value;
+  }
+
+  _checkedValue(id, fallback = false) {
+    const element = this.querySelector(`#${id}`);
+    return element ? Boolean(element.checked) : fallback;
+  }
+
+  _stringValue(id, fallback = "") {
+    const element = this.querySelector(`#${id}`);
+    return element ? String(element.value ?? "") : fallback;
   }
 
   render() {
@@ -6441,143 +6502,209 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
+    const speed = Number(this.config.speed ?? 50);
+    const ptzDuration = Number(this.config.ptz_duration ?? 450);
+    const lensStep = Number(this.config.lens_step ?? 60);
+    const lensDuration = Number(this.config.lens_duration ?? 180);
+    const refocusStep = Number(this.config.refocus_step ?? 40);
+    const title = this._escapeAttr(this.config.title || "ha-hikvision-bridge-card");
+    const playbackPresets = (this.config.playback_presets || [1, 5, 10, 30, 60, 300, 600, 3600]).join(", ");
+
     this.innerHTML = `
       <div style="padding:16px;display:grid;gap:16px;">
-        <div style="font-size:18px;font-weight:700;">HA Hikvision Bridge Card Editor</div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div><label>Title</label><br><input id="title" type="text" value="${this.config.title || "ha-hikvision-bridge-card"}" style="width:100%;"></div>
-          <div><label>Default PTZ speed</label><br><input id="speed" type="number" min="1" max="100" value="${this.config.speed || 50}" style="width:100%;"></div>
-          <div><label>PTZ click duration (ms)</label><br><input id="ptz_duration" type="number" min="100" value="${this.config.ptz_duration ?? 450}" style="width:100%;"></div>
-          <div><label>Focus / Iris step value</label><br><input id="lens_step" type="number" min="1" max="100" value="${this.config.lens_step || 60}" style="width:100%;"></div>
-          <div><label>Lens pulse duration (ms)</label><br><input id="lens_duration" type="number" min="60" value="${this.config.lens_duration ?? 180}" style="width:100%;"></div>
-          <div><label>Refocus zoom step</label><br><input id="refocus_step" type="number" min="1" max="100" value="${this.config.refocus_step ?? 40}" style="width:100%;"></div>
-          <div>
-            <label>Video mode</label><br>
-            <select id="video_mode" style="width:100%;">
-              <option value="webrtc_direct" ${videoMode === "webrtc_direct" ? "selected" : ""}>WebRTC direct RTSP</option>
-              <option value="webrtc" ${videoMode === "webrtc" ? "selected" : ""}>WebRTC ISAPI RTSP</option>
-              <option value="rtsp_direct" ${videoMode === "rtsp_direct" ? "selected" : ""}>RTSP direct</option>
-              <option value="rtsp" ${videoMode === "rtsp" ? "selected" : ""}>RTSP ISAPI</option>
-              <option value="snapshot" ${videoMode === "snapshot" ? "selected" : ""}>Snapshot</option>
-            </select>
+        <div style="display:grid;gap:4px;">
+          <div style="font-size:18px;font-weight:700;">HA Hikvision Bridge Card Editor</div>
+          <div style="font-size:13px;line-height:1.45;color:var(--secondary-text-color);">
+            Grouped settings for cleaner tuning. For momentary PTZ, adjust <strong>Speed</strong> and <strong>Duration</strong> together:
+            increase speed for stronger movement, shorten duration for smaller and more precise nudges.
           </div>
-          <div>
-            <label>Controls display</label><br>
-            <select id="controls_mode" style="width:100%;">
-              <option value="always" ${controlsMode === "always" ? "selected" : ""}>Always show controls</option>
-              <option value="toggle" ${controlsMode === "toggle" ? "selected" : ""}>Show only when button is pressed</option>
-            </select>
-          </div>
-          <div><label>Accent color</label><br><input id="accent_color" type="color" value="${accent.startsWith('#') ? accent : '#03a9f4'}" style="width:100%;height:38px;"></div>
-          <div><label>Panel tint strength</label><br><input id="panel_tint" type="range" min="0" max="24" step="1" value="${tint}" style="width:100%;"></div>
-          <div>
-            <label>PTZ speed slider placement</label><br>
-            <select id="speed_position" style="width:100%;">
-              <option value="left" ${speedPosition === "left" ? "selected" : ""}>Left of PTZ stick</option>
-              <option value="right" ${speedPosition === "right" ? "selected" : ""}>Right of PTZ stick</option>
-              <option value="above" ${speedPosition === "above" ? "selected" : ""}>Above PTZ stick</option>
-              <option value="below" ${speedPosition === "below" ? "selected" : ""}>Below PTZ stick</option>
-            </select>
-          </div>
-          <div><label>Playback jump presets (seconds)</label><br><input id="playback_presets" type="text" value="${(this.config.playback_presets || [1, 5, 10, 30, 60, 300, 600, 3600]).join(", ")}" style="width:100%;" placeholder="1, 5, 10, 30, 60"></div>
-          <div>
-            <label>Talk mode</label><br>
-            <select id="talk_mode" style="width:100%;">
-              <option value="hold" ${String(this.config.talk_mode || "hold") === "hold" ? "selected" : ""}>Hold to talk</option>
-              <option value="toggle" ${String(this.config.talk_mode || "hold") === "toggle" ? "selected" : ""}>Toggle talk</option>
-            </select>
-          </div>
-          <div><label>Speaker default</label><br><select id="speaker_default" style="width:100%;"><option value="off" ${this.config.speaker_default ? "" : "selected"}>Off</option><option value="on" ${this.config.speaker_default ? "selected" : ""}>On</option></select></div>
-          <div><label>Default volume (%)</label><br><input id="volume_default" type="number" min="0" max="100" value="${Number(this.config.volume_default ?? 100)}" style="width:100%;"></div>
-          <div><label>Audio boost (%)</label><br><input id="audio_boost" type="number" min="100" max="300" step="10" value="${Number(this.config.audio_boost ?? 100)}" style="width:100%;"></div>
         </div>
 
-        <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
-          <div style="font-weight:600;">Display options</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            ${this.rowCheckbox("auto_discover", "Auto-discover connected cameras", this.config.auto_discover !== false)}
+        ${this._section(
+          "General",
+          "Core card presentation and interaction defaults.",
+          `
+            ${this._field("title", "Title", `<input id="title" type="text" value="${title}" style="width:100%;">`, "Shown in the card header when the title bar is enabled.")}
+            ${this._field("video_mode", "Video mode", `
+              <select id="video_mode" style="width:100%;">
+                <option value="webrtc_direct" ${videoMode === "webrtc_direct" ? "selected" : ""}>WebRTC direct RTSP</option>
+                <option value="webrtc" ${videoMode === "webrtc" ? "selected" : ""}>WebRTC ISAPI RTSP</option>
+                <option value="rtsp_direct" ${videoMode === "rtsp_direct" ? "selected" : ""}>RTSP direct</option>
+                <option value="rtsp" ${videoMode === "rtsp" ? "selected" : ""}>RTSP ISAPI</option>
+                <option value="snapshot" ${videoMode === "snapshot" ? "selected" : ""}>Snapshot</option>
+              </select>
+            `, "Choose the preferred stream transport for live video.")}
+            ${this._field("controls_mode", "Controls display", `
+              <select id="controls_mode" style="width:100%;">
+                <option value="always" ${controlsMode === "always" ? "selected" : ""}>Always show controls</option>
+                <option value="toggle" ${controlsMode === "toggle" ? "selected" : ""}>Show only when button is pressed</option>
+              </select>
+            `, "Keeps the control console visible or collapses it until requested.")}
+            ${this._field("accent_color", "Accent color", `<input id="accent_color" type="color" value="${accent.startsWith("#") ? accent : "#03a9f4"}" style="width:100%;height:38px;">`, "Applied to highlighted controls and active accents.")}
+            ${this._field("panel_tint", "Panel tint strength", `<input id="panel_tint" type="range" min="0" max="24" step="1" value="${tint}" style="width:100%;">`, "Higher values add more overlay tint to the control surfaces.")}
+          `
+        )}
+
+        ${this._section(
+          "PTZ controls",
+          "Momentary PTZ tuning for NVR/DVR proxy control. Use shorter duration for finer taps. Raise speed only if motion is too weak.",
+          `
+            ${this._field("speed", "PTZ speed", `<input id="speed" type="number" min="1" max="100" value="${speed}" style="width:100%;">`, "Used as the pan/tilt strength for momentary PTZ. Start around 50-70. Increase it when each pulse feels too weak.")}
+            ${this._field("ptz_duration", "PTZ duration (ms)", `<input id="ptz_duration" type="number" min="100" value="${ptzDuration}" style="width:100%;">`, "How long each PTZ pulse runs. Lower values such as 120-180 ms give tighter control. Higher values move farther per tap.")}
+            ${this._field("speed_position", "PTZ speed slider placement", `
+              <select id="speed_position" style="width:100%;">
+                <option value="left" ${speedPosition === "left" ? "selected" : ""}>Left of PTZ stick</option>
+                <option value="right" ${speedPosition === "right" ? "selected" : ""}>Right of PTZ stick</option>
+                <option value="above" ${speedPosition === "above" ? "selected" : ""}>Above PTZ stick</option>
+                <option value="below" ${speedPosition === "below" ? "selected" : ""}>Below PTZ stick</option>
+              </select>
+            `, "Changes where the live PTZ speed slider is shown in the card.")}
+          `
+        )}
+
+        ${this._section(
+          "Lens and focus",
+          "Pulse settings for zoom, focus, iris, and refocus helpers.",
+          `
+            ${this._field("lens_step", "Focus / Iris step value", `<input id="lens_step" type="number" min="1" max="100" value="${lensStep}" style="width:100%;">`, "Strength used for focus and iris pulse controls.")}
+            ${this._field("lens_duration", "Lens pulse duration (ms)", `<input id="lens_duration" type="number" min="60" value="${lensDuration}" style="width:100%;">`, "How long each zoom/focus/iris pulse runs.")}
+            ${this._field("refocus_step", "Refocus zoom step", `<input id="refocus_step" type="number" min="1" max="100" value="${refocusStep}" style="width:100%;">`, "Zoom amount used by the refocus helper sequence.")}
+            ${this.rowCheckbox("lens_stop_safeguard", "Enable lens stop safeguard", this.config.lens_stop_safeguard === true, "Sends extra lens stop protection where supported.")}
+          `,
+          "repeat(auto-fit, minmax(240px, 1fr))"
+        )}
+
+        ${this._section(
+          "Playback and audio",
+          "Playback shortcuts and two-way audio defaults.",
+          `
+            ${this._field("playback_presets", "Playback jump presets (seconds)", `<input id="playback_presets" type="text" value="${this._escapeAttr(playbackPresets)}" style="width:100%;" placeholder="1, 5, 10, 30, 60">`, "Comma-separated jump buttons for playback seek controls.")}
+            ${this._field("talk_mode", "Talk mode", `
+              <select id="talk_mode" style="width:100%;">
+                <option value="hold" ${String(this.config.talk_mode || "hold") === "hold" ? "selected" : ""}>Hold to talk</option>
+                <option value="toggle" ${String(this.config.talk_mode || "hold") === "toggle" ? "selected" : ""}>Toggle talk</option>
+              </select>
+            `, "Defines how the talk button behaves in the live card.")}
+            ${this._field("speaker_default", "Speaker default", `
+              <select id="speaker_default" style="width:100%;">
+                <option value="off" ${this.config.speaker_default ? "" : "selected"}>Off</option>
+                <option value="on" ${this.config.speaker_default ? "selected" : ""}>On</option>
+              </select>
+            `, "Initial speaker state when the card loads.")}
+            ${this._field("volume_default", "Default volume (%)", `<input id="volume_default" type="number" min="0" max="100" value="${Number(this.config.volume_default ?? 100)}" style="width:100%;">`, "Initial playback volume for the card audio controls.")}
+            ${this._field("audio_boost", "Audio boost (%)", `<input id="audio_boost" type="number" min="100" max="300" step="10" value="${Number(this.config.audio_boost ?? 100)}" style="width:100%;">`, "Extra gain applied by the card audio pipeline.")}
+            ${this.rowCheckbox("show_playback_panel", "Show playback panel", this.config.show_playback_panel !== false, "Displays playback controls when the backend supports playback.")}
+            ${this.rowCheckbox("show_audio_controls", "Show audio console", this.config.show_audio_controls !== false, "Displays audio controls such as volume, speaker, and talk.")}
+            ${this.rowCheckbox("mute_during_talk", "Mute speaker while talking", this.config.mute_during_talk !== false, "Prevents feedback by muting playback while talk is active.")}
+          `
+        )}
+
+        ${this._section(
+          "Display",
+          "Visibility and discovery options for the card interface.",
+          `
+            ${this.rowCheckbox("auto_discover", "Auto-discover connected cameras", this.config.auto_discover !== false, "Automatically populate cameras exposed by the bridge.")}
             ${this.rowCheckbox("show_title", "Show title bar", this.config.show_title !== false)}
             ${this.rowCheckbox("show_camera_chips", "Show camera selector chips", this.config.show_camera_chips !== false)}
             ${this.rowCheckbox("show_status_pills", "Show status pills", this.config.show_status_pills !== false)}
-            ${this.rowCheckbox("show_camera_info", "Show Camera Info", this.config.show_camera_info !== false)}
-            ${this.rowCheckbox("show_stream_info", "Show Stream Info", this.config.show_stream_info !== false)}
-            ${this.rowCheckbox("show_stream_mode_info", "Show Stream Mode Info", this.config.show_stream_mode_info !== false)}
-            ${this.rowCheckbox("show_alarm_dashboard", "Show Alarm Dashboard", this.config.show_alarm_dashboard !== false)}
+            ${this.rowCheckbox("show_camera_info", "Show camera info", this.config.show_camera_info !== false)}
+            ${this.rowCheckbox("show_stream_info", "Show stream info", this.config.show_stream_info !== false)}
+            ${this.rowCheckbox("show_stream_mode_info", "Show stream mode info", this.config.show_stream_mode_info !== false)}
+            ${this.rowCheckbox("show_alarm_dashboard", "Show alarm dashboard", this.config.show_alarm_dashboard !== false)}
             ${this.rowCheckbox("show_controls", "Show control console by default", this.config.show_controls !== false)}
-            ${this.rowCheckbox("show_dvr_info", "Show NVR System Info", this.config.show_dvr_info !== false)}
-            ${this.rowCheckbox("show_storage_info", "Show NVR Storage Info", this.config.show_storage_info !== false)}
+            ${this.rowCheckbox("show_dvr_info", "Show NVR system info", this.config.show_dvr_info !== false)}
+            ${this.rowCheckbox("show_storage_info", "Show NVR storage info", this.config.show_storage_info !== false)}
             ${this.rowCheckbox("show_position_info", "Show PTZ position tracker", this.config.show_position_info !== false)}
-            ${this.rowCheckbox("lens_stop_safeguard", "Enable lens stop safeguard", this.config.lens_stop_safeguard === true)}
             ${this.rowCheckbox("debug_enabled", "Show unified debug dashboard", this.config.debug?.enabled === true)}
-            ${this.rowCheckbox("show_audio_controls", "Show audio console", this.config.show_audio_controls !== false)}
-            ${this.rowCheckbox("mute_during_talk", "Mute speaker while talking", this.config.mute_during_talk !== false)}
-          </div>
-        </div>
+          `
+        )}
 
-        <div style="padding:12px;border:1px solid var(--divider-color);border-radius:12px;display:grid;gap:10px;">
-          <div style="font-weight:600;">Virtual PTZ tracking</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
-            <div><label>Max pan steps</label><br><input id="max_pan_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5}" style="width:100%;"></div>
-            <div><label>Max tilt steps</label><br><input id="max_tilt_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.tilt ?? this.config.max_tilt_steps ?? 5}" style="width:100%;"></div>
-            <div><label>Max zoom steps</label><br><input id="max_zoom_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.zoom ?? this.config.max_zoom_steps ?? 5}" style="width:100%;"></div>
-            <div><label>Return step delay (ms)</label><br><input id="return_step_delay" type="number" min="0" max="2000" value="${this.config.return_step_delay ?? 150}" style="width:100%;"></div>
-          </div>
-        </div>
+        ${this._section(
+          "Virtual PTZ tracking",
+          "Visual step tracking for return-to-center and on-screen PTZ state.",
+          `
+            ${this._field("max_pan_steps", "Max pan steps", `<input id="max_pan_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5}" style="width:100%;">`, "Maximum tracked pan distance in virtual PTZ steps.")}
+            ${this._field("max_tilt_steps", "Max tilt steps", `<input id="max_tilt_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.tilt ?? this.config.max_tilt_steps ?? 5}" style="width:100%;">`, "Maximum tracked tilt distance in virtual PTZ steps.")}
+            ${this._field("max_zoom_steps", "Max zoom steps", `<input id="max_zoom_steps" type="number" min="1" max="20" value="${this.config.ptz_steps?.zoom ?? this.config.max_zoom_steps ?? 5}" style="width:100%;">`, "Maximum tracked zoom distance in virtual PTZ steps.")}
+            ${this._field("return_step_delay", "Return step delay (ms)", `<input id="return_step_delay" type="number" min="0" max="2000" value="${this.config.return_step_delay ?? 150}" style="width:100%;">`, "Delay between each step when returning the virtual PTZ state to center.")}
+          `
+        )}
       </div>`;
 
-    ["title", "speed", "ptz_duration", "lens_step", "lens_duration", "refocus_step", "video_mode", "controls_mode", "accent_color", "panel_tint", "speed_position", "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost", "auto_discover", "show_title", "show_camera_chips", "show_status_pills", "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard", "show_controls", "show_dvr_info", "show_storage_info", "show_position_info", "lens_stop_safeguard", "show_playback_panel", "debug_enabled", "show_audio_controls", "mute_during_talk", "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay"].forEach((id) => {
+    [
+      "title", "video_mode", "controls_mode", "accent_color", "panel_tint",
+      "speed", "ptz_duration", "speed_position",
+      "lens_step", "lens_duration", "refocus_step", "lens_stop_safeguard",
+      "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost",
+      "show_playback_panel", "show_audio_controls", "mute_during_talk",
+      "auto_discover", "show_title", "show_camera_chips", "show_status_pills",
+      "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard",
+      "show_controls", "show_dvr_info", "show_storage_info", "show_position_info",
+      "debug_enabled",
+      "max_pan_steps", "max_tilt_steps", "max_zoom_steps", "return_step_delay",
+    ].forEach((id) => {
       this.querySelector(`#${id}`)?.addEventListener("change", () => this._valueChanged());
       this.querySelector(`#${id}`)?.addEventListener("input", () => this._valueChanged());
     });
   }
 
   _valueChanged() {
+    const playbackPresets = this._stringValue("playback_presets", "")
+      .split(",")
+      .map((value) => Number(String(value).trim()))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
     const config = {
       ...this.config,
       type: "custom:ha-hikvision-bridge-card",
-      title: this.querySelector("#title").value,
-      speed: Number(this.querySelector("#speed").value),
-      ptz_duration: Number(this.querySelector("#ptz_duration").value),
-      lens_step: Number(this.querySelector("#lens_step").value),
-      lens_duration: Number(this.querySelector("#lens_duration").value),
-      refocus_step: Number(this.querySelector("#refocus_step").value),
-      video_mode: this.querySelector("#video_mode").value,
-      controls_mode: this.querySelector("#controls_mode").value,
-      accent_color: this.querySelector("#accent_color").value,
-      panel_tint: Number(this.querySelector("#panel_tint").value),
-      speed_position: this.querySelector("#speed_position").value,
-      playback_presets: String(this.querySelector("#playback_presets").value || "").split(",").map((value) => Number(String(value).trim())).filter((value) => Number.isFinite(value) && value > 0),
-      auto_discover: this.querySelector("#auto_discover").checked,
-      show_title: this.querySelector("#show_title").checked,
-      show_camera_chips: this.querySelector("#show_camera_chips").checked,
-      show_status_pills: this.querySelector("#show_status_pills").checked,
-      show_camera_info: this.querySelector("#show_camera_info").checked,
-      show_stream_info: this.querySelector("#show_stream_info").checked,
-      show_stream_mode_info: this.querySelector("#show_stream_mode_info").checked,
-      show_alarm_dashboard: this.querySelector("#show_alarm_dashboard").checked,
-      show_controls: this.querySelector("#show_controls").checked,
-      show_dvr_info: this.querySelector("#show_dvr_info").checked,
-      show_storage_info: this.querySelector("#show_storage_info").checked,
-      show_position_info: this.querySelector("#show_position_info").checked,
-      lens_stop_safeguard: this.querySelector("#lens_stop_safeguard").checked,
-      show_playback_panel: this.querySelector("#show_playback_panel").checked,
-      show_audio_controls: this.querySelector("#show_audio_controls").checked,
+      title: this._stringValue("title", this.config.title || "ha-hikvision-bridge-card"),
+      speed: this._numberValue("speed", Number(this.config.speed ?? 50), { min: 1, max: 100 }),
+      ptz_duration: this._numberValue("ptz_duration", Number(this.config.ptz_duration ?? 450), { min: 100 }),
+      lens_step: this._numberValue("lens_step", Number(this.config.lens_step ?? 60), { min: 1, max: 100 }),
+      lens_duration: this._numberValue("lens_duration", Number(this.config.lens_duration ?? 180), { min: 60 }),
+      refocus_step: this._numberValue("refocus_step", Number(this.config.refocus_step ?? 40), { min: 1, max: 100 }),
+      video_mode: this._stringValue("video_mode", this.config.video_mode || "rtsp_direct"),
+      controls_mode: this._stringValue("controls_mode", this.config.controls_mode || "always"),
+      accent_color: this._stringValue("accent_color", this.config.accent_color || "#03a9f4"),
+      panel_tint: this._numberValue("panel_tint", Number(this.config.panel_tint ?? 8), { min: 0, max: 24 }),
+      speed_position: this._stringValue("speed_position", this.config.speed_position || "right"),
+      playback_presets: playbackPresets.length ? playbackPresets : [1, 5, 10, 30, 60, 300, 600, 3600],
+      talk_mode: this._stringValue("talk_mode", this.config.talk_mode || "hold"),
+      speaker_default: this._stringValue("speaker_default", this.config.speaker_default ? "on" : "off") === "on",
+      volume_default: this._numberValue("volume_default", Number(this.config.volume_default ?? 100), { min: 0, max: 100 }),
+      audio_boost: this._numberValue("audio_boost", Number(this.config.audio_boost ?? 100), { min: 100, max: 300 }),
+      auto_discover: this._checkedValue("auto_discover", this.config.auto_discover !== false),
+      show_title: this._checkedValue("show_title", this.config.show_title !== false),
+      show_camera_chips: this._checkedValue("show_camera_chips", this.config.show_camera_chips !== false),
+      show_status_pills: this._checkedValue("show_status_pills", this.config.show_status_pills !== false),
+      show_camera_info: this._checkedValue("show_camera_info", this.config.show_camera_info !== false),
+      show_stream_info: this._checkedValue("show_stream_info", this.config.show_stream_info !== false),
+      show_stream_mode_info: this._checkedValue("show_stream_mode_info", this.config.show_stream_mode_info !== false),
+      show_alarm_dashboard: this._checkedValue("show_alarm_dashboard", this.config.show_alarm_dashboard !== false),
+      show_controls: this._checkedValue("show_controls", this.config.show_controls !== false),
+      show_dvr_info: this._checkedValue("show_dvr_info", this.config.show_dvr_info !== false),
+      show_storage_info: this._checkedValue("show_storage_info", this.config.show_storage_info !== false),
+      show_position_info: this._checkedValue("show_position_info", this.config.show_position_info !== false),
+      lens_stop_safeguard: this._checkedValue("lens_stop_safeguard", this.config.lens_stop_safeguard === true),
+      show_playback_panel: this._checkedValue("show_playback_panel", this.config.show_playback_panel !== false),
+      show_audio_controls: this._checkedValue("show_audio_controls", this.config.show_audio_controls !== false),
       debug: {
         ...(this.config.debug || {}),
-        enabled: this.querySelector("#debug_enabled").checked,
+        enabled: this._checkedValue("debug_enabled", this.config.debug?.enabled === true),
       },
-      mute_during_talk: this.querySelector("#mute_during_talk").checked,
+      mute_during_talk: this._checkedValue("mute_during_talk", this.config.mute_during_talk !== false),
       ptz_steps: {
-        pan: Number(this.querySelector("#max_pan_steps").value),
-        tilt: Number(this.querySelector("#max_tilt_steps").value),
-        zoom: Number(this.querySelector("#max_zoom_steps").value),
+        pan: this._numberValue("max_pan_steps", Number(this.config.ptz_steps?.pan ?? this.config.max_pan_steps ?? 5), { min: 1, max: 20 }),
+        tilt: this._numberValue("max_tilt_steps", Number(this.config.ptz_steps?.tilt ?? this.config.max_tilt_steps ?? 5), { min: 1, max: 20 }),
+        zoom: this._numberValue("max_zoom_steps", Number(this.config.ptz_steps?.zoom ?? this.config.max_zoom_steps ?? 5), { min: 1, max: 20 }),
       },
-      return_step_delay: Number(this.querySelector("#return_step_delay").value),
+      return_step_delay: this._numberValue("return_step_delay", Number(this.config.return_step_delay ?? 150), { min: 0, max: 2000 }),
     };
+
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
   }
 }
+
 
 if (!customElements.get("ha-hikvision-bridge-card")) customElements.define("ha-hikvision-bridge-card", HikvisionPTZCard);
 
