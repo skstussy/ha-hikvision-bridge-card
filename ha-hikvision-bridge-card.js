@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.17 */
+/* UI Split Patch 2.6.20 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.24";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.25";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -126,6 +126,7 @@ _pushDebugEntry(entry) {
       auto_discover: true,
       video_mode: "rtsp_direct",
       controls_mode: "always",
+      card_mode: "full",
       accent_color: "var(--primary-color)",
       panel_tint: "8",
       show_camera_info: true,
@@ -162,6 +163,7 @@ _pushDebugEntry(entry) {
       },
       ...config,
     };
+    this.config.card_mode = this._normalizeCardMode(this.config.card_mode);
     this.config.debug = this._normalizeDebugConfig(this.config);
     this.selected = 0;
     this._repeatHandle = null;
@@ -550,6 +552,14 @@ _pushDebugEntry(entry) {
       categories: Array.from(new Set(categories)),
       levels: Array.from(new Set(levels)),
     };
+  }
+
+  _normalizeCardMode(value = "full") {
+    return String(value || "full").trim().toLowerCase() === "mini" ? "mini" : "full";
+  }
+
+  _isMiniCardMode() {
+    return this._normalizeCardMode(this.config?.card_mode) === "mini";
   }
 
   isDebugEnabled() {
@@ -2003,6 +2013,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   getCardSize() {
+    if (this._isMiniCardMode()) return 6;
     return this._controlsVisible ? 11 : 9;
   }
 
@@ -2012,6 +2023,7 @@ _toggleDebugFilter(kind, value) {
       title: "ha-hikvision-bridge-card",
       auto_discover: true,
       controls_mode: "always",
+      card_mode: "full",
       speed: 50,
       ptz_duration: 450,
       ptz_repeat_delay: 0,
@@ -5231,6 +5243,8 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const accent = this.normalizeColor(this.config.accent_color);
     const panelTint = Math.max(0, Math.min(24, Number(this.config.panel_tint || 8)));
     const controlsMode = this.config.controls_mode || "always";
+    const cardMode = this._normalizeCardMode(this.config.card_mode);
+    const isMiniMode = cardMode === "mini";
     const speedPlacement = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const padLayoutClass = ["left", "right"].includes(speedPlacement) ? "pad-layout-side" : "pad-layout-stack";
     const infoCards = [];
@@ -5267,6 +5281,23 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     if (!storagePanelSupported && this._videoAccessoryPanel === "storage") this._videoAccessoryPanel = "";
     if (!playbackPanelSupported) this._playbackOverlayVisible = false;
     if (this.config.debug?.enabled !== true) this._debugOverlayOpen = false;
+    if (isMiniMode) {
+      this._videoAccessoryPanel = "";
+      this._debugOverlayOpen = false;
+      this._playbackOverlayVisible = false;
+      this._gridMode = false;
+    }
+
+    const showTitleBar = !isMiniMode && this.config.show_title !== false;
+    const showCameraChips = !isMiniMode && this.config.show_camera_chips !== false;
+    const showStatusPillsRow = !isMiniMode && this.config.show_status_pills !== false;
+    const showStatusPillsOverlay = !isMiniMode;
+    const showCameraCycleControls = !isMiniMode;
+    const showCapabilityBanner = !isMiniMode;
+    const showAccessoryOverlays = !isMiniMode;
+    const showBottomSelectors = !isMiniMode;
+    const showPlaybackPanel = !isMiniMode && playbackPanelSupported && (this._playbackOverlayVisible || playbackActive);
+    const showInfoGrid = !isMiniMode && infoCards.length > 0;
 
     const streamModeOverlayContent = this.config.show_stream_mode_info !== false && this._videoAccessoryPanel === "stream_mode" ? `
       <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream mode info overlay">
@@ -5602,7 +5633,25 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; } .hik-video-accessory-wrap { margin-top:14px; } .hik-video-accessory-wrap > .hik-panel { margin:0; } .hik-video-accessory-panel { width:100%; }
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
-          .hik-video-block { --hik-ov-btn: clamp(30px, 8cqw, 56px); --hik-ov-radius: clamp(10px, 2.6cqw, 18px); --hik-ov-gap: clamp(5px, 1.8cqw, 10px); --hik-ov-icon: clamp(13px, 3.2cqw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); container-type:inline-size; }          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
+          .hik-video-block { --hik-ov-btn: clamp(30px, 8cqw, 56px); --hik-ov-radius: clamp(10px, 2.6cqw, 18px); --hik-ov-gap: clamp(5px, 1.8cqw, 10px); --hik-ov-icon: clamp(13px, 3.2cqw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); container-type:inline-size; }
+          .hik-video-block.is-mini { --hik-ov-btn: clamp(28px, 11cqw, 42px); --hik-ov-radius: clamp(9px, 2.8cqw, 14px); --hik-ov-gap: clamp(4px, 1.6cqw, 8px); --hik-ov-icon: clamp(12px, 3.6cqw, 18px); min-height:180px; border-radius:18px; }
+          .hik-wrap.is-mini { padding:10px; }
+          .hik-video-block.is-mini .hik-video-ptz-overlay { opacity:1; transform:none; }
+          .hik-video-block.is-mini .hik-video-ptz-surface { inset:10px; }
+          .hik-video-block.is-mini .hik-video-media-overlay { inset:10px; }
+          .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:clamp(34px, 12cqw, 42px); max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
+          .hik-video-block.is-mini .hik-video-media-topcenter,
+          .hik-video-block.is-mini .hik-video-media-bottom,
+          .hik-video-block.is-mini .hik-status-pills-overlay,
+          .hik-video-block.is-mini .hik-capability-banner { display:none !important; }
+          .hik-video-block.is-mini .hik-video-media-btn { min-width:clamp(30px, 10cqw, 38px); height:clamp(30px, 10cqw, 38px); border-radius:clamp(9px, 2.8cqw, 12px); }
+          .hik-video-block.is-mini .hik-video-media-btn ha-icon { --mdc-icon-size:clamp(14px, 4.2cqw, 18px); }
+          .hik-video-block.is-mini .hik-video-ptz-top { display:none; }
+          .hik-video-block.is-mini .hik-video-ptz-pad { left:0; bottom:0; }
+          .hik-video-block.is-mini .hik-video-zoom-rail { right:0; top:auto; bottom:0; transform:none; width:clamp(34px, 10cqw, 48px); padding:clamp(4px, 1.4cqw, 8px) clamp(4px, 1.1cqw, 6px); }
+          .hik-video-block.is-mini .hik-video-zoom-track { height:clamp(40px, 14cqw, 72px); }
+          .hik-video-block.is-mini .hik-video-refocus-btn { display:none; }
+          .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
           #hikvision-video-host > * { width:100%; height:100%; display:block; }
           .hik-video-ptz-overlay { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transform:scale(0.985); transition:opacity 180ms ease, transform 180ms ease; }
@@ -5750,6 +5799,8 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-video-media-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
           .hik-video-media-btn:active:not(:disabled) { transform:scale(0.95); }
           .hik-video-media-btn.live { box-shadow:0 0 0 1px rgba(255,80,80,0.45), 0 12px 26px rgba(0,0,0,0.28); background:rgba(80,16,16,0.46); }
+          .hik-video-media-btn.is-enabled { background:rgba(16,32,24,0.52); border-color:rgba(92,214,140,0.34); box-shadow:0 0 0 1px rgba(92,214,140,0.16), 0 12px 26px rgba(0,0,0,0.28); }
+          .hik-video-media-btn.is-talking { background:rgba(52,20,24,0.56); border-color:rgba(255,110,110,0.34); box-shadow:0 0 0 1px rgba(255,110,110,0.16), 0 12px 26px rgba(0,0,0,0.28); }
           .hik-video-media-btn ha-icon { --mdc-icon-size:18px; color:var(--hik-accent); }
           .hik-video-audio-chip { min-height:clamp(34px, 3.8vw, 42px); padding:0 clamp(8px, 0.9vw, 12px) 0 clamp(8px, 0.8vw, 10px); border:none; border-radius:clamp(10px, 1vw, 14px); display:inline-flex; align-items:center; gap:clamp(6px, 0.8vw, 10px); cursor:pointer; color:var(--primary-text-color); background:rgba(10,14,20,0.38); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px) saturate(1.15); box-shadow:0 12px 26px rgba(0,0,0,0.28); transition:transform 120ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
           .hik-video-audio-chip:hover:not(:disabled) { transform:translateY(-1px); background:rgba(14,20,28,0.48); }
@@ -6000,8 +6051,8 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
             .hik-video-playback-grid { grid-template-columns:1fr; } .hik-video-playback-ticker { flex-direction:column; align-items:flex-start; }
           }
         </style>
-        <div class="hik-wrap">
-          ${this.config.show_title !== false ? `
+        <div class="hik-wrap ${isMiniMode ? "is-mini" : ""}">
+          ${showTitleBar ? `
           <div class="hik-titlebar">
             <div>
               <div class="hik-title">${this.escapeHtml(this.config.title)}</div>
@@ -6009,7 +6060,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
             </div>
           </div>` : ""}
 
-          ${this.config.show_camera_chips !== false ? `
+          ${showCameraChips ? `
           <div class="hik-chip-row">
             ${cameras.map((c, i) => `
               <button type="button" class="hik-chip ${i === this.selected ? "active" : ""}" data-cam="${i}">
@@ -6022,11 +6073,12 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"}">
+                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"} ${isMiniMode ? "is-mini" : ""}">
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"} ${(this._videoAccessoryPanel === "alarm" || this._videoAccessoryPanel === "storage") ? "is-suppressed" : ""}" aria-label="PTZ video overlay">
                       <div class="hik-video-ptz-surface">
+                        ${isMiniMode ? "" : `
                         <div class="hik-video-ptz-top">
                           <div class="hik-video-ptz-chip">
                             <ha-icon icon="mdi:axis-arrow"></ha-icon>
@@ -6037,6 +6089,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                             <span>${speed}</span>
                           </div>
                         </div>
+                        `}
                         <div class="hik-video-ptz-pad">
                           <div></div>
                           <button type="button" class="hik-video-ptz-btn ptz-btn up" data-pan="0" data-tilt="1" ${(!online || this._returningHome) ? 'disabled' : ''} aria-label="Move up" title="Move up">
@@ -6068,16 +6121,18 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                             <ha-icon icon="mdi:magnify-minus"></ha-icon>
                           </button>
                         </div>
+                        ${isMiniMode ? "" : `
                         <button type="button" class="hik-video-refocus-btn" id="hik-refocus-overlay" ${(!online || this._returningHome) ? 'disabled' : ''}>
                           <ha-icon icon="mdi:image-auto-adjust"></ha-icon>
                           <span>Refocus</span>
                         </button>
+                        `}
                       </div>
                     </div>
                   ` : ""}
-                  ${this.renderPlaybackOverlay(playbackIndicator)}
+                  ${isMiniMode ? "" : this.renderPlaybackOverlay(playbackIndicator)}
                   <div class="hik-video-media-overlay">
-                    ${this._renderStatusPillsOverlay(versionInfo, {
+                    ${showStatusPillsOverlay ? this._renderStatusPillsOverlay(versionInfo, {
                       playbackEnabled: playbackCapability.controlsEnabled,
                       playbackSupported: playbackCapability.supported === true,
                       playbackIndicatorVisible: playbackCapability.supported === false,
@@ -6090,7 +6145,8 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                       streamInfoEnabled: this.config.show_stream_info !== false,
                       cameraInfoEnabled: this.config.show_camera_info !== false,
                       debugEnabled: this.config.debug?.enabled === true,
-                    })}
+                    }) : ""}
+                    ${showCameraCycleControls ? `
                     <div class="hik-video-media-topcenter">
                       <button type="button" class="hik-video-media-btn" id="hik-overlay-cycle-prev" title="Previous camera" aria-label="Previous camera">
                         <ha-icon icon="mdi:chevron-left"></ha-icon>
@@ -6102,8 +6158,21 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                         <ha-icon icon="mdi:chevron-right"></ha-icon>
                       </button>
                     </div>
-                    <div class="hik-video-media-topright">
-                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
+                    ` : ""}
+                    <div class="hik-video-media-topright ${isMiniMode ? "is-mini" : ""}">
+                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? (isMiniMode ? `
+                        <button type="button" class="hik-video-media-btn ${this._speakerEnabled ? "is-enabled" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
+                          <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                        </button>
+                        ${isWebRtc ? `
+                          <button type="button" class="hik-video-media-btn ${this._talkHoldActive || this._talkRequested ? "is-talking" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
+                            <ha-icon icon="mdi:microphone"></ha-icon>
+                          </button>
+                        ` : ""}
+                        <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
+                          <ha-icon icon="mdi:fullscreen"></ha-icon>
+                        </button>
+                      ` : `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
                             <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
@@ -6146,16 +6215,16 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                         <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
                           <ha-icon icon="mdi:fullscreen"></ha-icon>
                         </button>
-                      ` : ""}
+                      `) : ""}
                     </div>
-                    ${this.renderCapabilityBanner(camAttrs, storage, dvr)}
-                    ${this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
-                    ${storageOverlayContent}
-                    ${audioConsoleOverlayContent}
-                    ${streamModeOverlayContent}
-                    ${streamInfoOverlayContent}
-                    ${cameraInfoOverlayContent}
-                    ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
+                    ${showCapabilityBanner ? this.renderCapabilityBanner(camAttrs, storage, dvr) : ""}
+                    ${showAccessoryOverlays && this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
+                    ${showAccessoryOverlays ? storageOverlayContent : ""}
+                    ${showAccessoryOverlays ? audioConsoleOverlayContent : ""}
+                    ${showAccessoryOverlays ? streamModeOverlayContent : ""}
+                    ${showAccessoryOverlays ? streamInfoOverlayContent : ""}
+                    ${showAccessoryOverlays ? cameraInfoOverlayContent : ""}
+                    ${showBottomSelectors && (!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? `
                       <div class="hik-video-media-bottom">
                         <label class="hik-video-mini-select">
                           <span>Mode</span>
@@ -6172,7 +6241,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
 
                       </div>
                     ` : ""}
-                    ${playbackPanelSupported && (this._playbackOverlayVisible || playbackActive) ? `
+                    ${showPlaybackPanel ? `
                       <div class="hik-video-playback-panel ${playbackActive ? "is-recording" : "is-standby"}">
                         <div class="hik-video-playback-head">
                           <div class="hik-video-playback-title">
@@ -6225,7 +6294,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                     ` : ""}
                   </div>
                 </div>
-                ${this.config.show_status_pills !== false ? `
+                ${showStatusPillsRow ? `
                 <div class="hik-status-row">
                   <span class="hik-pill hik-pill-static"><ha-icon icon="mdi:numeric-${cam.channel}-circle-outline"></ha-icon>Channel ${cam.channel}</span>
                   <span class="hik-pill hik-pill-static ${online ? "good" : "warn"}"><ha-icon icon="${online ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>${online ? "Connected" : "Offline"}</span>
@@ -6235,7 +6304,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                   ${this.isDebugEnabled() && this._debugOverlayOpen === true ? `<span class="hik-pill hik-pill-static warn" title="Debug mode is enabled and may reduce browser performance"><ha-icon icon="mdi:bug-outline"></ha-icon>Debug impacts performance</span>` : ""}
                   ${cameraAlarmBadges.map((badge) => `<span class="hik-pill hik-pill-static ${badge.level || "warn"}"><ha-icon icon="${badge.icon}"></ha-icon>${this.escapeHtml(badge.label)}</span>`).join("")}
                 </div>` : ""}
-                ${this._renderVideoAccessoryPanel(videoAccessoryPanelContent)}
+                ${showAccessoryOverlays ? this._renderVideoAccessoryPanel(videoAccessoryPanelContent) : ""}
               </div>
             </div>
 
@@ -6243,7 +6312,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
             </div>
           </div>
 
-          ${infoCards.length ? `<div class="hik-info-grid">${infoCards.join("")}</div>` : ""}
+          ${showInfoGrid ? `<div class="hik-info-grid">${infoCards.join("")}</div>` : ""}
         </div>
       </ha-card>
     `;
@@ -6821,6 +6890,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
   render() {
     const videoMode = this.config.video_mode || "rtsp_direct";
     const controlsMode = this.config.controls_mode || "always";
+    const cardMode = this.config.card_mode || "full";
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
@@ -6863,6 +6933,12 @@ class HikvisionPTZCardEditor extends HTMLElement {
                 <option value="toggle" ${controlsMode === "toggle" ? "selected" : ""}>Show only when button is pressed</option>
               </select>
             `, "Keeps the control console visible or collapses it until requested.")}
+            ${this._field("card_mode", "Card mode", `
+              <select id="card_mode" style="width:100%;">
+                <option value="full" ${cardMode === "full" ? "selected" : ""}>Full card</option>
+                <option value="mini" ${cardMode === "mini" ? "selected" : ""}>Mini card</option>
+              </select>
+            `, "Full keeps the complete dashboard overlays. Mini keeps only PTZ, zoom, speaker, mic, and fullscreen for compact dashboards.")}
             ${this._field("accent_color", "Accent color", `<input id="accent_color" type="color" value="${accent.startsWith("#") ? accent : "#03a9f4"}" style="width:100%;height:38px;">`, "Applied to highlighted controls and active accents.")}
             ${this._field("panel_tint", "Panel tint strength", `<input id="panel_tint" type="range" min="0" max="24" step="1" value="${tint}" style="width:100%;">`, "Higher values add more overlay tint to the control surfaces.")}
           `
@@ -6956,7 +7032,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       </div>`;
 
     [
-      "title", "video_mode", "controls_mode", "accent_color", "panel_tint",
+      "title", "video_mode", "controls_mode", "card_mode", "accent_color", "panel_tint",
       "speed", "ptz_duration", "ptz_repeat_delay", "speed_position",
       "lens_step", "lens_duration", "refocus_step", "lens_stop_safeguard",
       "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost",
@@ -6989,6 +7065,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       refocus_step: this._numberValue("refocus_step", Number(this.config.refocus_step ?? 40), { min: 1, max: 100 }),
       video_mode: this._stringValue("video_mode", this.config.video_mode || "rtsp_direct"),
       controls_mode: this._stringValue("controls_mode", this.config.controls_mode || "always"),
+      card_mode: this._stringValue("card_mode", this.config.card_mode || "full"),
       accent_color: this._stringValue("accent_color", this.config.accent_color || "#03a9f4"),
       panel_tint: this._numberValue("panel_tint", Number(this.config.panel_tint ?? 8), { min: 0, max: 24 }),
       speed_position: this._stringValue("speed_position", this.config.speed_position || "right"),
