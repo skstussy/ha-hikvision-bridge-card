@@ -1,6 +1,6 @@
 /* UI Split Patch 2.6.20 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.25";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.26";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -125,6 +125,8 @@ _pushDebugEntry(entry) {
       refocus_step: 40,
       auto_discover: true,
       video_mode: "rtsp_direct",
+      stream_mode: "auto",
+      stream_channel: "auto",
       controls_mode: "always",
       card_mode: "full",
       accent_color: "var(--primary-color)",
@@ -164,7 +166,12 @@ _pushDebugEntry(entry) {
       ...config,
     };
     this.config.card_mode = this._normalizeCardMode(this.config.card_mode);
+    this.config.stream_mode = this._normalizeConfiguredStreamMode(this.config.stream_mode);
+    this.config.stream_channel = this._normalizeConfiguredStreamChannel(this.config.stream_channel ?? this.config.stream_profile);
     this.config.debug = this._normalizeDebugConfig(this.config);
+    this._configuredStreamPreferenceState = this._configuredStreamPreferenceState || {};
+    this._miniWebRtcControlTimers = Array.isArray(this._miniWebRtcControlTimers) ? this._miniWebRtcControlTimers : [];
+    this._miniWebRtcControlSyncToken = Number.isFinite(this._miniWebRtcControlSyncToken) ? this._miniWebRtcControlSyncToken : 0;
     this.selected = 0;
     this._repeatHandle = null;
     this._ptzHoldActive = this._ptzHoldActive || false;
@@ -272,6 +279,8 @@ _pushDebugEntry(entry) {
 
   _cleanupVideoCard() {
     this._teardownWebRtcPtzBindings();
+    this._clearMiniWebRtcControlTimers();
+    this._teardownMiniWebRtcNativeControls();
     if (this._mediaSyncObserver) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
     }
@@ -315,10 +324,16 @@ _pushDebugEntry(entry) {
   }
 
   _buildWebRtcCardConfig(url, playbackMode = false) {
-    const style = [
-      ".ptz, .header, .menu, .toolbar, .controls { display:none !important; opacity:0 !important; pointer-events:none !important; }",
-      ":host { --controls-display:none; }",
-    ].join(" ");
+    const nativeMiniControls = this._isMiniCardMode() && !playbackMode;
+    const style = (nativeMiniControls
+      ? [
+          ".ptz, .header, .menu, .toolbar { display:none !important; opacity:0 !important; pointer-events:none !important; }",
+          ":host { --controls-display:flex; }",
+        ]
+      : [
+          ".ptz, .header, .menu, .toolbar, .controls { display:none !important; opacity:0 !important; pointer-events:none !important; }",
+          ":host { --controls-display:none; }",
+        ]).join(" ");
 
     const config = {
       type: "custom:webrtc-camera",
@@ -326,7 +341,7 @@ _pushDebugEntry(entry) {
       mode: "webrtc",
       media: "video,audio",
       muted: !this._speakerEnabled,
-      ui: false,
+      ui: nativeMiniControls,
       background: true,
       style,
     };
@@ -497,20 +512,25 @@ _pushDebugEntry(entry) {
     this._webRtcPtzLastBindAt = new Date().toISOString();
     if (!card) {
       this._webRtcPtzLastBindReason = "disabled:no_card";
+      this._teardownMiniWebRtcNativeControls(card);
       return;
     }
     if (playbackMode) {
       this._webRtcPtzLastBindReason = "disabled:playback_mode";
+      this._teardownMiniWebRtcNativeControls(card);
       return;
     }
     this._webRtcPtzLastBindReason = "disabled:custom_overlay";
     this._webRtcPtzLastCandidateCount = 0;
     this._webRtcPtzLastButtonCount = 0;
     this._webRtcPtzBound = true;
+    this._scheduleMiniWebRtcNativeControls(card, playbackMode);
   }
 
 
   _teardownWebRtcPtzBindings() {
+    this._clearMiniWebRtcControlTimers();
+    this._teardownMiniWebRtcNativeControls();
     if (typeof this._webRtcPtzCleanup === "function") {
       try { this._webRtcPtzCleanup(); } catch (err) {}
     }
@@ -523,13 +543,215 @@ _pushDebugEntry(entry) {
     const current = this._videoCardConfig;
     if (!card || !current || current.type !== "custom:webrtc-camera") return;
     const next = this._buildWebRtcCardConfig(current.url, playbackMode);
-    if (JSON.stringify(current) === JSON.stringify(next)) return;
+    if (JSON.stringify(current) === JSON.stringify(next)) {
+      this._scheduleMiniWebRtcNativeControls(card, playbackMode);
+      return;
+    }
     this._pushDebug("render", "info", "webrtc_card_config_sync", "Syncing WebRTC card config", { playback_mode: playbackMode, has_ptz: !!next.ptz }, "frontend");
     this._videoCardConfig = next;
     try {
       if (typeof card.setConfig === "function") card.setConfig(next);
       card.hass = this._hass;
     } catch (err) {}
+    this._scheduleMiniWebRtcNativeControls(card, playbackMode);
+  }
+
+  _clearMiniWebRtcControlTimers() {
+    if (!Array.isArray(this._miniWebRtcControlTimers)) {
+      this._miniWebRtcControlTimers = [];
+      return;
+    }
+    this._miniWebRtcControlTimers.forEach((timerId) => {
+      try { window.clearTimeout(timerId); } catch (err) {}
+    });
+    this._miniWebRtcControlTimers = [];
+  }
+
+  _findNestedSelector(root, selector) {
+    if (!root || !selector) return null;
+    try {
+      if (typeof root.querySelector === "function") {
+        const direct = root.querySelector(selector);
+        if (direct) return direct;
+      }
+    } catch (err) {}
+    const nodes = root.children ? Array.from(root.children) : [];
+    for (const node of nodes) {
+      if (node?.shadowRoot) {
+        const nestedShadow = this._findNestedSelector(node.shadowRoot, selector);
+        if (nestedShadow) return nestedShadow;
+      }
+      const nested = this._findNestedSelector(node, selector);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  _injectMiniWebRtcNativeControlStyle(card) {
+    const root = card?.shadowRoot;
+    if (!root || typeof root.querySelector !== "function") return;
+    if (root.querySelector("style[data-hik-mini-native-style]")) return;
+    const style = document.createElement("style");
+    style.setAttribute("data-hik-mini-native-style", "true");
+    style.textContent = `
+      .controls {
+        display:flex !important;
+        align-items:center;
+        justify-content:flex-end;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+      .hik-mini-native-controls {
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        pointer-events:auto;
+      }
+      .hik-mini-native-btn,
+      .hik-mini-native-select {
+        height:32px;
+        min-height:32px;
+        border-radius:16px;
+        border:1px solid rgba(255,255,255,0.18);
+        background:rgba(10,14,20,0.54);
+        color:var(--primary-text-color, #fff);
+        backdrop-filter:blur(10px);
+        box-shadow:0 8px 18px rgba(0,0,0,0.22);
+      }
+      .hik-mini-native-btn {
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:6px;
+        padding:0 12px;
+        cursor:pointer;
+        font:inherit;
+        font-size:12px;
+        font-weight:600;
+      }
+      .hik-mini-native-btn ha-icon,
+      .hik-mini-native-select ha-icon {
+        --mdc-icon-size:16px;
+      }
+      .hik-mini-native-btn.is-live {
+        border-color:color-mix(in srgb, var(--accent-color, #03a9f4) 60%, rgba(255,255,255,0.18));
+        background:color-mix(in srgb, var(--accent-color, #03a9f4) 24%, rgba(10,14,20,0.54));
+      }
+      .hik-mini-native-select {
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:0 10px;
+      }
+      .hik-mini-native-select select {
+        min-width:84px;
+        max-width:148px;
+        border:none;
+        outline:none;
+        background:transparent;
+        color:inherit;
+        font:inherit;
+        font-size:12px;
+        font-weight:600;
+      }
+      .hik-mini-native-select select option {
+        color:#111;
+      }
+    `;
+    root.appendChild(style);
+  }
+
+  _teardownMiniWebRtcNativeControls(card = this._videoCard) {
+    const root = card?.shadowRoot || card || null;
+    if (!root) return;
+    try {
+      root.querySelector(".hik-mini-native-controls")?.remove();
+    } catch (err) {}
+  }
+
+  _scheduleMiniWebRtcNativeControls(card = this._videoCard, playbackMode = false) {
+    this._clearMiniWebRtcControlTimers();
+    const syncToken = (this._miniWebRtcControlSyncToken || 0) + 1;
+    this._miniWebRtcControlSyncToken = syncToken;
+    const runner = () => {
+      if (this._miniWebRtcControlSyncToken !== syncToken) return;
+      this._syncMiniWebRtcNativeControls(card, playbackMode);
+    };
+    [0, 80, 220, 480].forEach((delay) => {
+      const timerId = window.setTimeout(runner, delay);
+      this._miniWebRtcControlTimers.push(timerId);
+    });
+  }
+
+  _syncMiniWebRtcNativeControls(card = this._videoCard, playbackMode = false) {
+    if (!card || playbackMode || !this._isMiniCardMode() || this._gridMode || this._videoCardConfig?.type !== "custom:webrtc-camera") {
+      this._teardownMiniWebRtcNativeControls(card);
+      return false;
+    }
+
+    const root = card.shadowRoot || card;
+    const controls = this._findNestedSelector(root, ".controls");
+    if (!controls) return false;
+    this._injectMiniWebRtcNativeControlStyle(card);
+
+    let host = controls.querySelector(".hik-mini-native-controls");
+    if (!host) {
+      host = document.createElement("div");
+      host.className = "hik-mini-native-controls";
+      controls.appendChild(host);
+    }
+
+    const cameras = this.cameras || [];
+    const currentIndex = Math.max(0, Math.min(Number(this.selected || 0), Math.max(0, cameras.length - 1)));
+    const refs = this.selectedCamera ? this.refsForChannel(this.selectedCamera.channel) : {};
+    const camAttrs = refs.camera ? (this.getEntity(refs.camera)?.attributes || {}) : {};
+    const streamAttrs = refs.stream ? (this.getEntity(refs.stream)?.attributes || {}) : {};
+    const activeStreamMode = String(camAttrs.stream_mode || streamAttrs.stream_mode || this.config.stream_mode || "rtsp_direct").toLowerCase();
+    const micAvailable = Boolean(this._preferredRtspUrl) && activeStreamMode !== "snapshot";
+    const talkActive = this._talkHoldActive || this._talkRequested;
+    const talkMode = this._getTalkMode();
+
+    host.innerHTML = `
+      ${micAvailable ? `
+        <button type="button" class="hik-mini-native-btn ${talkActive ? "is-live" : ""}" data-role="mic" title="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-label="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-pressed="${talkActive ? "true" : "false"}">
+          <ha-icon icon="mdi:microphone"></ha-icon>
+          <span>Mic</span>
+        </button>
+      ` : ""}
+      ${cameras.length > 1 ? `
+        <label class="hik-mini-native-select" title="Camera selection">
+          <ha-icon icon="mdi:cctv"></ha-icon>
+          <select data-role="camera-select" aria-label="Camera selection">
+            ${cameras.map((camera, index) => `<option value="${index}" ${index === currentIndex ? "selected" : ""}>${this.escapeHtml(camera.name || `Camera ${camera.channel}`)}</option>`).join("")}
+          </select>
+        </label>
+      ` : ""}
+    `;
+
+    const micButton = host.querySelector('[data-role="mic"]');
+    if (micButton) {
+      if (talkMode === "toggle") {
+        micButton.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this._handleTalkToggle(ev);
+        });
+      } else {
+        this._bindHoldTalkButton(micButton);
+      }
+    }
+
+    const cameraSelect = host.querySelector('[data-role="camera-select"]');
+    if (cameraSelect) {
+      cameraSelect.addEventListener("click", (ev) => ev.stopPropagation());
+      cameraSelect.addEventListener("change", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.selectCamera(ev.target?.value);
+      });
+    }
+
+    return true;
   }
 
   _computeStreamName() {
@@ -560,6 +782,25 @@ _pushDebugEntry(entry) {
 
   _isMiniCardMode() {
     return this._normalizeCardMode(this.config?.card_mode) === "mini";
+  }
+
+  _normalizeConfiguredStreamMode(value = "auto") {
+    const normalized = String(value ?? "auto").trim().toLowerCase();
+    return ["auto", "snapshot", "rtsp_direct", "webrtc_direct", "rtsp", "webrtc"].includes(normalized)
+      ? normalized
+      : "auto";
+  }
+
+  _normalizeConfiguredStreamChannel(value = "auto") {
+    const normalized = String(value ?? "auto").trim().toLowerCase();
+    if (["auto", "main", "sub"].includes(normalized)) return normalized;
+    if (["101", "201", "301", "mainstream", "main_stream", "main-stream"].includes(normalized)) return "main";
+    if (["102", "202", "302", "substream", "sub_stream", "sub-stream"].includes(normalized)) return "sub";
+    return "auto";
+  }
+
+  _getConfiguredStreamChannel() {
+    return this._normalizeConfiguredStreamChannel(this.config?.stream_channel ?? this.config?.stream_profile);
   }
 
   isDebugEnabled() {
@@ -2022,6 +2263,8 @@ _toggleDebugFilter(kind, value) {
       type: "custom:ha-hikvision-bridge-card",
       title: "ha-hikvision-bridge-card",
       auto_discover: true,
+      stream_mode: "auto",
+      stream_channel: "auto",
       controls_mode: "always",
       card_mode: "full",
       speed: 50,
@@ -4781,6 +5024,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       this._videoCard.hass = this._hass;
       this._syncWebRtcCardConfig(playbackMode);
       this._setupWebRtcPtzBindings(this._videoCard, playbackMode);
+      this._syncMiniWebRtcNativeControls(this._videoCard, playbackMode);
       if (this._videoCard.parentNode !== host) {
         host.innerHTML = "";
         host.appendChild(this._videoCard);
@@ -4808,6 +5052,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           this._videoCard = webrtcCard;
           this._videoCardConfig = webrtcConfig;
           this._setupWebRtcPtzBindings(webrtcCard, playbackMode);
+          this._scheduleMiniWebRtcNativeControls(webrtcCard, playbackMode);
           this._pushDebug("video", "info", "webrtc_card_ready", "WebRTC card created successfully", { playback_mode: playbackMode, url: preferredRtspUrl || "" }, "frontend");
           this._observeMediaElement(host);
           this._syncMediaAudio();
@@ -4851,6 +5096,48 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
       this._pushDebug("video", "error", "card_helpers_failed", "Unable to load card helpers", { error: String(err?.message || err || "unknown") }, "frontend");
       if (this._videoSignature === signature) host.innerHTML = `<div class="hik-empty">Unable to load card helpers</div>`;
     });
+  }
+
+  _applyConfiguredStreamPreferences(refs = {}, camAttrs = {}, streamAttrs = {}, playbackActive = false) {
+    if (!this._hass || playbackActive || !refs?.camera) return;
+    const desiredMode = this._normalizeConfiguredStreamMode(this.config?.stream_mode);
+    const desiredChannel = this._getConfiguredStreamChannel();
+    if (desiredMode === "auto" && desiredChannel === "auto") return;
+
+    const entityId = String(refs.camera || "");
+    if (!entityId) return;
+    const now = Date.now();
+    const state = this._configuredStreamPreferenceState || (this._configuredStreamPreferenceState = {});
+    const currentMode = String(camAttrs?.stream_mode || streamAttrs?.stream_mode || "").toLowerCase();
+    const currentChannel = this._normalizeConfiguredStreamChannel(camAttrs?.stream_profile || streamAttrs?.stream_profile || "");
+
+    const maybeApply = (kind, desired, current, service, payloadKey) => {
+      if (!desired || desired === "auto" || current === desired) {
+        delete state[`${entityId}:${kind}`];
+        return;
+      }
+      const entry = state[`${entityId}:${kind}`];
+      if (entry && entry.desired === desired && (now - Number(entry.requestedAt || 0)) < 8000) return;
+      state[`${entityId}:${kind}`] = { desired, requestedAt: now };
+      this._pushDebug("service", "info", `configured_${kind}_requested`, `Applying configured ${kind.replace(/_/g, " ")}`, {
+        entity_id: entityId,
+        desired,
+        current,
+      }, "frontend");
+      Promise.resolve(this._hass.callService("ha_hikvision_bridge", service, {
+        entity_id: entityId,
+        [payloadKey]: desired,
+      })).catch((err) => {
+        this._pushDebug("service", "warn", `configured_${kind}_failed`, `Configured ${kind.replace(/_/g, " ")} apply failed`, {
+          entity_id: entityId,
+          desired,
+          error: String(err?.message || err || "unknown"),
+        }, "frontend");
+      });
+    };
+
+    maybeApply("stream_mode", desiredMode, currentMode, "set_stream_mode", "mode");
+    maybeApply("stream_channel", desiredChannel, currentChannel, "set_stream_profile", "profile");
   }
 
   _cleanupGridVideoCards() {
@@ -5220,7 +5507,9 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const ptz = ptzEntity ? ptzEntity.state === "on" : camAttrs.ptz_supported === true;
     const presets = cam.presets || [];
     const speed = Number(this.config.speed || 50);
-    const streamProfile = String(camAttrs.stream_profile || stream.stream_profile || info.stream_profile || "main").toLowerCase();
+    const configuredStreamMode = this._normalizeConfiguredStreamMode(this.config.stream_mode);
+    const configuredStreamChannel = this._getConfiguredStreamChannel();
+    const streamProfile = this._normalizeConfiguredStreamChannel(camAttrs.stream_profile || stream.stream_profile || info.stream_profile || (configuredStreamChannel !== "auto" ? configuredStreamChannel : "main"));
     const streamProfileLabel = streamProfile === "sub" ? "Sub-stream" : "Main-stream";
     const rtspUrl = camAttrs.rtsp_url || stream.rtsp_url || info.rtsp_url || "";
     const directRtspUrl = camAttrs.rtsp_direct_url || stream.rtsp_direct_url || info.rtsp_direct_url || "";
@@ -5229,7 +5518,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const ptzCapabilityMode = camAttrs.ptz_capability_mode || info.ptz_capability_mode || "-";
     const ptzImplementation = camAttrs.ptz_implementation || info.ptz_implementation || "-";
     const ptzUnsupportedReason = camAttrs.ptz_unsupported_reason || info.ptz_unsupported_reason || "";
-    const streamMode = String(camAttrs.stream_mode || "rtsp_direct").toLowerCase();
+    const streamMode = String(camAttrs.stream_mode || stream.stream_mode || info.stream_mode || (configuredStreamMode !== "auto" ? configuredStreamMode : "rtsp_direct")).toLowerCase();
     const videoMethod = camAttrs.video_method || (streamMode === "snapshot" ? "Snapshot" : streamMode === "webrtc_direct" ? "WebRTC Direct" : streamMode === "webrtc" ? "WebRTC" : streamMode === "rtsp_direct" ? "RTSP Direct" : "RTSP");
     const playbackState = this.syncPlaybackState(camAttrs);
     const playbackPresets = this.getPlaybackPresets();
@@ -5237,7 +5526,8 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const playbackIndicator = this.formatPlaybackIndicatorState(camAttrs, playbackState);
     const versionInfo = this._resolveVersionInfo(info, camAttrs, dvr, storage);
     const playbackActive = playbackIndicator.playbackActive;
-    const isWebRtc = String(streamMode || "").toLowerCase() === "webrtc_direct";
+    this._applyConfiguredStreamPreferences(refs, camAttrs, stream, playbackActive);
+    const isWebRtc = this._isWebRtcMode(streamMode, playbackActive ? "playback" : "");
     const cameraAlarmBadges = this.collectCameraAlarmBadges(refs);
     const nvrAlarmBadges = this.collectNvrAlarmBadges(globalRefs, dvr);
     const accent = this.normalizeColor(this.config.accent_color);
@@ -5634,22 +5924,22 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
           .hik-video-block { --hik-ov-btn: clamp(30px, 8cqw, 56px); --hik-ov-radius: clamp(10px, 2.6cqw, 18px); --hik-ov-gap: clamp(5px, 1.8cqw, 10px); --hik-ov-icon: clamp(13px, 3.2cqw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); container-type:inline-size; }
-          .hik-video-block.is-mini { --hik-ov-btn: clamp(28px, 11cqw, 42px); --hik-ov-radius: clamp(9px, 2.8cqw, 14px); --hik-ov-gap: clamp(4px, 1.6cqw, 8px); --hik-ov-icon: clamp(12px, 3.6cqw, 18px); min-height:180px; border-radius:18px; }
+          .hik-video-block.is-mini { --hik-ov-btn: clamp(24px, 8.6cqw, 34px); --hik-ov-radius: clamp(8px, 2.4cqw, 12px); --hik-ov-gap: clamp(3px, 1.2cqw, 6px); --hik-ov-icon: clamp(11px, 3.1cqw, 16px); min-height:180px; border-radius:18px; }
           .hik-wrap.is-mini { padding:10px; }
           .hik-video-block.is-mini .hik-video-ptz-overlay { opacity:1; transform:none; }
-          .hik-video-block.is-mini .hik-video-ptz-surface { inset:10px; }
+          .hik-video-block.is-mini .hik-video-ptz-surface { inset:8px; }
           .hik-video-block.is-mini .hik-video-media-overlay { inset:10px; }
-          .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:clamp(34px, 12cqw, 42px); max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
+          .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:clamp(28px, 9cqw, 34px); max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
           .hik-video-block.is-mini .hik-video-media-topcenter,
           .hik-video-block.is-mini .hik-video-media-bottom,
           .hik-video-block.is-mini .hik-status-pills-overlay,
           .hik-video-block.is-mini .hik-capability-banner { display:none !important; }
-          .hik-video-block.is-mini .hik-video-media-btn { min-width:clamp(30px, 10cqw, 38px); height:clamp(30px, 10cqw, 38px); border-radius:clamp(9px, 2.8cqw, 12px); }
-          .hik-video-block.is-mini .hik-video-media-btn ha-icon { --mdc-icon-size:clamp(14px, 4.2cqw, 18px); }
+          .hik-video-block.is-mini .hik-video-media-btn { min-width:clamp(24px, 8cqw, 32px); height:clamp(24px, 8cqw, 32px); border-radius:clamp(8px, 2.2cqw, 10px); }
+          .hik-video-block.is-mini .hik-video-media-btn ha-icon { --mdc-icon-size:clamp(12px, 3.5cqw, 16px); }
           .hik-video-block.is-mini .hik-video-ptz-top { display:none; }
           .hik-video-block.is-mini .hik-video-ptz-pad { left:0; bottom:0; }
-          .hik-video-block.is-mini .hik-video-zoom-rail { right:0; top:auto; bottom:0; transform:none; width:clamp(34px, 10cqw, 48px); padding:clamp(4px, 1.4cqw, 8px) clamp(4px, 1.1cqw, 6px); }
-          .hik-video-block.is-mini .hik-video-zoom-track { height:clamp(40px, 14cqw, 72px); }
+          .hik-video-block.is-mini .hik-video-zoom-rail { right:0; top:auto; bottom:0; transform:none; width:clamp(28px, 8.6cqw, 38px); padding:clamp(3px, 1.1cqw, 5px) clamp(3px, 0.9cqw, 5px); }
+          .hik-video-block.is-mini .hik-video-zoom-track { height:clamp(32px, 11cqw, 54px); }
           .hik-video-block.is-mini .hik-video-refocus-btn { display:none; }
           .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
@@ -6160,19 +6450,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                     </div>
                     ` : ""}
                     <div class="hik-video-media-topright ${isMiniMode ? "is-mini" : ""}">
-                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? (isMiniMode ? `
-                        <button type="button" class="hik-video-media-btn ${this._speakerEnabled ? "is-enabled" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
-                          <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
-                        </button>
-                        ${isWebRtc ? `
-                          <button type="button" class="hik-video-media-btn ${this._talkHoldActive || this._talkRequested ? "is-talking" : ""}" id="hik-talk-hold-overlay" title="Hold to talk" aria-label="Hold to talk" aria-pressed="${this._talkHoldActive || this._talkRequested ? "true" : "false"}">
-                            <ha-icon icon="mdi:microphone"></ha-icon>
-                          </button>
-                        ` : ""}
-                        <button type="button" class="hik-video-media-btn" id="hik-overlay-fullscreen" title="Fullscreen" aria-label="Fullscreen">
-                          <ha-icon icon="mdi:fullscreen"></ha-icon>
-                        </button>
-                      ` : `
+                      ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible) ? (isMiniMode ? `` : `
                         <button type="button" class="hik-video-audio-chip ${this._speakerEnabled ? "is-live" : ""}" id="hik-speaker-toggle-overlay" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
                           <span class="hik-video-audio-icon">
                             <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
@@ -6889,6 +7167,8 @@ class HikvisionPTZCardEditor extends HTMLElement {
 
   render() {
     const videoMode = this.config.video_mode || "rtsp_direct";
+    const configuredStreamMode = this.config.stream_mode || "auto";
+    const configuredStreamChannel = this.config.stream_channel ?? this.config.stream_profile ?? "auto";
     const controlsMode = this.config.controls_mode || "always";
     const cardMode = this.config.card_mode || "full";
     const speedPosition = String(this.config.speed_position || (this.config.speed_orientation === "horizontal" ? "below" : "right")).toLowerCase();
@@ -6927,6 +7207,23 @@ class HikvisionPTZCardEditor extends HTMLElement {
                 <option value="snapshot" ${videoMode === "snapshot" ? "selected" : ""}>Snapshot</option>
               </select>
             `, "Choose the preferred stream transport for live video.")}
+            ${this._field("stream_mode", "Configured stream mode", `
+              <select id="stream_mode" style="width:100%;">
+                <option value="auto" ${configuredStreamMode === "auto" ? "selected" : ""}>Follow backend state</option>
+                <option value="webrtc_direct" ${configuredStreamMode === "webrtc_direct" ? "selected" : ""}>WebRTC direct RTSP</option>
+                <option value="webrtc" ${configuredStreamMode === "webrtc" ? "selected" : ""}>WebRTC ISAPI RTSP</option>
+                <option value="rtsp_direct" ${configuredStreamMode === "rtsp_direct" ? "selected" : ""}>RTSP direct</option>
+                <option value="rtsp" ${configuredStreamMode === "rtsp" ? "selected" : ""}>RTSP ISAPI</option>
+                <option value="snapshot" ${configuredStreamMode === "snapshot" ? "selected" : ""}>Snapshot</option>
+              </select>
+            `, "Applies the selected live stream mode to the active camera when the card loads. Leave on Follow backend state to avoid forcing a mode.")}
+            ${this._field("stream_channel", "Configured stream channel", `
+              <select id="stream_channel" style="width:100%;">
+                <option value="auto" ${String(configuredStreamChannel).toLowerCase() === "auto" ? "selected" : ""}>Follow backend state</option>
+                <option value="main" ${String(configuredStreamChannel).toLowerCase() === "main" ? "selected" : ""}>Main stream</option>
+                <option value="sub" ${String(configuredStreamChannel).toLowerCase() === "sub" ? "selected" : ""}>Sub-stream</option>
+              </select>
+            `, "Maps to the backend stream profile selection. Use Main stream for the highest quality feed, or leave on Follow backend state.")}
             ${this._field("controls_mode", "Controls display", `
               <select id="controls_mode" style="width:100%;">
                 <option value="always" ${controlsMode === "always" ? "selected" : ""}>Always show controls</option>
@@ -7032,7 +7329,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       </div>`;
 
     [
-      "title", "video_mode", "controls_mode", "card_mode", "accent_color", "panel_tint",
+      "title", "video_mode", "stream_mode", "stream_channel", "controls_mode", "card_mode", "accent_color", "panel_tint",
       "speed", "ptz_duration", "ptz_repeat_delay", "speed_position",
       "lens_step", "lens_duration", "refocus_step", "lens_stop_safeguard",
       "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost",
@@ -7064,6 +7361,8 @@ class HikvisionPTZCardEditor extends HTMLElement {
       lens_duration: this._numberValue("lens_duration", Number(this.config.lens_duration ?? 180), { min: 60 }),
       refocus_step: this._numberValue("refocus_step", Number(this.config.refocus_step ?? 40), { min: 1, max: 100 }),
       video_mode: this._stringValue("video_mode", this.config.video_mode || "rtsp_direct"),
+      stream_mode: this._stringValue("stream_mode", this.config.stream_mode || "auto"),
+      stream_channel: this._stringValue("stream_channel", this.config.stream_channel ?? this.config.stream_profile ?? "auto"),
       controls_mode: this._stringValue("controls_mode", this.config.controls_mode || "always"),
       card_mode: this._stringValue("card_mode", this.config.card_mode || "full"),
       accent_color: this._stringValue("accent_color", this.config.accent_color || "#03a9f4"),
