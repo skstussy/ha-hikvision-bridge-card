@@ -1901,10 +1901,8 @@ _toggleDebugFilter(kind, value) {
             <div class="hik-debug-detail-message">${this.escapeHtml(selectedEntry.message || "")}</div>
             <textarea class="hik-debug-textarea" readonly>${this.escapeHtml(selectedDebugText)}</textarea>
             ${selectedEntry?.details ? `
-              <details class="hik-debug-nested-details">
-                <summary>Details JSON</summary>
-                <pre class="hik-debug-pre">${this.escapeHtml(selectedDetailsText)}</pre>
-              </details>
+              <label class="hik-debug-label">Response</label>
+              <pre class="hik-debug-pre">${this.escapeHtml(selectedDetailsText)}</pre>
             ` : ""}
           </div>
         ` : ""}
