@@ -118,7 +118,7 @@ _pushDebugEntry(entry) {
       title: "ha-hikvision-bridge-card",
       speed: 50,
       lens_step: 60,
-      ptz_duration: 450,
+      ptz_duration: 150,
       ptz_repeat_delay: 0,
       lens_duration: 180,
       lens_stop_safeguard: false,
@@ -2266,7 +2266,7 @@ _toggleDebugFilter(kind, value) {
       controls_mode: "always",
       card_mode: "full",
       speed: 50,
-      ptz_duration: 450,
+      ptz_duration: 150,
       ptz_repeat_delay: 0,
       show_camera_info: true,
       show_stream_info: true,
@@ -2657,7 +2657,7 @@ _toggleDebugFilter(kind, value) {
         channel: String(cam.channel),
         state,
         speed: Number(this.config.speed || 50),
-        duration: Number(this.config.repeat_ms || 350),
+        duration: Number(this.config.ptz_duration ?? this.config.repeat_ms ?? 350),
         step_delay: Number(this.config.return_step_delay || 150),
       });
       this.resetPTZState(cam.channel);
@@ -2789,7 +2789,7 @@ _toggleDebugFilter(kind, value) {
   }
 
   getPTZDuration() {
-    return Math.max(100, Number(this.config.ptz_duration ?? 450));
+    return Math.max(100, Number(this.config.ptz_duration ?? 150));
   }
 
   getPTZRepeatDelay() {
@@ -7173,7 +7173,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const accent = this.config.accent_color || "#03a9f4";
     const tint = Number(this.config.panel_tint ?? 8);
     const speed = Number(this.config.speed ?? 50);
-    const ptzDuration = Number(this.config.ptz_duration ?? 450);
+    const ptzDuration = Number(this.config.ptz_duration ?? 150);
     const ptzRepeatDelay = Number(this.config.ptz_repeat_delay ?? 0);
     const lensStep = Number(this.config.lens_step ?? 60);
     const lensDuration = Number(this.config.lens_duration ?? 180);
@@ -7353,7 +7353,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       type: "custom:ha-hikvision-bridge-card",
       title: this._stringValue("title", this.config.title || "ha-hikvision-bridge-card"),
       speed: this._numberValue("speed", Number(this.config.speed ?? 50), { min: 1, max: 100 }),
-      ptz_duration: this._numberValue("ptz_duration", Number(this.config.ptz_duration ?? 450), { min: 100 }),
+      ptz_duration: this._numberValue("ptz_duration", Number(this.config.ptz_duration ?? 150), { min: 100 }),
       ptz_repeat_delay: this._numberValue("ptz_repeat_delay", Number(this.config.ptz_repeat_delay ?? 0), { min: 0 }),
       lens_step: this._numberValue("lens_step", Number(this.config.lens_step ?? 60), { min: 1, max: 100 }),
       lens_duration: this._numberValue("lens_duration", Number(this.config.lens_duration ?? 180), { min: 60 }),
