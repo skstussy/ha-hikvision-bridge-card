@@ -1,6 +1,6 @@
 /* UI Split Patch 2.6.20 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.26";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.27";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -172,6 +172,8 @@ _pushDebugEntry(entry) {
     this._configuredStreamPreferenceState = this._configuredStreamPreferenceState || {};
     this._miniWebRtcControlTimers = Array.isArray(this._miniWebRtcControlTimers) ? this._miniWebRtcControlTimers : [];
     this._miniWebRtcControlSyncToken = Number.isFinite(this._miniWebRtcControlSyncToken) ? this._miniWebRtcControlSyncToken : 0;
+    this._miniOverlayVisible = this._miniOverlayVisible === true;
+    this._miniOverlayHideTimer = this._miniOverlayHideTimer || null;
     this.selected = 0;
     this._repeatHandle = null;
     this._ptzHoldActive = this._ptzHoldActive || false;
@@ -280,6 +282,7 @@ _pushDebugEntry(entry) {
   _cleanupVideoCard() {
     this._teardownWebRtcPtzBindings();
     this._clearMiniWebRtcControlTimers();
+    this._clearMiniOverlayHideTimer();
     this._teardownMiniWebRtcNativeControls();
     if (this._mediaSyncObserver) {
       try { this._mediaSyncObserver.disconnect(); } catch (err) {}
@@ -567,6 +570,65 @@ _pushDebugEntry(entry) {
     this._miniWebRtcControlTimers = [];
   }
 
+  _clearMiniOverlayHideTimer() {
+    if (!this._miniOverlayHideTimer) return;
+    try { window.clearTimeout(this._miniOverlayHideTimer); } catch (err) {}
+    this._miniOverlayHideTimer = null;
+  }
+
+  _setMiniOverlayVisible(visible = false, card = this._videoCard) {
+    this._miniOverlayVisible = visible === true;
+    const target = card || this._videoCard || null;
+    if (!target || typeof target.toggleAttribute !== "function") return;
+    try {
+      target.toggleAttribute("data-hik-mini-reveal", this._miniOverlayVisible === true);
+    } catch (err) {}
+  }
+
+  _scheduleMiniOverlayAutoHide(block) {
+    this._clearMiniOverlayHideTimer();
+    const shell = block || this.querySelector(".hik-video-block.is-mini");
+    if (!shell) return;
+    this._miniOverlayHideTimer = window.setTimeout(() => {
+      const active = document?.activeElement || null;
+      if (active && shell.contains(active)) return;
+      this._setMiniOverlayVisible(false);
+    }, 2200);
+  }
+
+  _bindMiniOverlayInteractions() {
+    const block = this.querySelector(".hik-video-block.is-mini");
+    if (!block) {
+      this._clearMiniOverlayHideTimer();
+      this._setMiniOverlayVisible(false);
+      return;
+    }
+    this._setMiniOverlayVisible(false);
+    if (block.dataset.hikMiniOverlayBound === "true") return;
+    block.dataset.hikMiniOverlayBound = "true";
+
+    const show = () => {
+      this._clearMiniOverlayHideTimer();
+      this._setMiniOverlayVisible(true);
+    };
+    const hide = () => {
+      const active = document?.activeElement || null;
+      if (active && block.contains(active)) return;
+      this._clearMiniOverlayHideTimer();
+      this._setMiniOverlayVisible(false);
+    };
+
+    block.addEventListener("pointerenter", show);
+    block.addEventListener("pointerleave", hide);
+    block.addEventListener("focusin", show);
+    block.addEventListener("focusout", () => window.setTimeout(hide, 0));
+    block.addEventListener("pointerdown", (ev) => {
+      if (ev?.pointerType !== "touch") return;
+      show();
+      this._scheduleMiniOverlayAutoHide(block);
+    });
+  }
+
   _findNestedSelector(root, selector) {
     if (!root || !selector) return null;
     try {
@@ -600,6 +662,16 @@ _pushDebugEntry(entry) {
         justify-content:flex-end;
         gap:8px;
         flex-wrap:wrap;
+        opacity:0;
+        transform:translateY(4px);
+        pointer-events:none;
+        transition:opacity 160ms ease, transform 160ms ease;
+      }
+      :host([data-hik-mini-reveal="true"]) .controls,
+      .controls:focus-within {
+        opacity:1;
+        transform:translateY(0);
+        pointer-events:auto;
       }
       .hik-mini-native-controls {
         display:inline-flex;
@@ -665,6 +737,7 @@ _pushDebugEntry(entry) {
     const root = card?.shadowRoot || card || null;
     if (!root) return;
     try {
+      card?.removeAttribute?.("data-hik-mini-reveal");
       root.querySelector(".hik-mini-native-controls")?.remove();
     } catch (err) {}
   }
@@ -693,6 +766,7 @@ _pushDebugEntry(entry) {
     const controls = this._findNestedSelector(root, ".controls");
     if (!controls) return false;
     this._injectMiniWebRtcNativeControlStyle(card);
+    this._setMiniOverlayVisible(this._miniOverlayVisible === true, card);
 
     let host = controls.querySelector(".hik-mini-native-controls");
     if (!host) {
@@ -5586,6 +5660,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const showBottomSelectors = !isMiniMode;
     const showPlaybackPanel = !isMiniMode && playbackPanelSupported && (this._playbackOverlayVisible || playbackActive);
     const showInfoGrid = !isMiniMode && infoCards.length > 0;
+    const miniVideoBlockAttrs = isMiniMode ? ` tabindex="0" role="group" aria-label="Mini camera video surface"` : "";
 
     const streamModeOverlayContent = this.config.show_stream_mode_info !== false && this._videoAccessoryPanel === "stream_mode" ? `
       <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream mode info overlay">
@@ -5922,22 +5997,36 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-video-shell { position:relative; }
           .hik-merged-shell { display:grid; gap:14px; }
           .hik-video-block { --hik-ov-btn: clamp(30px, 8cqw, 56px); --hik-ov-radius: clamp(10px, 2.6cqw, 18px); --hik-ov-gap: clamp(5px, 1.8cqw, 10px); --hik-ov-icon: clamp(13px, 3.2cqw, 22px); position:relative; aspect-ratio:16 / 9; min-height:240px; overflow:hidden; border-radius:20px; background: radial-gradient(circle at top, rgba(255,255,255,0.06), rgba(0,0,0,0.94) 55%), #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.26); container-type:inline-size; }
-          .hik-video-block.is-mini { --hik-ov-btn: clamp(24px, 8.6cqw, 34px); --hik-ov-radius: clamp(8px, 2.4cqw, 12px); --hik-ov-gap: clamp(3px, 1.2cqw, 6px); --hik-ov-icon: clamp(11px, 3.1cqw, 16px); min-height:180px; border-radius:18px; }
+          .hik-video-block.is-mini { --hik-ov-btn: clamp(28px, 7.6cqw, 32px); --hik-ov-radius: 16px; --hik-ov-gap: 4px; --hik-ov-icon: 16px; min-height:180px; border-radius:18px; }
           .hik-wrap.is-mini { padding:10px; }
-          .hik-video-block.is-mini .hik-video-ptz-overlay { opacity:1; transform:none; }
-          .hik-video-block.is-mini .hik-video-ptz-surface { inset:8px; }
-          .hik-video-block.is-mini .hik-video-media-overlay { inset:10px; }
-          .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:clamp(28px, 9cqw, 34px); max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
+          .hik-video-block.is-mini { outline:none; }
+          .hik-video-block.is-mini:focus-visible { outline:2px solid color-mix(in srgb, var(--hik-accent) 48%, rgba(255,255,255,0.82)); outline-offset:2px; }
+          .hik-video-block.is-mini .hik-video-ptz-surface { inset:10px; }
+          .hik-video-block.is-mini .hik-video-media-overlay { inset:10px; opacity:0; transition:opacity 160ms ease; }
+          .hik-video-block.is-mini:hover .hik-video-media-overlay,
+          .hik-video-block.is-mini:focus-within .hik-video-media-overlay,
+          .hik-video-block.is-mini .hik-video-media-overlay:focus-within { opacity:1; }
+          .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:32px; max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
           .hik-video-block.is-mini .hik-video-media-topcenter,
           .hik-video-block.is-mini .hik-video-media-bottom,
           .hik-video-block.is-mini .hik-status-pills-overlay,
           .hik-video-block.is-mini .hik-capability-banner { display:none !important; }
-          .hik-video-block.is-mini .hik-video-media-btn { min-width:clamp(24px, 8cqw, 32px); height:clamp(24px, 8cqw, 32px); border-radius:clamp(8px, 2.2cqw, 10px); }
-          .hik-video-block.is-mini .hik-video-media-btn ha-icon { --mdc-icon-size:clamp(12px, 3.5cqw, 16px); }
+          .hik-video-block.is-mini .hik-video-media-btn,
+          .hik-video-block.is-mini .hik-video-ptz-btn,
+          .hik-video-block.is-mini .hik-video-zoom-btn { min-width:32px; width:32px; height:32px; min-height:32px; border-radius:16px; border:1px solid rgba(255,255,255,0.18); background:rgba(10,14,20,0.54); color:var(--primary-text-color); backdrop-filter:blur(10px); box-shadow:0 8px 18px rgba(0,0,0,0.22); }
+          .hik-video-block.is-mini .hik-video-media-btn:hover:not(:disabled),
+          .hik-video-block.is-mini .hik-video-ptz-btn:hover:not(:disabled),
+          .hik-video-block.is-mini .hik-video-zoom-btn:hover:not(:disabled) { background:rgba(16,20,28,0.68); box-shadow:0 10px 22px rgba(0,0,0,0.24); }
+          .hik-video-block.is-mini .hik-video-media-btn ha-icon,
+          .hik-video-block.is-mini .hik-video-ptz-btn ha-icon,
+          .hik-video-block.is-mini .hik-video-zoom-btn ha-icon { --mdc-icon-size:16px; color:var(--primary-text-color); }
+          .hik-video-block.is-mini .hik-video-ptz-btn.center { background:rgba(10,14,20,0.62); }
+          .hik-video-block.is-mini .hik-video-ptz-center-core { inset:8px; }
           .hik-video-block.is-mini .hik-video-ptz-top { display:none; }
-          .hik-video-block.is-mini .hik-video-ptz-pad { left:0; bottom:0; }
-          .hik-video-block.is-mini .hik-video-zoom-rail { right:0; top:auto; bottom:0; transform:none; width:clamp(28px, 8.6cqw, 38px); padding:clamp(3px, 1.1cqw, 5px) clamp(3px, 0.9cqw, 5px); }
-          .hik-video-block.is-mini .hik-video-zoom-track { height:clamp(32px, 11cqw, 54px); }
+          .hik-video-block.is-mini .hik-video-ptz-pad { left:0; bottom:clamp(46px, 14cqw, 58px); }
+          .hik-video-block.is-mini .hik-video-zoom-rail { right:0; top:50%; bottom:auto; transform:translateY(-50%); width:32px; padding:4px; border-radius:18px; background:rgba(10,14,20,0.46); border:1px solid rgba(255,255,255,0.18); box-shadow:0 8px 18px rgba(0,0,0,0.22); }
+          .hik-video-block.is-mini .hik-video-zoom-track { width:2px; height:28px; background:rgba(255,255,255,0.14); }
+          .hik-video-block.is-mini .hik-video-zoom-track span { top:22%; bottom:22%; }
           .hik-video-block.is-mini .hik-video-refocus-btn { display:none; }
           .hik-video-block.is-playback { box-shadow: inset 0 0 0 2px rgba(220, 36, 36, 0.85), inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 34px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,80,80,0.18); }
           #hikvision-video-host { width:100%; height:100%; display:block; }
@@ -6361,7 +6450,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           <div class="hik-grid">
             <div class="hik-panel hik-video-shell">
               <div class="hik-merged-shell">
-                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"} ${isMiniMode ? "is-mini" : ""}">
+                <div class="hik-video-block ${playbackActive ? "is-playback" : "is-live"} ${isMiniMode ? "is-mini" : ""}"${miniVideoBlockAttrs}>
                   ${this._gridMode ? this._renderGridView() : `<div id="hikvision-video-host"></div>`}
                   ${(!this._gridMode && !playbackActive && !this._playbackOverlayVisible && ptz) ? `
                     <div class="hik-video-ptz-overlay ${online && !this._returningHome ? "is-ready" : "is-disabled"} ${(this._videoAccessoryPanel === "alarm" || this._videoAccessoryPanel === "storage") ? "is-suppressed" : ""}" aria-label="PTZ video overlay">
@@ -6597,6 +6686,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     this._restorePreservedVideoHost(preservedVideoHost);
     this.renderVideo(refs.camera, rtspUrl, directRtspUrl, streamMode, camAttrs.playback_active === true ? (camAttrs.playback_uri || "") : "", playbackState.paused);
     this._syncMediaAudio();
+    this._bindMiniOverlayInteractions();
 
     this.querySelectorAll("[data-cam]").forEach((btn) => {
       const handler = (ev) => {
