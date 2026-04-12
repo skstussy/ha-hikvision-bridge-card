@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.20 */
+/* UI Split Patch 2.6.24 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.27";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.28";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -129,6 +129,7 @@ _pushDebugEntry(entry) {
       stream_channel: "auto",
       controls_mode: "always",
       card_mode: "full",
+      mini_camera_cycle_seconds: 60,
       accent_color: "var(--primary-color)",
       panel_tint: "8",
       show_camera_info: true,
@@ -174,6 +175,9 @@ _pushDebugEntry(entry) {
     this._miniWebRtcControlSyncToken = Number.isFinite(this._miniWebRtcControlSyncToken) ? this._miniWebRtcControlSyncToken : 0;
     this._miniOverlayVisible = this._miniOverlayVisible === true;
     this._miniOverlayHideTimer = this._miniOverlayHideTimer || null;
+    this._miniCameraCycleTimer = this._miniCameraCycleTimer || null;
+    this._miniNoMotionSince = Number.isFinite(this._miniNoMotionSince) ? this._miniNoMotionSince : 0;
+    this._miniCycleSelectedKey = this._miniCycleSelectedKey || "";
     this.selected = 0;
     this._repeatHandle = null;
     this._ptzHoldActive = this._ptzHoldActive || false;
@@ -269,6 +273,7 @@ _pushDebugEntry(entry) {
     this._talkRequested = false;
     this._talkLatched = false;
     this._detachTalkReleaseListeners();
+    this._clearMiniCameraCycleTimer?.();
     this._stopTalkbackDirect();
     this._teardownTalkAudioGraph();
     this._teardownAudioGraph();
@@ -627,6 +632,94 @@ _pushDebugEntry(entry) {
       show();
       this._scheduleMiniOverlayAutoHide(block);
     });
+  }
+
+  _clearMiniCameraCycleTimer() {
+    if (!this._miniCameraCycleTimer) return;
+    try { window.clearTimeout(this._miniCameraCycleTimer); } catch (err) {}
+    this._miniCameraCycleTimer = null;
+  }
+
+  _getMiniCameraCycleSeconds() {
+    const raw = Number(this.config?.mini_camera_cycle_seconds ?? 60);
+    if (!Number.isFinite(raw)) return 60;
+    return Math.max(5, Math.min(3600, Math.round(raw)));
+  }
+
+  _cameraHasMotion(camera) {
+    if (!camera || camera.channel == null) return false;
+    const refs = this.refsForChannel(camera.channel);
+    const motionEntity = refs.motion ? this.getEntity(refs.motion) : null;
+    return String(motionEntity?.state || "").toLowerCase() === "on";
+  }
+
+  _getMiniPriorityMotionIndex(currentIndex = 0) {
+    const cameras = this.cameras || [];
+    if (!cameras.length) return -1;
+    const normalizedIndex = Math.max(0, Math.min(Number(currentIndex || 0), cameras.length - 1));
+    if (this._cameraHasMotion(cameras[normalizedIndex])) return normalizedIndex;
+    for (let offset = 1; offset < cameras.length; offset += 1) {
+      const index = (normalizedIndex + offset) % cameras.length;
+      if (this._cameraHasMotion(cameras[index])) return index;
+    }
+    return -1;
+  }
+
+  _syncMiniCameraCycle({ playbackActive = false } = {}) {
+    const cameras = this.cameras || [];
+    const enabled = this._isMiniCardMode() && playbackActive !== true && cameras.length > 1;
+    if (!enabled) {
+      this._clearMiniCameraCycleTimer();
+      this._miniNoMotionSince = 0;
+      this._miniCycleSelectedKey = "";
+      return;
+    }
+
+    const currentIndex = Math.max(0, Math.min(Number(this.selected || 0), cameras.length - 1));
+    const currentCamera = cameras[currentIndex] || null;
+    const currentKey = currentCamera?.channel != null ? `ch:${currentCamera.channel}` : `idx:${currentIndex}`;
+
+    if (currentKey !== this._miniCycleSelectedKey) {
+      this._miniCycleSelectedKey = currentKey;
+      this._miniNoMotionSince = this._cameraHasMotion(currentCamera) ? 0 : Date.now();
+    }
+
+    const motionIndex = this._getMiniPriorityMotionIndex(currentIndex);
+    this._clearMiniCameraCycleTimer();
+
+    if (motionIndex >= 0) {
+      if (motionIndex !== currentIndex) {
+        this._miniCameraCycleTimer = window.setTimeout(() => {
+          this._miniCameraCycleTimer = null;
+          this.selectCamera(motionIndex, { reason: "motion" });
+        }, 0);
+        return;
+      }
+      this._miniNoMotionSince = 0;
+      return;
+    }
+
+    if (!Number.isFinite(this._miniNoMotionSince) || this._miniNoMotionSince <= 0) {
+      this._miniNoMotionSince = Date.now();
+    }
+
+    const intervalMs = this._getMiniCameraCycleSeconds() * 1000;
+    const dueAt = this._miniNoMotionSince + intervalMs;
+    const remaining = Math.max(0, dueAt - Date.now());
+
+    if (remaining <= 0) {
+      const nextIndex = (currentIndex + 1) % cameras.length;
+      this._miniCameraCycleTimer = window.setTimeout(() => {
+        this._miniCameraCycleTimer = null;
+        this.selectCamera(nextIndex, { reason: "idle" });
+      }, 0);
+      return;
+    }
+
+    this._miniCameraCycleTimer = window.setTimeout(() => {
+      this._miniCameraCycleTimer = null;
+      this._queueRender();
+    }, remaining);
   }
 
   _findNestedSelector(root, selector) {
@@ -2339,6 +2432,7 @@ _toggleDebugFilter(kind, value) {
       stream_channel: "auto",
       controls_mode: "always",
       card_mode: "full",
+      mini_camera_cycle_seconds: 60,
       speed: 50,
       ptz_duration: 150,
       ptz_repeat_delay: 0,
@@ -3485,15 +3579,25 @@ async seekPlayback(direction = 1) {
   }, 350);
 }
 
-  selectCamera(index) {
+  selectCamera(index, options = {}) {
     const cameras = this.cameras || [];
     if (!cameras.length) return;
     const nextIndex = Math.max(0, Math.min(Number(index) || 0, cameras.length - 1));
-    if (nextIndex === this.selected) return;
+    const nextCamera = cameras[nextIndex] || null;
+    const nextKey = nextCamera?.channel != null ? `ch:${nextCamera.channel}` : `idx:${nextIndex}`;
+    const nextNoMotionSince = this._cameraHasMotion(nextCamera) ? 0 : Date.now();
+    this._clearMiniCameraCycleTimer();
+    if (nextIndex === this.selected) {
+      this._miniCycleSelectedKey = nextKey;
+      this._miniNoMotionSince = nextNoMotionSince;
+      return;
+    }
     this.stopMove();
     this.selected = nextIndex;
+    this._miniCycleSelectedKey = nextKey;
+    this._miniNoMotionSince = nextNoMotionSince;
     this._videoSignature = null;
-    this._pushDebug("video", "info", "camera_selected", "Selected camera changed", { index: nextIndex, channel: cameras[nextIndex]?.channel, name: cameras[nextIndex]?.name || "" }, "frontend");
+    this._pushDebug("video", "info", "camera_selected", "Selected camera changed", { index: nextIndex, channel: nextCamera?.channel, name: nextCamera?.name || "", reason: String(options.reason || "manual") }, "frontend");
     this.render();
   }
 
@@ -5652,6 +5756,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
 
     const showTitleBar = !isMiniMode && this.config.show_title !== false;
     const showCameraChips = !isMiniMode && this.config.show_camera_chips !== false;
+    const showMiniCameraPills = isMiniMode && this.config.show_camera_chips !== false && cameras.length > 1;
     const showStatusPillsRow = !isMiniMode && this.config.show_status_pills !== false;
     const showStatusPillsOverlay = !isMiniMode;
     const showCameraCycleControls = !isMiniMode;
@@ -5852,6 +5957,16 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-chip:hover { transform: translateY(-1px); }
           .hik-chip.active { outline: 2px solid var(--hik-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--hik-accent) 35%, transparent); }
           .hik-chip ha-icon { --mdc-icon-size: 16px; color: var(--hik-accent); }
+          .hik-mini-camera-pill-row { display:flex; gap:6px; align-items:center; overflow-x:auto; padding:10px 2px 2px; margin-top:8px; scrollbar-width:none; }
+          .hik-mini-camera-pill-row::-webkit-scrollbar { display:none; }
+          .hik-mini-camera-pill { flex:0 0 auto; min-width:0; max-width:140px; height:28px; border:none; border-radius:14px; padding:0 10px; cursor:pointer; background:rgba(10,14,20,0.12); color:var(--primary-text-color); display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:12px; font-weight:600; transition:transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--divider-color) 74%, transparent); }
+          .hik-mini-camera-pill:hover { transform:translateY(-1px); background:rgba(10,14,20,0.18); }
+          .hik-mini-camera-pill.active { background:color-mix(in srgb, var(--hik-accent) 18%, var(--card-background-color)); box-shadow:0 0 0 1px color-mix(in srgb, var(--hik-accent) 34%, transparent), 0 8px 18px rgba(0,0,0,0.12); }
+          .hik-mini-camera-pill.is-motion:not(.active) { background:color-mix(in srgb, var(--warning-color, #ed6c02) 16%, var(--card-background-color)); }
+          .hik-mini-camera-pill-dot { width:8px; height:8px; border-radius:999px; flex:0 0 auto; background:color-mix(in srgb, var(--disabled-text-color, #9aa0a6) 70%, transparent); box-shadow:0 0 0 1px rgba(255,255,255,0.08); }
+          .hik-mini-camera-pill-dot.is-online { background:color-mix(in srgb, var(--success-color, #2e7d32) 72%, white 8%); }
+          .hik-mini-camera-pill-dot.is-motion { background:color-mix(in srgb, var(--warning-color, #ed6c02) 76%, white 8%); box-shadow:0 0 0 4px color-mix(in srgb, var(--warning-color, #ed6c02) 18%, transparent); }
+          .hik-mini-camera-pill-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .hik-grid { display:grid; grid-template-columns: minmax(320px, 1fr); gap:14px; }
           .hik-panel { border:1px solid color-mix(in srgb, var(--hik-accent) 12%, var(--divider-color)); border-radius:18px; padding:14px; background: color-mix(in srgb, var(--card-background-color) calc(100% - var(--hik-panel-tint)), var(--hik-accent) var(--hik-panel-tint)); }
           .hik-expandable-panel { padding:0; overflow:hidden; }
@@ -6671,6 +6786,30 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                 </div>` : ""}
                 ${showAccessoryOverlays ? this._renderVideoAccessoryPanel(videoAccessoryPanelContent) : ""}
               </div>
+              ${showMiniCameraPills ? `
+                <div class="hik-mini-camera-pill-row" role="tablist" aria-label="Mini camera selector">
+                  ${cameras.map((cameraItem, index) => {
+                    const miniRefs = this.refsForChannel(cameraItem.channel);
+                    const motionActive = miniRefs.motion ? this.alarmOn(miniRefs.motion) : false;
+                    const onlineActive = miniRefs.online ? this.alarmOn(miniRefs.online) : false;
+                    const label = this.escapeHtml(cameraItem.name || `Camera ${cameraItem.channel}`);
+                    return `
+                      <button
+                        type="button"
+                        class="hik-mini-camera-pill ${index === this.selected ? "active" : ""} ${motionActive ? "is-motion" : ""}"
+                        data-cam="${index}"
+                        role="tab"
+                        aria-selected="${index === this.selected ? "true" : "false"}"
+                        aria-pressed="${index === this.selected ? "true" : "false"}"
+                        title="${label}"
+                      >
+                        <span class="hik-mini-camera-pill-dot ${onlineActive ? "is-online" : ""} ${motionActive ? "is-motion" : ""}" aria-hidden="true"></span>
+                        <span class="hik-mini-camera-pill-label">${label}</span>
+                      </button>
+                    `;
+                  }).join("")}
+                </div>
+              ` : ""}
             </div>
 
 
@@ -6687,6 +6826,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     this.renderVideo(refs.camera, rtspUrl, directRtspUrl, streamMode, camAttrs.playback_active === true ? (camAttrs.playback_uri || "") : "", playbackState.paused);
     this._syncMediaAudio();
     this._bindMiniOverlayInteractions();
+    this._syncMiniCameraCycle({ playbackActive });
 
     this.querySelectorAll("[data-cam]").forEach((btn) => {
       const handler = (ev) => {
@@ -7268,6 +7408,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
     const lensStep = Number(this.config.lens_step ?? 60);
     const lensDuration = Number(this.config.lens_duration ?? 180);
     const refocusStep = Number(this.config.refocus_step ?? 40);
+    const miniCameraCycleSeconds = Number(this.config.mini_camera_cycle_seconds ?? 60);
     const title = this._escapeAttr(this.config.title || "ha-hikvision-bridge-card");
     const playbackPresets = (this.config.playback_presets || [1, 5, 10, 30, 60, 300, 600, 3600]).join(", ");
 
@@ -7323,7 +7464,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
                 <option value="full" ${cardMode === "full" ? "selected" : ""}>Full card</option>
                 <option value="mini" ${cardMode === "mini" ? "selected" : ""}>Mini card</option>
               </select>
-            `, "Full keeps the complete dashboard overlays. Mini keeps only PTZ, zoom, speaker, mic, and fullscreen for compact dashboards.")}
+            `, "Full keeps the complete dashboard overlays. Mini keeps compact overlays, camera pills below the video, and idle camera switching for dashboards.")}
             ${this._field("accent_color", "Accent color", `<input id="accent_color" type="color" value="${accent.startsWith("#") ? accent : "#03a9f4"}" style="width:100%;height:38px;">`, "Applied to highlighted controls and active accents.")}
             ${this._field("panel_tint", "Panel tint strength", `<input id="panel_tint" type="range" min="0" max="24" step="1" value="${tint}" style="width:100%;">`, "Higher values add more overlay tint to the control surfaces.")}
           `
@@ -7391,6 +7532,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
             ${this.rowCheckbox("auto_discover", "Auto-discover connected cameras", this.config.auto_discover !== false, "Automatically populate cameras exposed by the bridge.")}
             ${this.rowCheckbox("show_title", "Show title bar", this.config.show_title !== false)}
             ${this.rowCheckbox("show_camera_chips", "Show camera selector chips", this.config.show_camera_chips !== false)}
+            ${this._field("mini_camera_cycle_seconds", "Mini idle camera switch (sec)", `<input id="mini_camera_cycle_seconds" type="number" min="5" max="3600" value="${miniCameraCycleSeconds}" style="width:100%;">`, "Mini card mode only. When no configured camera reports motion for this many seconds, the card advances to the next camera. Motion on another camera still takes priority immediately.")}
             ${this.rowCheckbox("show_status_pills", "Show status pills", this.config.show_status_pills !== false)}
             ${this.rowCheckbox("show_camera_info", "Show camera info", this.config.show_camera_info !== false)}
             ${this.rowCheckbox("show_stream_info", "Show stream info", this.config.show_stream_info !== false)}
@@ -7422,7 +7564,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       "lens_step", "lens_duration", "refocus_step", "lens_stop_safeguard",
       "playback_presets", "talk_mode", "speaker_default", "volume_default", "audio_boost",
       "show_playback_panel", "show_audio_controls", "mute_during_talk",
-      "auto_discover", "show_title", "show_camera_chips", "show_status_pills",
+      "auto_discover", "show_title", "show_camera_chips", "mini_camera_cycle_seconds", "show_status_pills",
       "show_camera_info", "show_stream_info", "show_stream_mode_info", "show_alarm_dashboard",
       "show_controls", "show_dvr_info", "show_storage_info", "show_position_info",
       "debug_enabled",
@@ -7453,6 +7595,7 @@ class HikvisionPTZCardEditor extends HTMLElement {
       stream_channel: this._stringValue("stream_channel", this.config.stream_channel ?? this.config.stream_profile ?? "auto"),
       controls_mode: this._stringValue("controls_mode", this.config.controls_mode || "always"),
       card_mode: this._stringValue("card_mode", this.config.card_mode || "full"),
+      mini_camera_cycle_seconds: this._numberValue("mini_camera_cycle_seconds", Number(this.config.mini_camera_cycle_seconds ?? 60), { min: 5, max: 3600 }),
       accent_color: this._stringValue("accent_color", this.config.accent_color || "#03a9f4"),
       panel_tint: this._numberValue("panel_tint", Number(this.config.panel_tint ?? 8), { min: 0, max: 24 }),
       speed_position: this._stringValue("speed_position", this.config.speed_position || "right"),
