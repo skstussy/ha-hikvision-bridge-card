@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.24 */
+/* UI Split Patch 2.6.25 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.28";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.29";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -770,7 +770,11 @@ _pushDebugEntry(entry) {
         display:inline-flex;
         align-items:center;
         gap:8px;
+        flex-wrap:nowrap;
         pointer-events:auto;
+      }
+      .hik-mini-native-controls:empty {
+        display:none;
       }
       .hik-mini-native-btn,
       .hik-mini-native-select {
@@ -793,6 +797,12 @@ _pushDebugEntry(entry) {
         font:inherit;
         font-size:12px;
         font-weight:600;
+      }
+      .hik-mini-native-btn.is-icon {
+        width:32px;
+        min-width:32px;
+        padding:0;
+        gap:0;
       }
       .hik-mini-native-btn ha-icon,
       .hik-mini-native-select ha-icon {
@@ -879,21 +889,56 @@ _pushDebugEntry(entry) {
     const talkMode = this._getTalkMode();
 
     host.innerHTML = `
+      <button
+        type="button"
+        class="hik-mini-native-btn is-icon ${this._speakerEnabled ? "is-live" : ""}"
+        data-role="speaker"
+        title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}"
+        aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}"
+        aria-pressed="${this._speakerEnabled ? "true" : "false"}"
+      >
+        <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+      </button>
       ${micAvailable ? `
-        <button type="button" class="hik-mini-native-btn ${talkActive ? "is-live" : ""}" data-role="mic" title="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-label="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-pressed="${talkActive ? "true" : "false"}">
+        <button
+          type="button"
+          class="hik-mini-native-btn is-icon ${talkActive ? "is-live" : ""}"
+          data-role="mic"
+          title="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}"
+          aria-label="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}"
+          aria-pressed="${talkActive ? "true" : "false"}"
+        >
           <ha-icon icon="mdi:microphone"></ha-icon>
-          <span>Mic</span>
         </button>
       ` : ""}
-      ${cameras.length > 1 ? `
-        <label class="hik-mini-native-select" title="Camera selection">
-          <ha-icon icon="mdi:cctv"></ha-icon>
-          <select data-role="camera-select" aria-label="Camera selection">
-            ${cameras.map((camera, index) => `<option value="${index}" ${index === currentIndex ? "selected" : ""}>${this.escapeHtml(camera.name || `Camera ${camera.channel}`)}</option>`).join("")}
-          </select>
-        </label>
-      ` : ""}
+      <button
+        type="button"
+        class="hik-mini-native-btn is-icon"
+        data-role="fullscreen"
+        title="Fullscreen"
+        aria-label="Fullscreen"
+      >
+        <ha-icon icon="mdi:fullscreen"></ha-icon>
+      </button>
+      <button
+        type="button"
+        class="hik-mini-native-btn is-icon"
+        data-role="snapshot"
+        title="Take snapshot"
+        aria-label="Take snapshot"
+      >
+        <ha-icon icon="mdi:camera-outline"></ha-icon>
+      </button>
     `;
+
+    const speakerButton = host.querySelector('[data-role="speaker"]');
+    if (speakerButton) {
+      speakerButton.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._setSpeakerEnabled(!this._speakerEnabled);
+      });
+    }
 
     const micButton = host.querySelector('[data-role="mic"]');
     if (micButton) {
@@ -908,17 +953,133 @@ _pushDebugEntry(entry) {
       }
     }
 
-    const cameraSelect = host.querySelector('[data-role="camera-select"]');
-    if (cameraSelect) {
-      cameraSelect.addEventListener("click", (ev) => ev.stopPropagation());
-      cameraSelect.addEventListener("change", (ev) => {
+    const fullscreenButton = host.querySelector('[data-role="fullscreen"]');
+    if (fullscreenButton) {
+      fullscreenButton.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        this.selectCamera(ev.target?.value);
+        this._toggleFullscreenVideo();
+      });
+    }
+
+    const snapshotButton = host.querySelector('[data-role="snapshot"]');
+    if (snapshotButton) {
+      snapshotButton.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        await this._takeSnapshot();
       });
     }
 
     return true;
+  }
+
+
+  _findNestedSnapshotSource(root) {
+    if (!root) return null;
+    if (typeof root.matches === "function" && (root.matches("canvas") || root.matches("video") || root.matches("img"))) return root;
+    if (typeof root.querySelector === "function") {
+      const direct = root.querySelector("canvas, video, img");
+      if (direct) return direct;
+    }
+    const nodes = root.children ? Array.from(root.children) : [];
+    for (const node of nodes) {
+      if (node?.shadowRoot) {
+        const nestedShadow = this._findNestedSnapshotSource(node.shadowRoot);
+        if (nestedShadow) return nestedShadow;
+      }
+      const nested = this._findNestedSnapshotSource(node);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  _snapshotFilenameBase() {
+    const selectedName = String(this.selectedCamera?.name || "").trim().replace(/[^a-zA-Z0-9_.-]+/g, "_");
+    return selectedName || this._computeStreamName();
+  }
+
+  _blobExtension(type = "") {
+    const normalized = String(type || "").toLowerCase();
+    if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+    if (normalized.includes("webp")) return "webp";
+    if (normalized.includes("bmp")) return "bmp";
+    if (normalized.includes("gif")) return "gif";
+    return "png";
+  }
+
+  _downloadBlob(blob, prefix = "hikvision-snapshot") {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const extension = this._blobExtension(blob.type);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${prefix}-${stamp}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async _captureSnapshotBlob(source) {
+    if (!source) return null;
+    const tag = String(source.tagName || "").toLowerCase();
+    if (tag === "canvas" && typeof source.toBlob === "function") {
+      return await new Promise((resolve) => source.toBlob((blob) => resolve(blob || null), "image/png"));
+    }
+
+    const width = tag === "video"
+      ? Math.max(0, Number(source.videoWidth || 0))
+      : Math.max(0, Number(source.naturalWidth || source.width || 0));
+    const height = tag === "video"
+      ? Math.max(0, Number(source.videoHeight || 0))
+      : Math.max(0, Number(source.naturalHeight || source.height || 0));
+    if (!width || !height) return null;
+    if (tag === "video" && Number(source.readyState || 0) < 2) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0, width, height);
+    return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || null), "image/png"));
+  }
+
+  _resolveSnapshotEntityPictureUrl() {
+    const refs = this.selectedCamera ? this.refsForChannel(this.selectedCamera.channel) : {};
+    const cameraEntity = refs.camera ? this.getEntity(refs.camera) : null;
+    const entityPicture = String(cameraEntity?.attributes?.entity_picture || "").trim();
+    if (!entityPicture) return "";
+    if (/^https?:\/\//i.test(entityPicture)) return entityPicture;
+    if (typeof this._hass?.hassUrl === "function") return this._hass.hassUrl(entityPicture);
+    return entityPicture;
+  }
+
+  async _takeSnapshot() {
+    const host = this.querySelector("#hikvision-video-host");
+    let blob = null;
+
+    try {
+      const source = this._findNestedSnapshotSource(host);
+      blob = await this._captureSnapshotBlob(source);
+    } catch (err) {
+      blob = null;
+    }
+
+    if (!blob) {
+      const fallbackUrl = this._resolveSnapshotEntityPictureUrl();
+      if (fallbackUrl) {
+        try {
+          const response = await fetch(fallbackUrl, { credentials: "include" });
+          if (response.ok) blob = await response.blob();
+        } catch (err) {}
+      }
+    }
+
+    if (!blob) return;
+    this._downloadBlob(blob, this._snapshotFilenameBase());
   }
 
   _computeStreamName() {
