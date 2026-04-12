@@ -1,6 +1,6 @@
-/* UI Split Patch 2.6.25 */
+/* UI Split Patch 2.6.26 */
 
-const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.29";
+const HIKVISION_BRIDGE_CARD_FRONTEND_VERSION = "1.3.30";
 
 class HikvisionPTZCard extends HTMLElement {
 _toggleDebugExpand(entry) {
@@ -5927,6 +5927,10 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     const showPlaybackPanel = !isMiniMode && playbackPanelSupported && (this._playbackOverlayVisible || playbackActive);
     const showInfoGrid = !isMiniMode && infoCards.length > 0;
     const miniVideoBlockAttrs = isMiniMode ? ` tabindex="0" role="group" aria-label="Mini camera video surface"` : "";
+    const talkMode = this._getTalkMode();
+    const talkActive = this._talkHoldActive || this._talkRequested;
+    const miniMicAvailable = isMiniMode && !playbackActive && isWebRtc && Boolean(directRtspUrl || rtspUrl) && streamMode !== "snapshot";
+    const showMiniActionBar = isMiniMode && !this._gridMode && !playbackActive && !this._playbackOverlayVisible;
 
     const streamModeOverlayContent = this.config.show_stream_mode_info !== false && this._videoAccessoryPanel === "stream_mode" ? `
       <div class="hik-storage-terminal-overlay" role="dialog" aria-modal="false" aria-label="Stream mode info overlay">
@@ -6284,7 +6288,7 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-video-block.is-mini .hik-video-media-overlay:focus-within { opacity:1; }
           .hik-video-block.is-mini .hik-video-media-topright { top:0; right:0; width:32px; max-width:none; display:grid; justify-items:end; align-content:start; gap:var(--hik-ov-gap); }
           .hik-video-block.is-mini .hik-video-media-topcenter,
-          .hik-video-block.is-mini .hik-video-media-bottom,
+          .hik-video-block.is-mini .hik-video-media-bottom:not(.is-mini-actions),
           .hik-video-block.is-mini .hik-status-pills-overlay,
           .hik-video-block.is-mini .hik-capability-banner { display:none !important; }
           .hik-video-block.is-mini .hik-video-media-btn,
@@ -6296,6 +6300,14 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
           .hik-video-block.is-mini .hik-video-media-btn ha-icon,
           .hik-video-block.is-mini .hik-video-ptz-btn ha-icon,
           .hik-video-block.is-mini .hik-video-zoom-btn ha-icon { --mdc-icon-size:16px; color:var(--primary-text-color); }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions { left:50%; right:auto; bottom:10px; width:auto; max-width:calc(100% - 24px); padding:4px; gap:6px; flex-wrap:nowrap; border-radius:18px; background:rgba(10,14,20,0.34); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,0.24); }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn { min-width:30px; width:30px; height:30px; min-height:30px; }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.live,
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.is-enabled,
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.is-talking { background:rgba(18,26,36,0.68); }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.is-enabled { border-color:rgba(92,214,140,0.36); box-shadow:0 0 0 1px rgba(92,214,140,0.16), 0 8px 18px rgba(0,0,0,0.22); }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.is-talking { border-color:rgba(255,110,110,0.34); box-shadow:0 0 0 1px rgba(255,110,110,0.16), 0 8px 18px rgba(0,0,0,0.22); }
+          .hik-video-block.is-mini .hik-video-media-bottom.is-mini-actions .hik-video-media-btn.live { border-color:color-mix(in srgb, var(--accent-color, #03a9f4) 60%, rgba(255,255,255,0.18)); box-shadow:0 0 0 1px rgba(3,169,244,0.16), 0 8px 18px rgba(0,0,0,0.22); }
           .hik-video-block.is-mini .hik-video-ptz-btn.center { background:rgba(10,14,20,0.62); }
           .hik-video-block.is-mini .hik-video-ptz-center-core { inset:8px; }
           .hik-video-block.is-mini .hik-video-ptz-top { display:none; }
@@ -6858,6 +6870,24 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
                         </button>
                       `) : ""}
                     </div>
+                    ${showMiniActionBar ? `
+                      <div class="hik-video-media-bottom is-mini-actions" role="toolbar" aria-label="Mini video actions">
+                        <button type="button" class="hik-video-media-btn ${this._speakerEnabled ? "is-enabled" : ""}" id="hik-mini-speaker-toggle" title="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-label="${this._speakerEnabled ? "Mute speaker" : "Enable speaker"}" aria-pressed="${this._speakerEnabled ? "true" : "false"}">
+                          <ha-icon icon="${this._speakerEnabled ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>
+                        </button>
+                        ${miniMicAvailable ? `
+                          <button type="button" class="hik-video-media-btn ${talkActive ? "is-talking live" : ""}" id="hik-mini-talk-toggle" title="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-label="${talkMode === "toggle" ? (talkActive ? "End talk" : "Start talk") : "Hold to talk"}" aria-pressed="${talkActive ? "true" : "false"}">
+                            <ha-icon icon="mdi:microphone"></ha-icon>
+                          </button>
+                        ` : ""}
+                        <button type="button" class="hik-video-media-btn" id="hik-mini-fullscreen" title="Fullscreen" aria-label="Fullscreen">
+                          <ha-icon icon="mdi:fullscreen"></ha-icon>
+                        </button>
+                        <button type="button" class="hik-video-media-btn" id="hik-mini-snapshot" title="Take snapshot" aria-label="Take snapshot">
+                          <ha-icon icon="mdi:camera-outline"></ha-icon>
+                        </button>
+                      </div>
+                    ` : ""}
                     ${showCapabilityBanner ? this.renderCapabilityBanner(camAttrs, storage, dvr) : ""}
                     ${showAccessoryOverlays && this._videoAccessoryPanel === "alarm" ? this.renderAlarmOverlay(globalRefs, dvr, refs, storageSummary) : ""}
                     ${showAccessoryOverlays ? storageOverlayContent : ""}
@@ -7155,6 +7185,29 @@ _renderAudioConsoleOverlay(refs = {}, streamMode = "", playbackActive = false) {
     });
     this.querySelector("#hik-overlay-fullscreen")?.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this._toggleFullscreenVideo(); });
     this.querySelector("#hik-overlay-fullscreen-playback")?.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this._toggleFullscreenVideo(); });
+    this.querySelector("#hik-mini-speaker-toggle")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._setSpeakerEnabled(!this._speakerEnabled);
+    });
+    this.querySelector("#hik-mini-fullscreen")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._toggleFullscreenVideo();
+    });
+    this.querySelector("#hik-mini-snapshot")?.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      await this._takeSnapshot();
+    });
+    const miniTalkBtn = this.querySelector("#hik-mini-talk-toggle");
+    if (miniTalkBtn) {
+      if (talkMode === "toggle") {
+        miniTalkBtn.addEventListener("click", (ev) => this._handleTalkToggle(ev));
+      } else {
+        this._bindHoldTalkButton(miniTalkBtn);
+      }
+    }
     this.querySelector("#hik-volume")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-volume-overlay")?.addEventListener("input", (ev) => this._setVolume(ev.target.value));
     this.querySelector("#hik-audio-boost")?.addEventListener("input", (ev) => this._setAudioBoost(ev.target.value));
